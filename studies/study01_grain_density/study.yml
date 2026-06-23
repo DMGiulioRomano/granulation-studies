@@ -1,0 +1,56 @@
+# Studio 01 — densità, grana, pitch, distribuzione.
+#
+# Quattro assi sotto osservazione. Lo sweep li muove a ordini crescenti
+# (1 alla volta -> a coppie -> a 3 -> tutti e 4), per isolare l'effetto di
+# ciascuno e poi le loro interazioni.
+
+study_id: study01_grain_density
+title: "Studio 01 — densità e grana"
+seed: 1988
+duration: 6
+# Cartella del corpus (relativa alla root del repo). Default: samples/
+samples_dir: samples
+
+# Stream base: tutto cio' che NON e' sotto studio resta fisso qui.
+base:
+  onset: 0
+  duration: 6
+  sample: corpus.wav
+  time_mode: absolute
+  distribution_mode: gaussian
+  density: 20
+  distribution: 0.5
+  grain:
+    duration: 0.05
+    envelope: hanning
+  pitch:
+    semitones: 0
+  pointer:
+    start: 0
+    speed_ratio: 1
+  pan: 0
+  volume: -6
+
+# Gli assi: path YAML, valore di baseline (quando l'asse non e' mosso) e i
+# valori di test da esplorare.
+axes:
+  density:
+    path: density
+    baseline: 20
+    values: [5, 50, 400]
+  grain_duration:
+    path: grain.duration
+    baseline: 0.05
+    values: [0.01, 0.05, 0.2]
+  pitch:
+    path: pitch.semitones
+    baseline: 0
+    values: [-12, 0, 7]
+  distribution:
+    path: distribution
+    baseline: 0.5
+    values: [0.0, 0.5, 1.0]
+
+sweep:
+  # 1=OAT, 2=coppie, 3=terzine, 4=fattoriale completo. 0 = solo baseline.
+  orders: [1, 2, 3, 4]

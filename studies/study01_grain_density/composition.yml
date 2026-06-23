@@ -1,0 +1,21 @@
+# Descrizione del percorso fra stati per generare il brano.
+#
+# Due modalita':
+#   mode: walk  -> random-walk seedabile sul grafo di parentela
+#   mode: path  -> percorso autoriale esplicito
+#
+# Gli argomenti CLI (--seed/--steps/--start) hanno la precedenza su questo file.
+
+mode: walk
+seed: 7
+steps: 6
+start: grani_radi
+threshold: 0.5   # soglia di similarity per gli archi del grafo (modalita' walk)
+
+# Esempio di percorso autoriale (attivo solo con mode: path):
+# mode: path
+# path:
+#   - {state: grani_radi, dwell: 8}
+#   - {state: nuvola, dwell: 5, transition: 4}
+#   - {state: muro, dwell: 3, transition: 2}
+#   - {state: grani_radi, dwell: 6}
