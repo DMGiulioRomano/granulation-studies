@@ -1,0 +1,78 @@
+"""Bounds dei parametri per clamping e normalizzazione delle distanze.
+
+I bounds dei parametri registrati derivano dall'engine
+(``parameter_definitions.GRANULAR_PARAMETERS``) — single source of truth, niente
+duplicazione. I parametri unit-driven (pitch) non sono nel registry e sono
+aggiunti qui a mano, come documentato in ``parameter_definitions.py``.
+
+Le chiavi sono i path YAML *dotted* (es. ``grain.duration``), come usati nello
+``study.yml`` e nelle definizioni di stato.
+"""
+from __future__ import annotations
+
+from typing import Dict, Optional, Tuple
+
+# path YAML dotted -> chiave nel registry dell'engine
+_PATH_TO_ENGINE_KEY: Dict[str, str] = {
+    "density": "density",
+    "distribution": "distribution",
+    "fill_factor": "fill_factor",
+    "grain.duration": "grain_duration",
+    "pan": "pan",
+    "volume": "volume",
+    "pointer.speed_ratio": "pointer_speed_ratio",
+    "pointer.deviation": "pointer_deviation",
+    "scatter": "scatter",
+    "num_voices": "num_voices",
+}
+
+# path non presenti nel registry (bounds unit-driven o derivati): valori manuali
+# coerenti coi commenti in parameter_definitions.py (EDO ±3 ottave).
+_MANUAL_BOUNDS: Dict[str, Tuple[float, float]] = {
+    "pitch.semitones": (-36.0, 36.0),
+    "pitch.cents": (-3600.0, 3600.0),
+}
+
+
+def bounds_for(path: str) -> Optional[Tuple[Optional[float], Optional[float]]]:
+    """(min, max) per un path, o ``None`` se sconosciuto.
+
+    ``max`` puo' essere ``None`` (bound dinamico nell'engine, es. loop_*).
+    """
+    if path in _MANUAL_BOUNDS:
+        return _MANUAL_BOUNDS[path]
+    key = _PATH_TO_ENGINE_KEY.get(path)
+    if key is None:
+        return None
+    from .engine_bridge import parameter_bounds
+
+    pb = parameter_bounds()[key]
+    return (pb.min_val, pb.max_val)
+
+
+def clamp(path: str, value: float) -> float:
+    """Riporta ``value`` entro i bounds del path (no-op se path sconosciuto)."""
+    b = bounds_for(path)
+    if b is None:
+        return value
+    lo, hi = b
+    if lo is not None and value < lo:
+        return lo
+    if hi is not None and value > hi:
+        return hi
+    return value
+
+
+def span(path: str) -> Optional[float]:
+    """Ampiezza (max-min) di un path, per normalizzare le distanze.
+
+    Ritorna ``None`` se i bounds non sono entrambi finiti.
+    """
+    b = bounds_for(path)
+    if b is None:
+        return None
+    lo, hi = b
+    if lo is None or hi is None:
+        return None
+    width = float(hi) - float(lo)
+    return width if width > 0 else None
