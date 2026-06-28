@@ -29,23 +29,6 @@ jobs:
           # userebbe comunque il token di default (403 sul repo privato engine).
           persist-credentials: false
 
-      - name: Diagnostica accesso del PAT al repo engine
-        # Verifica, senza esporre il token, se il PAT puo' leggere il repo
-        # privato. HTTP 200 = accesso ok; 403/404 = il PAT non ha accesso
-        # (repository non selezionato o permesso Contents:read mancante).
-        env:
-          ENGINE_PAT: ${{ secrets.ENGINE_PAT }}
-        run: |
-          resp=$(curl -sS -w '\n%{http_code}' \
-            -H "Authorization: Bearer $ENGINE_PAT" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/DMGiulioRomano/PythonGranularEngine)
-          code=$(printf '%s' "$resp" | tail -n1)
-          body=$(printf '%s' "$resp" | sed '$d')
-          echo "GET /repos/DMGiulioRomano/PythonGranularEngine -> HTTP $code"
-          echo "$body" | head -c 400
-          echo
-
       - name: Checkout submodule engine (repo privato PythonGranularEngine)
         # Il GITHUB_TOKEN di default e' limitato a questo repo e non puo' clonare
         # il submodule privato. Serve un PAT (fine-grained, contents:read su
