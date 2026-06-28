@@ -21,12 +21,26 @@ jobs:
         python-version: ["3.10", "3.11", "3.12"]
 
     steps:
-      - name: Checkout (con submodule engine)
+      - name: Checkout (repo principale)
         uses: actions/checkout@v4
-        with:
-          # I test smoke (test_engine_bridge) importano e renderizzano via il
-          # submodule engine: serve il checkout ricorsivo.
-          submodules: recursive
+
+      - name: Checkout submodule engine (repo privato PythonGranularEngine)
+        # Il GITHUB_TOKEN di default e' limitato a questo repo e non puo' clonare
+        # il submodule privato. Serve un PAT (fine-grained, contents:read su
+        # PythonGranularEngine) salvato come secret `ENGINE_PAT`. Se assente,
+        # questo passo fallisce con un messaggio esplicito invece di un errore
+        # criptico in fase di import.
+        env:
+          ENGINE_PAT: ${{ secrets.ENGINE_PAT }}
+        run: |
+          if [ -z "$ENGINE_PAT" ]; then
+            echo "::error::Secret 'ENGINE_PAT' mancante: impossibile clonare il submodule privato 'engine'."
+            echo "Crea un PAT fine-grained con contents:read su PythonGranularEngine e aggiungilo come secret ENGINE_PAT."
+            exit 1
+          fi
+          git config --global url."https://x-access-token:${ENGINE_PAT}@github.com/".insteadOf "https://github.com/"
+          git submodule sync --recursive
+          git submodule update --init --recursive
 
       - name: Setup Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
