@@ -23,6 +23,11 @@ jobs:
     steps:
       - name: Checkout (repo principale)
         uses: actions/checkout@v4
+        with:
+          # Non persistere il GITHUB_TOKEN come http.extraheader: quell'header
+          # avrebbe la precedenza sul PAT nell'URL e il clone del submodule
+          # userebbe comunque il token di default (403 sul repo privato engine).
+          persist-credentials: false
 
       - name: Checkout submodule engine (repo privato PythonGranularEngine)
         # Il GITHUB_TOKEN di default e' limitato a questo repo e non puo' clonare
