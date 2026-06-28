@@ -1,5 +1,36 @@
 from granstudies.study_spec import parse_study_spec
-from granstudies.sweep import generate_variants
+from granstudies.sweep import generate_variants, generate_discrete_variants
+
+
+def _mode_spec(mode):
+    return parse_study_spec(
+        {
+            "study_id": "s",
+            "base": {"density": 20, "volume": -6},
+            "axes": {
+                "a": {"path": "density", "baseline": 20, "values": [5, 50]},
+                "b": {"path": "volume", "baseline": -6, "values": [-12, -3]},
+            },
+            "sweep": {"orders": [0, 1, 2], "mode": mode},
+        }
+    )
+
+
+def test_discrete_mode_generates_variants():
+    assert len(generate_discrete_variants(_mode_spec("discrete"))) == 9
+
+
+def test_envelope_mode_returns_empty_discrete():
+    # in mode envelope la pipeline discrete non produce nulla
+    assert generate_discrete_variants(_mode_spec("envelope")) == []
+
+
+def test_both_mode_generates_discrete_variants():
+    assert len(generate_discrete_variants(_mode_spec("both"))) == 9
+
+
+def test_generate_variants_is_alias():
+    assert generate_variants is generate_discrete_variants
 
 
 def _clean_spec(orders):

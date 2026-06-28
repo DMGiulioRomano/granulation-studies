@@ -160,3 +160,22 @@ def parameter_bounds() -> dict:
     from parameters.parameter_definitions import GRANULAR_PARAMETERS
 
     return GRANULAR_PARAMETERS
+
+
+def parameter_defaults() -> dict:
+    """Mappa ``yaml_path -> default`` da tutti gli schema dell'engine.
+
+    Single source of truth per i valori a riposo dei parametri: invece di
+    duplicare i default nello ``study.yml``, l'asse che omette ``baseline`` lo
+    risolve da qui (vedi ``study_spec.parse_study_spec``). I path con
+    ``default=None`` (es. ``density``) restano fuori dalla risoluzione e
+    richiedono un baseline esplicito.
+    """
+    _ensure_engine_on_path()
+    from parameters.parameter_schema import ALL_SCHEMAS
+
+    out: dict = {}
+    for schema in ALL_SCHEMAS.values():
+        for spec in schema:
+            out[spec.yaml_path] = spec.default
+    return out

@@ -42,3 +42,45 @@ def test_build_document_includes_optional_keys_only_when_given():
     minimal = build_document(base, {})
     assert "title" not in minimal and "seed" not in minimal
     assert minimal["streams"][0] == {"density": 20}
+
+
+# --- envelope wrapping (gated) -------------------------------------------------
+
+def test_build_stream_wraps_list_override_when_envelope_mode():
+    out = build_stream(
+        {"density": 20},
+        {"density": [[0, 5], [1, 5]]},
+        envelope_time_mode="normalized",
+    )
+    assert out["density"] == {
+        "type": "linear",
+        "points": [[0, 5], [1, 5]],
+        "time_mode": "normalized",
+    }
+
+
+def test_build_stream_list_override_raw_by_default():
+    # backward compat (compose): senza envelope_time_mode la lista resta grezza
+    out = build_stream({"density": 20}, {"density": [[0, 5], [1, 5]]})
+    assert out["density"] == [[0, 5], [1, 5]]
+
+
+def test_build_stream_scalar_override_never_wrapped():
+    out = build_stream({"density": 20}, {"density": 50}, envelope_time_mode="normalized")
+    assert out["density"] == 50
+
+
+def test_build_document_wraps_list_override():
+    doc = build_document(
+        {"density": 20},
+        {"density": [[0, 5], [0.5, 5], [1, 50]]},
+        envelope_time_mode="normalized",
+        duration=25,
+    )
+    stream = doc["streams"][0]
+    assert stream["density"] == {
+        "type": "linear",
+        "points": [[0, 5], [0.5, 5], [1, 50]],
+        "time_mode": "normalized",
+    }
+    assert doc["duration"] == 25

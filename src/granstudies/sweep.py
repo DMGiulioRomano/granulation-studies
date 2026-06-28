@@ -59,8 +59,15 @@ def _name(order: int, moved_values: Dict[str, float]) -> str:
     return f"o{order}__" + "__".join(parts)
 
 
-def generate_variants(spec: StudySpec) -> List[Variant]:
-    """Enumera le varianti per gli ordini richiesti, deduplicando per valori."""
+def generate_discrete_variants(spec: StudySpec) -> List[Variant]:
+    """Enumera le varianti *discrete* per gli ordini richiesti, deduplicando.
+
+    In ``mode: envelope`` la pipeline discrete non produce nulla (le varianti
+    dinamiche sono generate da ``envelope_sweep.generate_envelope_variants``);
+    ``discrete`` e ``both`` generano il set statico completo.
+    """
+    if spec.mode == "envelope":
+        return []
     baseline = {ax.name: ax.baseline for ax in spec.axes}
     seen_vectors: set = set()
     variants: List[Variant] = []
@@ -94,3 +101,7 @@ def generate_variants(spec: StudySpec) -> List[Variant]:
                     )
                 )
     return variants
+
+
+# Alias di backward-compat: i consumatori storici importano ``generate_variants``.
+generate_variants = generate_discrete_variants
