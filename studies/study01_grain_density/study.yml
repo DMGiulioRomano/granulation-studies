@@ -1,27 +1,26 @@
 # Studio 01 — densità, grana, pitch, distribuzione.
 #
-# Quattro assi sotto osservazione. Lo sweep li muove a ordini crescenti
-# (1 alla volta -> a coppie -> a 3 -> tutti e 4), per isolare l'effetto di
-# ciascuno e poi le loro interazioni.
+# Quattro assi sotto osservazione. In modalità `envelope` lo sweep produce un
+# file per combinazione di assi, attraversando tutte le permutazioni dei valori
+# con plateau e transizioni sincronizzate (ascolto in sequenza continua).
 
 study_id: study01_grain_density
 title: "Studio 01 — densità e grana"
 seed: 1988
-duration: 6
 # Cartella del corpus (relativa alla root del repo). Default: samples/
 samples_dir: samples
 
-# Stream base: tutto cio' che NON e' sotto studio resta fisso qui.
+# Stream base: SOLO i parametri che NON sono assi (campi obbligatori di stream e
+# valori espliciti diversi dal default engine). I parametri-asse risolvono il
+# loro valore a riposo da `axes.*.baseline` o dal default engine (single source
+# of truth) — non vanno duplicati qui.
 base:
   onset: 0
-  duration: 6
+  duration: 6          # usato solo dalle varianti discrete (mode: discrete | both)
   sample: corpus.wav
-  time_mode: absolute
+  time_mode: normalized
   distribution_mode: gaussian
-  density: 20
-  distribution: 0.5
   grain:
-    duration: 0.05
     envelope: hanning
   pitch:
     semitones: 0
@@ -31,26 +30,28 @@ base:
   pan: 0
   volume: -6
 
-# Gli assi: path YAML, valore di baseline (quando l'asse non e' mosso) e i
-# valori di test da esplorare.
+# Gli assi: path YAML e valori di test. `baseline` (valore a riposo quando l'asse
+# non è mosso) è opzionale: se omesso si risolve dal default engine via `path`.
+# `plateau`/`transition` (secondi) governano il timing degli envelope.
 axes:
+  plateau: 5
+  transition: 5
   density:
     path: density
-    baseline: 20
+    baseline: 20           # obbligatorio: density non ha default engine
     values: [5, 50, 400]
   grain_duration:
     path: grain.duration
-    baseline: 0.05
-    values: [0.01, 0.05, 0.2]
+    values: [0.01, 0.05, 0.2]     # baseline omesso → default engine 0.05
   pitch:
     path: pitch.semitones
-    baseline: 0
+    baseline: 0                    # obbligatorio: path pitch.* richiede baseline esplicito
     values: [-12, 0, 7]
   distribution:
     path: distribution
-    baseline: 0.5
-    values: [0.0, 0.5, 1.0]
+    values: [0.0, 0.5, 1.0]       # baseline omesso → default engine 0.0
 
 sweep:
-  # 1=OAT, 2=coppie, 3=terzine, 4=fattoriale completo. 0 = solo baseline.
+  # envelope | discrete | both. 1=OAT, 2=coppie, 3=terzine, 4=fattoriale completo.
+  mode: envelope
   orders: [1, 2, 3, 4]

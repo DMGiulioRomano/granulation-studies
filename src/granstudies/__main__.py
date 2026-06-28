@@ -52,7 +52,14 @@ def cmd_sweep(study: str) -> int:
     spec = _load_spec(study)
     out = os.path.join(gen_dir(study), "variants")
     written = write_variants(spec, out)
-    print(f"[sweep] {len(written)} varianti scritte in {out}")
+    n_disc = sum(1 for p in written if (os.sep + "discrete" + os.sep) in p)
+    n_env = sum(1 for p in written if (os.sep + "envelope" + os.sep) in p)
+    if n_disc:
+        print(f"[sweep] {n_disc} varianti discrete in {os.path.join(out, 'discrete')}")
+    if n_env:
+        print(f"[sweep] {n_env} varianti envelope in {os.path.join(out, 'envelope')}")
+    if not written:
+        print(f"[sweep] nessuna variante generata (mode={spec.mode})")
     return 0
 
 
@@ -77,16 +84,21 @@ def cmd_render(study: str, no_score: bool) -> int:
 
 def cmd_describe(study: str) -> int:
     from .curation import update_results_file
-    from .sweep import generate_variants
+    from .sweep import generate_discrete_variants
 
     spec = _load_spec(study)
     g = gen_dir(study)
-    audio_dir = os.path.join(g, "audio")
+    # La curation lavora solo sulle varianti discrete: l'audio sta in
+    # ``audio/discrete/`` (layout di ``write_variants``); fallback flat per
+    # backward compat con output precedenti.
+    audio_dir = os.path.join(g, "audio", "discrete")
+    if not os.path.isdir(audio_dir):
+        audio_dir = os.path.join(g, "audio")
     if not os.path.isdir(audio_dir):
         print(f"[describe] nessun audio: esegui prima 'render {study}'.", file=sys.stderr)
         return 1
     params_by_name = {
-        v.name: v.overrides(spec) for v in generate_variants(spec)
+        v.name: v.overrides(spec) for v in generate_discrete_variants(spec)
     }
     results_path = os.path.join(g, "results.yml")
     merged = update_results_file(results_path, audio_dir, params_by_name=params_by_name)
