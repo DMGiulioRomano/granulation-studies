@@ -100,3 +100,97 @@ def test_both_mode_writes_both_sets(tmp_path):
     assert os.path.isdir(tmp_path / "envelope")
     assert any((os.sep + "discrete" + os.sep) in p for p in written)
     assert any((os.sep + "envelope" + os.sep) in p for p in written)
+
+
+# --- confronto golden: documento YAML completo letto da disco -------------------
+
+def _golden_spec(orders):
+    # spec minimale e deterministica per confronti byte-equivalenti
+    return parse_study_spec(
+        {
+            "study_id": "golden",
+            "seed": 1988,
+            "base": {
+                "sample": "corpus.wav",
+                "onset": 0,
+                "duration": 6,
+                "time_mode": "normalized",
+            },
+            "axes": {
+                "plateau": 5,
+                "transition": 5,
+                "density": {"path": "density", "baseline": 20, "values": [5, 50, 400]},
+                "grain_duration": {
+                    "path": "grain.duration",
+                    "baseline": 0.05,
+                    "values": [0.01, 0.05, 0.2],
+                },
+            },
+            "sweep": {"mode": "envelope", "orders": orders},
+        }
+    )
+
+
+def test_golden_e1_density_full_document(tmp_path):
+    # Confronta l'INTERO documento scritto (round-trip su disco) con l'atteso.
+    # I breakpoint replicano l'esempio della issue: densita'=[5,50,400], 25s.
+    written = write_variants(_golden_spec([1]), str(tmp_path))
+    doc = _load(_find(written, "e1__density.yml"))
+    assert doc == {
+        "title": "golden :: e1__density",
+        "seed": 1988,
+        "duration": 25.0,
+        "streams": [
+            {
+                "sample": "corpus.wav",
+                "onset": 0,
+                "time_mode": "normalized",
+                "stream_id": "stream",
+                "duration": 25.0,
+                "density": {
+                    "type": "linear",
+                    "points": [
+                        [0.0, 5],
+                        [0.2, 5],
+                        [0.4, 50],
+                        [0.6, 50],
+                        [0.8, 400],
+                        [1.0, 400],
+                    ],
+                    "time_mode": "normalized",
+                },
+                "grain": {"duration": 0.05},
+            }
+        ],
+    }
+
+
+def test_golden_e2_synchronized_points_exact(tmp_path):
+    # I due assi mossi devono avere ESATTAMENTE gli stessi tempi e i valori
+    # del prodotto cartesiano lessicografico, su 9 plateau (85s).
+    written = write_variants(_golden_spec([2]), str(tmp_path))
+    doc = _load(_find(written, "e2__density__grain_duration.yml"))
+    stream = doc["streams"][0]
+    assert doc["duration"] == 85.0
+    assert stream["duration"] == 85.0
+
+    # tempi attesi: 9 plateau, W_plateau = W_transition = 5/85
+    w = 5 / 85
+    expected_times = []
+    for i in range(9):
+        t_start = i * (w + w)
+        expected_times.append(round(t_start, 6))
+        expected_times.append(round(t_start + w, 6))
+    expected_times[0] = 0.0
+    expected_times[-1] = 1.0
+
+    dens_times = [t for t, _ in stream["density"]["points"]]
+    grain_times = [t for t, _ in stream["grain"]["duration"]["points"]]
+    assert dens_times == expected_times
+    assert grain_times == expected_times
+
+    # valori per plateau (uno ogni 2 breakpoint) = prodotto lessicografico
+    dens_vals = [v for _, v in stream["density"]["points"]][0::2]
+    grain_vals = [v for _, v in stream["grain"]["duration"]["points"]][0::2]
+    assert dens_vals == [5, 5, 5, 50, 50, 50, 400, 400, 400]
+    assert grain_vals == [0.01, 0.05, 0.2, 0.01, 0.05, 0.2, 0.01, 0.05, 0.2]
