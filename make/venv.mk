@@ -11,6 +11,7 @@ $(MARKER): pyproject.toml | $(VENV)
 
 .PHONY: setup
 setup: submodule $(MARKER)
+	@zsh setup.sh
 	@echo "Setup completato. Engine: $$(git -C engine rev-parse --short HEAD 2>/dev/null || echo 'non inizializzato')"
 
 .PHONY: submodule

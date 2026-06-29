@@ -1,0 +1,8 @@
+_make_with_study() {
+  local cur=${words[-1]}
+  if [[ $cur == STUDY=* ]] && [[ -d studies ]]; then
+    compadd -P 'STUDY=' -- studies/*(/:t)
+    return
+  fi
+  _make "$@"
+}

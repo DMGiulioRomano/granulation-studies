@@ -19,9 +19,21 @@ from .envelope_sweep import EnvelopeVariant, generate_envelope_variants
 from .yaml_builder import build_document
 
 
+class _Dumper(yaml.SafeDumper):
+    pass
+
+
+def _list_representer(dumper: yaml.SafeDumper, data: list) -> yaml.Node:
+    flow = bool(data and isinstance(data[0], list))
+    return dumper.represent_sequence("tag:yaml.org,2002:seq", data, flow_style=flow)
+
+
+_Dumper.add_representer(list, _list_representer)
+
+
 def _dump(path: str, doc: Dict[str, Any]) -> None:
     with open(path, "w", encoding="utf-8") as fh:
-        yaml.safe_dump(doc, fh, sort_keys=False, allow_unicode=True)
+        yaml.dump(doc, fh, Dumper=_Dumper, sort_keys=False, allow_unicode=True)
 
 
 def _write_discrete(spec: StudySpec, out_dir: str) -> List[str]:
