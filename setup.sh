@@ -33,6 +33,8 @@ else
   echo "→ aggiungo completion hook a ~/.zshrc..."
   cat >> "$ZSHRC" <<'EOF'
 
+autoload -Uz compinit && compinit -C
+
 # granulation-studies
 # Carica la completion dal repo quando direnv imposta GRANSTUDIES_ROOT.
 # Il check su _granstudies_last_root evita di ricaricare ad ogni comando.
@@ -43,7 +45,7 @@ _granstudies_completion_precmd() {
   local f="$cur/.zsh_completions/_make_with_study"
   [[ -n "$cur" && -f "$f" ]] && source "$f" && compdef _make_with_study make
 }
-add-zsh-hook precmd _granstudies_completion_precmd
+precmd_functions+=(_granstudies_completion_precmd)
 EOF
 fi
 
