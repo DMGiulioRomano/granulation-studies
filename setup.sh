@@ -36,14 +36,18 @@ else
 autoload -Uz compinit && compinit -C
 
 # granulation-studies
-# Carica la completion dal repo quando direnv imposta GRANSTUDIES_ROOT.
+# Carica tutti i file locali dal repo quando direnv imposta GRANSTUDIES_ROOT.
 # Il check su _granstudies_last_root evita di ricaricare ad ogni comando.
 _granstudies_completion_precmd() {
   local cur="${GRANSTUDIES_ROOT:-}"
   [[ "$cur" == "${_granstudies_last_root:-}" ]] && return
   _granstudies_last_root="$cur"
-  local f="$cur/.zsh_completions/_make_with_study"
-  [[ -n "$cur" && -f "$f" ]] && source "$f" && compdef _make_with_study make
+  if [[ -n "$cur" && -d "$cur/.zsh_completions" ]]; then
+    for f in "$cur"/.zsh_completions/_*(N); do
+      source "$f"
+    done
+    compdef _make_with_study make
+  fi
 }
 precmd_functions+=(_granstudies_completion_precmd)
 EOF
