@@ -177,6 +177,30 @@ def cmd_compose(study: str, seed: int | None, steps: int | None, start: str | No
     return 0
 
 
+def cmd_sv(study: str) -> int:
+    from .sv_export import variant_to_csvs
+
+    g = gen_dir(study)
+    variant_dir = os.path.join(g, "variants", "envelope")
+    if not os.path.isdir(variant_dir):
+        print(f"[sv] nessuna variante envelope: esegui prima 'sweep {study}'.", file=sys.stderr)
+        return 1
+
+    total = 0
+    for fname in sorted(os.listdir(variant_dir)):
+        if not fname.endswith(".yml"):
+            continue
+        variant_name = fname[:-4]
+        out_dir = os.path.join(g, "sv", "envelope", variant_name)
+        written = variant_to_csvs(os.path.join(variant_dir, fname), out_dir)
+        total += len(written)
+        if written:
+            print(f"[sv] {variant_name}: {len(written)} CSV -> {out_dir}")
+
+    print(f"[sv] totale {total} CSV in {os.path.join(g, 'sv')}")
+    return 0
+
+
 def cmd_render_final(study: str) -> int:
     from . import engine_bridge
 
@@ -221,6 +245,9 @@ def build_parser() -> argparse.ArgumentParser:
     fp = sub.add_parser("render-final", help="renderizza il brano finale")
     fp.add_argument("study")
 
+    svp = sub.add_parser("sv", help="genera CSV envelope per Sonic Visualiser")
+    svp.add_argument("study")
+
     return p
 
 
@@ -238,6 +265,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_compose(args.study, args.seed, args.steps, args.start)
     if args.command == "render-final":
         return cmd_render_final(args.study)
+    if args.command == "sv":
+        return cmd_sv(args.study)
     return 1
 
 
