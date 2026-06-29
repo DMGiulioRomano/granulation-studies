@@ -177,27 +177,37 @@ def cmd_compose(study: str, seed: int | None, steps: int | None, start: str | No
     return 0
 
 
-def cmd_sv(study: str) -> int:
-    from .sv_export import variant_to_csvs
+def cmd_sv(study: str, layout: str) -> int:
+    from .sv_export import variant_to_sv
 
     g = gen_dir(study)
     variant_dir = os.path.join(g, "variants", "envelope")
+    audio_dir = os.path.join(g, "audio", "envelope")
+    sv_dir = os.path.join(g, "sv", "envelope")
+
     if not os.path.isdir(variant_dir):
         print(f"[sv] nessuna variante envelope: esegui prima 'sweep {study}'.", file=sys.stderr)
         return 1
+    if not os.path.isdir(audio_dir):
+        print(f"[sv] nessun audio envelope: esegui prima 'render {study}'.", file=sys.stderr)
+        return 1
 
-    total = 0
+    written = []
     for fname in sorted(os.listdir(variant_dir)):
         if not fname.endswith(".yml"):
             continue
-        variant_name = fname[:-4]
-        out_dir = os.path.join(g, "sv", "envelope", variant_name)
-        written = variant_to_csvs(os.path.join(variant_dir, fname), out_dir)
-        total += len(written)
-        if written:
-            print(f"[sv] {variant_name}: {len(written)} CSV -> {out_dir}")
+        name = fname[:-4]
+        audio = os.path.join(audio_dir, name + ".aif")
+        if not os.path.exists(audio):
+            print(f"[sv] {name}: audio mancante, salto.", file=sys.stderr)
+            continue
+        suffix = f"_{layout}" if layout == "single" else ""
+        out = os.path.join(sv_dir, name + suffix + ".sv")
+        variant_to_sv(os.path.join(variant_dir, fname), audio, out, layout=layout)
+        written.append(out)
+        print(f"[sv] {out}")
 
-    print(f"[sv] totale {total} CSV in {os.path.join(g, 'sv')}")
+    print(f"[sv] {len(written)} sessioni in {sv_dir}")
     return 0
 
 
@@ -245,8 +255,10 @@ def build_parser() -> argparse.ArgumentParser:
     fp = sub.add_parser("render-final", help="renderizza il brano finale")
     fp.add_argument("study")
 
-    svp = sub.add_parser("sv", help="genera CSV envelope per Sonic Visualiser")
+    svp = sub.add_parser("sv", help="genera sessioni .sv per Sonic Visualiser")
     svp.add_argument("study")
+    svp.add_argument("--layout", choices=["multi", "single"], default="multi",
+                     help="multi: un pannello per parametro (default); single: tutti in un pannello")
 
     return p
 
@@ -266,7 +278,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "render-final":
         return cmd_render_final(args.study)
     if args.command == "sv":
-        return cmd_sv(args.study)
+        return cmd_sv(args.study, args.layout)
     return 1
 
 

@@ -20,8 +20,8 @@ compose: _require-study $(MARKER)
 		$(if $(START),--start $(START),)
 
 .PHONY: sv
-sv: _require-study
-	$(PY) -m granstudies sv $(STUDY)
+sv: _require-study render
+	$(PY) -m granstudies sv $(STUDY) $(if $(LAYOUT),--layout $(LAYOUT),)
 
 .PHONY: all-study
 all-study: sweep render #describe matrix compose render-final
