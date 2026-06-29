@@ -29,7 +29,7 @@ class Axis:
 # Chiavi riservate sotto ``axes:`` che non descrivono un asse ma il timing
 # degli envelope (vedi ``envelope_sweep``). Restano a livello study per garantire
 # comparabilita' tra i file generati.
-_AXES_RESERVED_KEYS = ("plateau", "transition")
+_AXES_RESERVED_KEYS = ("plateau", "transition", "interpolation")
 
 
 @dataclass(frozen=True)
@@ -45,6 +45,7 @@ class StudySpec:
     mode: str = "discrete"          # discrete | envelope | both
     plateau: float = 5.0            # secondi per plateau (ascolto stabile)
     transition: float = 5.0         # secondi per transizione tra plateau
+    interpolation: str = "linear"   # linear | cubic
 
     def axis(self, name: str) -> Axis:
         for ax in self.axes:
@@ -150,6 +151,7 @@ def parse_study_spec(data: Dict[str, Any], study_id: str | None = None) -> Study
         mode=sweep_cfg.get("mode", "discrete"),
         plateau=float(axes_raw.get("plateau", 5.0)),
         transition=float(axes_raw.get("transition", 5.0)),
+        interpolation=axes_raw.get("interpolation", "linear"),
     )
     _validate(spec)
     return spec

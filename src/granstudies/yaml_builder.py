@@ -44,12 +44,13 @@ def build_stream(
     overrides: Mapping[str, Any],
     *,
     envelope_time_mode: str | None = None,
+    envelope_type: str = "linear",
 ) -> Dict[str, Any]:
     """Crea un nuovo dict stream = copia di ``base_stream`` con override applicati.
 
     Se ``envelope_time_mode`` e' valorizzato (es. ``"normalized"``), gli override
     *lista* (breakpoint ``[[t, v], ...]``) vengono wrappati nel dict envelope
-    dell'engine ``{type: linear, points: ..., time_mode: <mode>}``. Lasciato a
+    dell'engine ``{type: <envelope_type>, points: ..., time_mode: <mode>}``. Lasciato a
     ``None`` (default) le liste passano grezze: cosi' la pipeline ``compose``
     (envelope assoluti) resta invariata.
     """
@@ -57,7 +58,7 @@ def build_stream(
     for path, value in overrides.items():
         if envelope_time_mode is not None and isinstance(value, list):
             value = {
-                "type": "linear",
+                "type": envelope_type,
                 "points": value,
                 "time_mode": envelope_time_mode,
             }
@@ -73,6 +74,7 @@ def build_document(
     seed: int | None = None,
     duration: float | None = None,
     envelope_time_mode: str | None = None,
+    envelope_type: str = "linear",
 ) -> Dict[str, Any]:
     """Crea un documento YAML engine completo con un singolo stream.
 
@@ -88,6 +90,6 @@ def build_document(
     if duration is not None:
         doc["duration"] = duration
     doc["streams"] = [
-        build_stream(base_stream, overrides, envelope_time_mode=envelope_time_mode)
+        build_stream(base_stream, overrides, envelope_time_mode=envelope_time_mode, envelope_type=envelope_type)
     ]
     return doc
