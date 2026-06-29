@@ -18,3 +18,6 @@ compose: _require-study $(MARKER)
 		$(if $(SEED),--seed $(SEED),) \
 		$(if $(STEPS),--steps $(STEPS),) \
 		$(if $(START),--start $(START),)
+
+.PHONY: all-study
+all-study: sweep render #describe matrix compose render-final

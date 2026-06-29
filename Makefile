@@ -37,6 +37,7 @@ help:
 	@echo "  make matrix STUDY=...       matrice di parentela -> kinship.json"
 	@echo "  make compose STUDY=...      genera final.yml dal percorso/grafo"
 	@echo "  make render-final STUDY=... renderizza il brano finale"
+	@echo "  make all-study STUDY=...    pipeline completa (sweep→render→describe→matrix→compose→render-final)"
 	@echo "  make clean / clean-all      pulizia output / output+venv"
 
 .PHONY: _require-study
