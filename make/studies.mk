@@ -19,5 +19,9 @@ compose: _require-study $(MARKER)
 		$(if $(STEPS),--steps $(STEPS),) \
 		$(if $(START),--start $(START),)
 
+.PHONY: sv
+sv: _require-study render
+	$(PY) -m granstudies sv $(STUDY) $(if $(LAYOUT),--layout $(LAYOUT),)
+
 .PHONY: all-study
 all-study: sweep render #describe matrix compose render-final
