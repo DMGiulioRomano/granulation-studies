@@ -8,16 +8,16 @@ testo versionabili.
 ## La pipeline a stadi
 
 ```
-study.yml ──sweep──▶ varianti/*.yml ──render──▶ audio + partitura
-                                          │
-                                          ▼
-                                    descriptors (results.yml)
-                                          │
-                              (ascolto + tag manuali)
-                                          ▼
-                                     states.yml ──matrix──▶ kinship.json
-                                          │
-                  composition.yml ──compose──▶ final.yml ──render──▶ brano
+study.yml ──sweep──▶ varianti/discrete/*.yml ──render──▶ audio + partitura
+                     varianti/envelope/*.yml ──┘    │
+                                                    ▼
+                                              descriptors (results.yml)
+                                                    │
+                                        (ascolto + tag manuali)
+                                                    ▼
+                                               states.yml ──matrix──▶ kinship.json
+                                                    │
+                            composition.yml ──compose──▶ final.yml ──render──▶ brano
 ```
 
 ### 1. Studio (`studies/<id>/study.yml`)
@@ -26,24 +26,50 @@ Si sceglie un **gruppo di parametri** (gli *assi*) e, per ciascuno, un valore di
 *baseline* e una lista di *valori di test*. Tutto il resto dello stream e' fisso
 nel blocco `base`.
 
+Il `baseline` puo' essere **omesso** se l'engine definisce un default per quel
+path: in quel caso viene risolto automaticamente dal registry dell'engine. I path
+`pitch.*` (unit-driven, nessun default) e i parametri con `default: null`
+(es. `density`) richiedono un baseline esplicito.
+
 ### 2. Sweep (OAT → fattoriale)
 
-`sweep` genera le varianti muovendo gli assi a **ordini crescenti**:
+`sweep` supporta tre modalita', scelte via `sweep.mode` in `study.yml`:
+
+- `discrete` (default) — un file YAML statico per combinazione, scritti in
+  `varianti/discrete/`;
+- `envelope` — un file per combinazione di assi, in cui i parametri attraversano
+  tutti i valori in sequenza tramite breakpoint temporali sincronizzati, scritti
+  in `varianti/envelope/`;
+- `both` — entrambe le sotto-cartelle.
+
+In tutte le modalita' gli assi vengono mossi a **ordini crescenti**:
 
 - ordine 1 (OAT, *one-at-a-time*): un asse alla volta, gli altri alla baseline;
 - ordine 2: tutte le coppie di assi;
 - ordine 3: tutte le terzine;
 - ordine 4: il fattoriale completo.
 
-Ogni variante e' completamente specificata (tutti gli assi hanno un valore),
-quindi le varianti sono direttamente confrontabili. Il numero di varianti per N
-assi con v valori ciascuno e' `1 + Σ_k C(N,k)·v^k` (la baseline piu' le
-combinazioni). I valori fuori dai bounds dell'engine vengono *clampati*.
+**Modalita' `discrete`**: ogni variante e' completamente specificata (tutti gli
+assi hanno un valore scalare), quindi le varianti sono direttamente
+confrontabili. Il numero di varianti per N assi con v valori ciascuno e'
+`1 + Σ_k C(N,k)·v^k` (la baseline piu' le combinazioni).
+
+**Modalita' `envelope`**: un file per combinazione di *k* assi, in cui quei *k*
+assi attraversano il prodotto cartesiano dei loro valori in ordine lessicografico.
+Ogni valore occupa un *plateau* (ascolto stabile) e il passaggio al successivo
+avviene tramite una *transition* lineare. I tempi sono normalizzati in `[0, 1]`
+(`time_mode: normalized`); la durata reale dello stream e' `N·plateau + (N-1)·transition`.
+I parametri `plateau` e `transition` (in secondi, default 5.0) si impostano
+sotto `axes:` in `study.yml` come chiavi riservate.
+
+I valori fuori dai bounds dell'engine vengono *clampati* in entrambe le modalita'.
 
 ### 3. Render
 
 `render` compila ogni variante in audio (renderer NumPy) e in una partitura PDF.
-L'audio finisce in `generated/<id>/audio/`, le partiture in `score/`.
+L'audio finisce in `generated/<id>/audio/discrete/` o `audio/envelope/` a seconda
+della modalita'; le partiture in `score/discrete/` o `score/envelope/`.
+Con `mode: both` entrambe le sotto-cartelle sono popolate.
 
 ### 4. Descrittori + curation (`generated/<id>/results.yml`)
 
