@@ -2,37 +2,63 @@
 
 **Lingua:** rispondi sempre in italiano.
 
+## Stato reale del progetto (leggi prima di toccare qualunque cosa)
+
+L'utente ha curato a mano **solo**: il submodule `engine/`, il proprio
+`study.yml`, lo `sweep` e l'`sv export`. È fermo a livello **render**: il suo
+ciclo di lavoro attuale è `study.yml → audio → ascolto → modifica study.yml →
+rigenera`. Niente oltre.
+
+Tutto il resto — `states.yml`, `composition.yml`, `methodology.md`, e i moduli
+`states.py` / `kinship.py` / `walk.py` / `compose.py` / `descriptors.py` /
+`curation.py` / `bounds.py` — è stato **generato da un comando Claude e NON è
+ancora stato studiato, validato né usato** dall'utente. Trattalo come
+scaffolding non vagliato, non come design consolidato: lo schema di `states.yml`
+e la semantica della kinship/walk vanno discussi e decisi con l'utente, non dati
+per buoni. Conferma di questo: in `make/studies.mk` il target `all-study` è
+`sweep render #describe matrix compose render-final` — le fasi describe/matrix/
+compose/render-final sono **commentate**, quindi fuori dalla pipeline viva.
+
+Non proporre di "continuare" su quei moduli come se fossero scelte dell'utente.
+
 ## Diario di ascolto
 
 Ogni studio ha una cartella `ascolto/` dentro la sua directory:
 
 ```
 studies/{studio_id}/ascolto/
-├── YYYY-MM-DD.md   ← log della sessione (uno per giorno)
-└── index.md        ← sintesi cronologica, aggiornata su richiesta
+├── YYYY-MM-DD.md   ← log della sessione, diario di bordo in prosa
+├── index.md        ← sintesi cronologica, aggiornata su richiesta
+└── riepilogo.md    ← tabella consolidata regioni/transizioni, aggiornata su richiesta
 ```
+
+Il log è **prosa libera**. Nel descrivere un oggetto in ascolto, il filo
+ricorrente è: **cosa** si ascolta → **range dove il percetto resta uguale**
+(plateau) → **range dove cambia** (transizione) → **plateau successivo**. Così
+scrivendo si mappano da sé regioni e transizioni.
 
 ### Creare il log di oggi
 
 Quando l'utente dice "crea il log di oggi" o simile:
 
-1. Recupera l'hash corrente con `git rev-parse --short HEAD`
-2. Crea `studies/{studio_id}/ascolto/YYYY-MM-DD.md` con questo frontmatter:
+1. Recupera l'hash con `git rev-parse --short HEAD`
+2. Crea `studies/{studio_id}/ascolto/YYYY-MM-DD.md` con frontmatter minimo:
 
 ```yaml
 ---
 data: YYYY-MM-DD
 studio: {studio_id}
 study_yml_commit: {hash}
-parametri_esplorati: []
-temi_percettivi: []
 sample:
-durata_sessione:
 ---
 ```
 
-3. Lascia il corpo vuoto o con un placeholder — è l'utente che scrive le osservazioni.
+3. Corpo vuoto — lo scrive l'utente in prosa.
 
-### Aggiornare l'index
+### Aggiornare index e riepilogo
 
-Quando l'utente dice "aggiorna l'index": leggi tutti i log `YYYY-MM-DD.md` della cartella, rielabora `index.md` aggiornando la tabella cronologica e la sezione temi emergenti.
+Quando l'utente lo chiede, leggi tutti i log `YYYY-MM-DD.md` e rigenera:
+- `index.md` — cronologia + temi emergenti;
+- `riepilogo.md` — tabella `sample | tipo | density | grain.dur | percetto`, dove
+  `tipo` è `plateau` (range dove resta uguale) o `transizione` (bracket `a→b`
+  sull'asse mosso).
