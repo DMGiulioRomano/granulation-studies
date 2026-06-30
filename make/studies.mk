@@ -2,7 +2,7 @@
 
 .PHONY: sweep
 sweep: _require-study $(MARKER)
-	$(PY) -m granstudies sweep $(STUDY)
+	$(PY) -m granstudies sweep $(STUDY) $(if $(STREAM),--stream $(STREAM),)
 
 .PHONY: describe
 describe: _require-study $(MARKER)
@@ -21,7 +21,7 @@ compose: _require-study $(MARKER)
 
 .PHONY: sv
 sv: _require-study render
-	$(PY) -m granstudies sv $(STUDY) $(if $(LAYOUT),--layout $(LAYOUT),)
+	$(PY) -m granstudies sv $(STUDY) $(if $(LAYOUT),--layout $(LAYOUT),) $(if $(STREAM),--stream $(STREAM),)
 
 .PHONY: all-study
 all-study: sweep render #describe matrix compose render-final

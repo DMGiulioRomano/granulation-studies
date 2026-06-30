@@ -98,11 +98,14 @@ def write_variants(spec: StudySpec, out_dir: str) -> List[str]:
 
     Returns: lista dei path YAML scritti (discrete prima, poi envelope).
     """
+    sub = spec.stream_id or ""
     written: List[str] = []
     if spec.mode in ("discrete", "both"):
-        written += _write_discrete(spec, os.path.join(out_dir, "discrete"))
+        d = os.path.join(out_dir, "discrete", sub) if sub else os.path.join(out_dir, "discrete")
+        written += _write_discrete(spec, d)
     if spec.mode in ("envelope", "both"):
-        written += _write_envelope(spec, os.path.join(out_dir, "envelope"))
+        e = os.path.join(out_dir, "envelope", sub) if sub else os.path.join(out_dir, "envelope")
+        written += _write_envelope(spec, e)
     return written
 
 

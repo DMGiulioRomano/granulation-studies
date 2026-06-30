@@ -44,22 +44,43 @@ def _load_spec(study: str):
     return load_study_spec(os.path.join(study_dir(study), "study.yml"))
 
 
+def _load_specs(study: str, stream: str | None = None) -> list:
+    from .study_spec import resolve_streams
+
+    path = os.path.join(study_dir(study), "study.yml")
+    with open(path, "r", encoding="utf-8") as fh:
+        data = yaml.safe_load(fh)
+    sid = data.get("study_id") or study
+    specs = resolve_streams(data, sid)
+    if stream:
+        specs = [s for s in specs if s.stream_id == stream]
+        if not specs:
+            print(f"[sweep] stream '{stream}' non trovata in {study}.", file=sys.stderr)
+    return specs
+
+
 # --- comandi ---------------------------------------------------------------
 
-def cmd_sweep(study: str) -> int:
+def cmd_sweep(study: str, stream: str | None = None) -> int:
     from .render import write_variants
 
-    spec = _load_spec(study)
+    specs = _load_specs(study, stream)
+    if not specs:
+        return 1
     out = os.path.join(gen_dir(study), "variants")
-    written = write_variants(spec, out)
-    n_disc = sum(1 for p in written if (os.sep + "discrete" + os.sep) in p)
-    n_env = sum(1 for p in written if (os.sep + "envelope" + os.sep) in p)
-    if n_disc:
-        print(f"[sweep] {n_disc} varianti discrete in {os.path.join(out, 'discrete')}")
-    if n_env:
-        print(f"[sweep] {n_env} varianti envelope in {os.path.join(out, 'envelope')}")
-    if not written:
-        print(f"[sweep] nessuna variante generata (mode={spec.mode})")
+    total = 0
+    for spec in specs:
+        written = write_variants(spec, out)
+        total += len(written)
+        label = f" [{spec.stream_id}]" if spec.stream_id else ""
+        n_disc = sum(1 for p in written if (os.sep + "discrete" + os.sep) in p)
+        n_env = sum(1 for p in written if (os.sep + "envelope" + os.sep) in p)
+        if n_disc:
+            print(f"[sweep]{label} {n_disc} varianti discrete")
+        if n_env:
+            print(f"[sweep]{label} {n_env} varianti envelope")
+        if not written:
+            print(f"[sweep]{label} nessuna variante generata (mode={spec.mode})")
     return 0
 
 
@@ -177,38 +198,43 @@ def cmd_compose(study: str, seed: int | None, steps: int | None, start: str | No
     return 0
 
 
-def cmd_sv(study: str, layout: str, markers: bool = True) -> int:
+def cmd_sv(study: str, layout: str, markers: bool = True, stream: str | None = None) -> int:
     from .sv_export import variant_to_sv
 
+    specs = _load_specs(study, stream)
+    if not specs:
+        return 1
     g = gen_dir(study)
-    variant_dir = os.path.join(g, "variants", "envelope")
-    audio_dir = os.path.join(g, "audio", "envelope")
-    sv_dir = os.path.join(g, "sv", "envelope")
+    total: list = []
+    for spec in specs:
+        sub = spec.stream_id or ""
+        variant_dir = os.path.join(g, "variants", "envelope", sub) if sub else os.path.join(g, "variants", "envelope")
+        audio_dir = os.path.join(g, "audio", "envelope", sub) if sub else os.path.join(g, "audio", "envelope")
+        sv_dir = os.path.join(g, "sv", "envelope", sub) if sub else os.path.join(g, "sv", "envelope")
 
-    if not os.path.isdir(variant_dir):
-        print(f"[sv] nessuna variante envelope: esegui prima 'sweep {study}'.", file=sys.stderr)
-        return 1
-    if not os.path.isdir(audio_dir):
-        print(f"[sv] nessun audio envelope: esegui prima 'render {study}'.", file=sys.stderr)
-        return 1
-
-    written = []
-    for fname in sorted(os.listdir(variant_dir)):
-        if not fname.endswith(".yml"):
+        if not os.path.isdir(variant_dir):
+            print(f"[sv] [{sub or 'default'}] nessuna variante envelope: esegui prima 'sweep {study}'.", file=sys.stderr)
             continue
-        name = fname[:-4]
-        audio = os.path.join(audio_dir, name + ".aif")
-        if not os.path.exists(audio):
-            print(f"[sv] {name}: audio mancante, salto.", file=sys.stderr)
+        if not os.path.isdir(audio_dir):
+            print(f"[sv] [{sub or 'default'}] nessun audio envelope: esegui prima 'render {study}'.", file=sys.stderr)
             continue
-        suffix = f"_{layout}" if layout == "single" else ""
-        out = os.path.join(sv_dir, name + suffix + ".sv")
-        variant_to_sv(os.path.join(variant_dir, fname), audio, out,
-                      layout=layout, markers=markers)
-        written.append(out)
-        print(f"[sv] {out}")
 
-    print(f"[sv] {len(written)} sessioni in {sv_dir}")
+        for fname in sorted(os.listdir(variant_dir)):
+            if not fname.endswith(".yml"):
+                continue
+            name = fname[:-4]
+            audio = os.path.join(audio_dir, name + ".aif")
+            if not os.path.exists(audio):
+                print(f"[sv] {name}: audio mancante, salto.", file=sys.stderr)
+                continue
+            suffix = f"_{layout}" if layout == "single" else ""
+            out = os.path.join(sv_dir, name + suffix + ".sv")
+            variant_to_sv(os.path.join(variant_dir, fname), audio, out,
+                          layout=layout, markers=markers)
+            total.append(out)
+            print(f"[sv] {out}")
+
+    print(f"[sv] {len(total)} sessioni totali")
     return 0
 
 
@@ -234,6 +260,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("sweep", help="genera le varianti YAML")
     sp.add_argument("study")
+    sp.add_argument("--stream", default=None, help="genera solo questa stream (default: tutte)")
 
     rp = sub.add_parser("render", help="renderizza audio + partitura")
     rp.add_argument("study")
@@ -261,6 +288,7 @@ def build_parser() -> argparse.ArgumentParser:
                      help="multi: un pannello per parametro (default); single: tutti in un pannello")
     svp.add_argument("--no-markers", action="store_true",
                      help="non emette i marker di inizio plateau (confini degli stati)")
+    svp.add_argument("--stream", default=None, help="genera sv solo per questa stream (default: tutte)")
 
     return p
 
@@ -268,7 +296,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "sweep":
-        return cmd_sweep(args.study)
+        return cmd_sweep(args.study, args.stream)
     if args.command == "render":
         return cmd_render(args.study, args.no_score)
     if args.command == "describe":
@@ -280,7 +308,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "render-final":
         return cmd_render_final(args.study)
     if args.command == "sv":
-        return cmd_sv(args.study, args.layout, markers=not args.no_markers)
+        return cmd_sv(args.study, args.layout, markers=not args.no_markers, stream=args.stream)
     return 1
 
 

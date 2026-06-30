@@ -47,6 +47,7 @@ class StudySpec:
     plateau: float = 5.0            # secondi per plateau (ascolto stabile)
     transition: float = 5.0         # secondi per transizione tra plateau
     interpolation: str = "linear"   # linear | cubic
+    stream_id: str | None = None    # sotto-cartella per versionare gli output
 
     def axis(self, name: str) -> Axis:
         for ax in self.axes:
@@ -120,6 +121,34 @@ def _resolve_baseline(name: str, cfg: Dict[str, Any], defaults: Dict[str, Any] |
     return defaults[path]
 
 
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    result = dict(base)
+    for k, v in override.items():
+        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+            result[k] = _deep_merge(result[k], v)
+        else:
+            result[k] = v
+    return result
+
+
+def resolve_streams(data: Dict[str, Any], study_id: str | None = None) -> List["StudySpec"]:
+    """Ritorna una lista di StudySpec, uno per stream.
+
+    Se ``streams:`` è assente, ritorna un singolo spec senza stream_id.
+    """
+    sid = study_id or data.get("study_id") or "study"
+    streams = data.get("streams")
+    if not streams:
+        return [parse_study_spec(data, sid)]
+    result = []
+    for stream_id, override in streams.items():
+        merged = _deep_merge(data, override or {})
+        merged.pop("streams", None)
+        merged.setdefault("sweep", {})["stream_id"] = stream_id
+        result.append(parse_study_spec(merged, sid))
+    return result
+
+
 def parse_study_spec(data: Dict[str, Any], study_id: str | None = None) -> StudySpec:
     """Costruisce uno ``StudySpec`` da un dict gia' caricato."""
     axes_raw = data.get("axes") or {}
@@ -163,6 +192,7 @@ def parse_study_spec(data: Dict[str, Any], study_id: str | None = None) -> Study
         plateau=float(axes_raw.get("plateau", 5.0)),
         transition=float(axes_raw.get("transition", 5.0)),
         interpolation=axes_raw.get("interpolation", "linear"),
+        stream_id=sweep_cfg.get("stream_id") or None,
     )
     _validate(spec)
     return spec

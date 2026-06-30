@@ -35,10 +35,10 @@ axes:
   density:
     path: density
     baseline: 20           # obbligatorio: density non ha default engine
-    values: [5, 10, 50, 100, 200, 400, 1000]
+    values: [5, 10, 15, 20, 25, 30, 35, 50, 100, 200]
   grain_duration:
     path: grain.duration
-    values: [0.001, 0.01, 0.03, 0.05]     # baseline omesso → default engine 0.05
+    values: [0.001, 0.0025, 0.005, 0.0075, 0.01, 0.02, 0.03, 0.04, 0.05, 0.075]     
   distribution:
     path: distribution
     values: [0.0, 0.5, 1.0]       # baseline omesso → default engine 0.0
@@ -54,3 +54,34 @@ sweep:
     - [density, grain_duration, distribution]      # distribution veloce (default lessicografico)
     - [distribution, density, grain_duration]      # grain_duration veloce
     - [grain_duration, distribution, density]      # density veloce
+
+# Varianti di ascolto: ogni stream è un override parziale del documento sopra.
+# I campi omessi restano dalla base. Le liste rimpiazzano (non si concatenano).
+streams:
+  # Stream di riferimento: nessun override, identica alla base.
+  base: {}
+
+  # Grana più grossa: sposta i valori di grain_duration verso durate maggiori.
+  # Utile per sentire la texture quando i grani diventano percettibili come eventi.
+  grana_lunga:
+    axes:
+      grain_duration:
+        values: [0.05, 0.075, 0.1, 0.15, 0.2, 0.3, 0.5]
+
+  # Lettura avanzata nel sample: cambia il punto di partenza del pointer.
+  # Permette di confrontare la stessa esplorazione parametrica su un materiale diverso.
+  lettura_avanzata:
+    base:
+      pointer:
+        start: 0.7
+
+  # Alta densità con transizioni lente: esplora solo densità molto elevate,
+  # con plateau lunghi per dare tempo all'ascolto di stabilizzarsi.
+  alta_densita:
+    axes:
+      density:
+        values: [50, 75, 100, 150, 200, 300]
+      plateau: 10
+      transition: 8
+    sweep:
+      orders: [1, 2]          # salta le terzine (troppo lungo con plateau=10)
