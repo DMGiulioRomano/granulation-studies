@@ -5,6 +5,10 @@ già configurati. Layout disponibili:
   multi  — un pannello per ogni parametro (Y scale indipendenti, default)
   single — tutti gli envelope in un pannello unico sotto la waveform
 
+Con ``markers=True`` (default) aggiunge un layer ``timeinstants`` con un marker
+all'inizio di ogni plateau (confine di stato), replicato in ogni pane come linea
+verticale di riferimento e navigabile in SV con PgUp/PgDown.
+
 Formato: XML bzip2, struttura <data><model/><dataset/><layer/></data><display><view/></display>.
 """
 from __future__ import annotations
@@ -51,13 +55,33 @@ def _find_envelopes(obj: Any, prefix: str = "") -> List[Tuple[str, List, str]]:
     return []
 
 
+def _plateau_starts(envelopes: List[Tuple[str, List, str]]) -> List[float]:
+    """Tempi normalizzati (ordinati, dedup) di inizio di ogni plateau.
+
+    I breakpoint envelope arrivano in coppie ``[t_start, v], [t_end, v]`` per
+    plateau (vedi ``envelope_sweep.envelope_breakpoints``): l'inizio di ogni
+    plateau e' quindi il punto a indice pari, mentre gli indici dispari chiudono
+    il plateau prima della transizione. Non ci si puo' basare sull'uguaglianza dei
+    valori per riconoscerli, perche' plateau consecutivi possono condividere lo
+    stesso valore su un asse (es. l'asse esterno del prodotto cartesiano resta
+    fermo per piu' plateau). Gli envelope di una stessa variante condividono la
+    griglia temporale, percio' i ``t_start`` coincidono: li uniamo e dedup.
+    """
+    starts = set()
+    for _path, points, _type in envelopes:
+        for i in range(0, len(points), 2):
+            starts.add(round(float(points[i][0]), 6))
+    return sorted(starts)
+
+
 def _sample_rate(audio_path: str) -> int:
     import soundfile as sf
     return sf.info(audio_path).samplerate
 
 
 def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
-                  envelopes: List[Tuple[str, List, str]], layout: Layout) -> bytes:
+                  envelopes: List[Tuple[str, List, str]], layout: Layout,
+                  markers: bool = True) -> bytes:
     root = ET.Element("sv")
     data = ET.SubElement(root, "data")
 
@@ -111,6 +135,34 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
         })
         layer_ids.append((layer_id, model_id, path))
 
+    # Layer marker: un time instant all'inizio di ogni plateau (confini degli
+    # stati). Modello 1D sparse; etichetta = indice plateau (1-based). Viene
+    # poi referenziato in ogni pane, cosi' le linee verticali sono allineate su
+    # waveform ed envelope e la navigazione PgUp/PgDown ci salta sopra.
+    marker_ref: Tuple[str, str] | None = None
+    plateau_starts = _plateau_starts(envelopes) if markers else []
+    if plateau_starts:
+        marker_model_id = str(next_id);    next_id += 1
+        marker_dataset_id = str(next_id);  next_id += 1
+        marker_layer_id = str(next_id);    next_id += 1
+
+        ET.SubElement(data, "model", {
+            "id": marker_model_id, "name": "Plateau markers",
+            "sampleRate": str(sample_rate), "type": "sparse",
+            "dimensions": "1", "resolution": "1",
+            "notifyOnAdd": "true", "dataset": marker_dataset_id,
+        })
+        mds = ET.SubElement(data, "dataset", {"id": marker_dataset_id, "dimensions": "1"})
+        for idx, t_norm in enumerate(plateau_starts, start=1):
+            frame = str(round(t_norm * duration_sec * sample_rate))
+            ET.SubElement(mds, "point", {"frame": frame, "label": str(idx)})
+        ET.SubElement(data, "layer", {
+            "id": marker_layer_id, "type": "timeinstants", "name": "Plateau markers",
+            "model": marker_model_id, "plotStyle": "0",  # PlotInstants
+            "colourName": "White", "colour": "#ffffff", "darkBackground": "true",
+        })
+        marker_ref = (marker_layer_id, marker_model_id)
+
     # Display
     display = ET.SubElement(root, "display")
     ET.SubElement(display, "window", {"width": "1728", "height": "1057"})
@@ -131,12 +183,22 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
             "model": "0", "visible": "true",
         })
 
+    def _marker_layer(pane):
+        if marker_ref is None:
+            return
+        layer_id, model_id = marker_ref
+        ET.SubElement(pane, "layer", {
+            "id": layer_id, "type": "timeinstants", "name": "Plateau markers",
+            "model": model_id, "visible": "true",
+        })
+
     waveform_pane = _pane(display)
     _ruler_layer(waveform_pane)
     ET.SubElement(waveform_pane, "layer", {
         "id": "2", "type": "waveform", "name": "Waveform",
         "model": "0", "visible": "true",
     })
+    _marker_layer(waveform_pane)
 
     if layout == "single":
         env_pane = _pane(display)
@@ -146,6 +208,7 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
                 "id": layer_id, "type": "timevalues", "name": path,
                 "model": model_id, "visible": "true",
             })
+        _marker_layer(env_pane)
     else:  # multi
         for layer_id, model_id, path in layer_ids:
             pane = _pane(display)
@@ -154,6 +217,7 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
                 "id": layer_id, "type": "timevalues", "name": path,
                 "model": model_id, "visible": "true",
             })
+            _marker_layer(pane)
 
     ET.SubElement(root, "selections")
 
@@ -163,8 +227,13 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
 
 
 def variant_to_sv(variant_yaml_path: str, audio_path: str, out_path: str,
-                  layout: Layout = "multi") -> str:
-    """Legge un variant YAML + audio, scrive un file .sv pronto per SV."""
+                  layout: Layout = "multi", markers: bool = True) -> str:
+    """Legge un variant YAML + audio, scrive un file .sv pronto per SV.
+
+    Con ``markers=True`` (default) aggiunge un layer ``timeinstants`` con un
+    marker all'inizio di ogni plateau (confine di stato), navigabile in SV con
+    PgUp/PgDown.
+    """
     import yaml
 
     with open(variant_yaml_path, "r", encoding="utf-8") as fh:
@@ -175,7 +244,8 @@ def variant_to_sv(variant_yaml_path: str, audio_path: str, out_path: str,
     envelopes = _find_envelopes(streams[0]) if streams else []
 
     sr = _sample_rate(audio_path)
-    compressed = _build_sv_xml(os.path.abspath(audio_path), sr, duration, envelopes, layout)
+    compressed = _build_sv_xml(os.path.abspath(audio_path), sr, duration,
+                               envelopes, layout, markers=markers)
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     with open(out_path, "wb") as fh:

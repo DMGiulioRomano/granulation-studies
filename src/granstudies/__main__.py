@@ -177,7 +177,7 @@ def cmd_compose(study: str, seed: int | None, steps: int | None, start: str | No
     return 0
 
 
-def cmd_sv(study: str, layout: str) -> int:
+def cmd_sv(study: str, layout: str, markers: bool = True) -> int:
     from .sv_export import variant_to_sv
 
     g = gen_dir(study)
@@ -203,7 +203,8 @@ def cmd_sv(study: str, layout: str) -> int:
             continue
         suffix = f"_{layout}" if layout == "single" else ""
         out = os.path.join(sv_dir, name + suffix + ".sv")
-        variant_to_sv(os.path.join(variant_dir, fname), audio, out, layout=layout)
+        variant_to_sv(os.path.join(variant_dir, fname), audio, out,
+                      layout=layout, markers=markers)
         written.append(out)
         print(f"[sv] {out}")
 
@@ -258,6 +259,8 @@ def build_parser() -> argparse.ArgumentParser:
     svp.add_argument("study")
     svp.add_argument("--layout", choices=["multi", "single"], default="multi",
                      help="multi: un pannello per parametro (default); single: tutti in un pannello")
+    svp.add_argument("--no-markers", action="store_true",
+                     help="non emette i marker di inizio plateau (confini degli stati)")
 
     return p
 
@@ -277,7 +280,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "render-final":
         return cmd_render_final(args.study)
     if args.command == "sv":
-        return cmd_sv(args.study, args.layout)
+        return cmd_sv(args.study, args.layout, markers=not args.no_markers)
     return 1
 
 
