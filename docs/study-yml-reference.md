@@ -41,8 +41,9 @@ axes:                             # * almeno un asse
 sweep:
   mode: envelope                 # discrete | envelope | both (default discrete)
   orders: [1, 2, 3]             # ordini da generare: 1=OAT, 2=coppie, 3=terzine…
-  orderings:                     # permutazioni esplicite per l'ordine 3 (opzionale)
-    - [density, grain_duration, distribution]   # primo = asse lento, ultimo = veloce
+  orderings:                     # permutazioni esplicite (funziona per e2, e3, qualsiasi ordine)
+    - [density, grain_duration]                # primo = asse lento (outer), ultimo = veloce (inner)
+    - [grain_duration, density]                # stessa coppia, ordine invertito
 
 # Stream: varianti di ascolto con override parziali sul documento sopra.
 # Regole del merge: i dict si fondono ricorsivamente, le liste rimpiazzano.
@@ -65,11 +66,14 @@ streams:
 
 ## Output con `streams:`
 
+Il nome della stream è incorporato nel basename dei file generati (non solo
+nella sotto-cartella) per facilitare l'identificazione in Sonic Visualiser.
+
 ```
 generated/<study_id>/
   variants/envelope/<stream_id>/e1__density.yml
-  audio/envelope/<stream_id>/e1__density.aif
-  sv/envelope/<stream_id>/e1__density.sv
+  audio/envelope/<stream_id>/<stream_id>_e1__density.aif
+  sv/envelope/<stream_id>/<stream_id>_e1__density.sv
 ```
 
 ## Comandi Make
@@ -81,3 +85,16 @@ make render STUDY=<id>                    # renderizza tutto (ricorsivo, tutte l
 make sv     STUDY=<id>                    # genera .sv per tutte le stream
 make sv     STUDY=<id> STREAM=nome        # genera .sv per una stream
 ```
+
+### Flag del comando `sv`
+
+| Flag | Valori | Default | Descrizione |
+|------|--------|---------|-------------|
+| `--layout` | `multi`, `single` | `multi` | `multi`: un pannello per asse; `single`: tutti in un pannello |
+| `--markers-scope` | `waveform`, `all` | `waveform` | Dove appaiono i marker di plateau: solo nel pane waveform o in ogni pane |
+| `--no-markers` | — | — | Disabilita completamente i marker di plateau |
+| `--stream` | nome stream | tutte | Genera `.sv` solo per la stream indicata |
+
+Il pane waveform di ogni sessione `.sv` include automaticamente uno strato
+spectrogram (finestra 8192, overlap 75%, White on Black, scala logaritmica)
+sovrapposto alla forma d'onda.
