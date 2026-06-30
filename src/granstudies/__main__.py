@@ -223,7 +223,6 @@ def cmd_render_final(study: str) -> int:
     audio = os.path.join(g, "final.aif")
     sdir = samples_dir(spec.samples_dir)
     engine_bridge.render(final_yaml, audio, samples_dir=sdir)
-    engine_bridge.score_pdf(final_yaml, os.path.join(g, "final.pdf"), samples_dir=sdir)
     print(f"[render-final] {audio}")
     return 0
 

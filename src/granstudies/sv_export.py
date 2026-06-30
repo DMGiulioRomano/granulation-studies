@@ -14,7 +14,16 @@ import os
 import xml.etree.ElementTree as ET
 from typing import Any, List, Literal, Tuple
 
-_PLOT_STYLE = "3"  # Lines: segmenti retti tra breakpoint
+# Plot style per tipo di interpolazione dell'envelope.
+# I valori sono gli interi dell'enum PlotStyle di TimeValueLayer (svgui),
+# serializzati come stringa nell'attributo plotStyle del layer.
+#   "3" = PlotLines        -> spezzata di segmenti retti tra i breakpoint
+#   "7" = PlotCubicHermite -> curva cubica monotona (Fritsch-Carlson)
+_PLOT_STYLE_BY_TYPE = {
+    "linear": "3",
+    "cubic": "7",
+}
+_PLOT_STYLE_DEFAULT = "3"  # fallback prudente: segmenti retti
 
 _COLOURS = [
     ("#ff8800", "Orange"),
@@ -30,11 +39,11 @@ Layout = Literal["multi", "single"]
 _ENVELOPE_TYPES = {"linear", "cubic"}
 
 
-def _find_envelopes(obj: Any, prefix: str = "") -> List[Tuple[str, List]]:
-    """Walk ricorsivo: [(path_dotted, points)] per ogni envelope (linear o cubic)."""
+def _find_envelopes(obj: Any, prefix: str = "") -> List[Tuple[str, List, str]]:
+    """Walk ricorsivo: [(path_dotted, points, type)] per ogni envelope (linear o cubic)."""
     if isinstance(obj, dict):
         if obj.get("type") in _ENVELOPE_TYPES and "points" in obj:
-            return [(prefix.lstrip("."), obj["points"])]
+            return [(prefix.lstrip("."), obj["points"], obj["type"])]
         results = []
         for k, v in obj.items():
             results.extend(_find_envelopes(v, f"{prefix}.{k}"))
@@ -48,7 +57,7 @@ def _sample_rate(audio_path: str) -> int:
 
 
 def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
-                  envelopes: List[Tuple[str, List]], layout: Layout) -> bytes:
+                  envelopes: List[Tuple[str, List, str]], layout: Layout) -> bytes:
     root = ET.Element("sv")
     data = ET.SubElement(root, "data")
 
@@ -77,7 +86,7 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
     # Modelli + dataset + layer per ogni envelope
     layer_ids: List[Tuple[str, str, str]] = []  # (layer_id, model_id, path)
     next_id = 3
-    for i, (path, points) in enumerate(envelopes):
+    for i, (path, points, env_type) in enumerate(envelopes):
         model_id = str(next_id);    next_id += 1
         dataset_id = str(next_id);  next_id += 1
         layer_id = str(next_id);    next_id += 1
@@ -94,9 +103,10 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
             ET.SubElement(ds, "point", {"frame": frame, "value": str(value), "label": ""})
 
         colour, colour_name = _COLOURS[i % len(_COLOURS)]
+        plot_style = _PLOT_STYLE_BY_TYPE.get(env_type, _PLOT_STYLE_DEFAULT)
         ET.SubElement(data, "layer", {
             "id": layer_id, "type": "timevalues", "name": path, "model": model_id,
-            "plotStyle": _PLOT_STYLE, "verticalScale": "0",
+            "plotStyle": plot_style, "verticalScale": "0",
             "colourName": colour_name, "colour": colour, "darkBackground": "true",
         })
         layer_ids.append((layer_id, model_id, path))
