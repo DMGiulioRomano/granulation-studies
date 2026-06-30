@@ -47,7 +47,8 @@ def _envelopes():
 
 def test_markers_emitted_in_data_and_every_pane():
     sr, duration = 1000, 25.0  # 3*5 + 2*5; frame = t_norm * duration * sr
-    xml = _parse(_build_sv_xml("/x.wav", sr, duration, _envelopes(), "multi"))
+    xml = _parse(_build_sv_xml("/x.wav", sr, duration, _envelopes(), "multi",
+                               markers_scope="all"))
 
     inst_models = [m for m in xml.findall("./data/model") if m.get("dimensions") == "1"]
     assert len(inst_models) == 1
@@ -68,12 +69,44 @@ def test_markers_emitted_in_data_and_every_pane():
     assert len(data_layer) == 1
     marker_id = data_layer[0].get("id")
 
-    # Referenziato in ogni pane (waveform + un pane per envelope = 2 pane).
+    # scope=all: marker in ogni pane (waveform + un pane envelope = 2 pane).
     panes = xml.findall("./display/view")
     assert len(panes) == 2
     for pane in panes:
         ids = [l.get("id") for l in pane.findall("layer") if l.get("type") == "timeinstants"]
         assert ids == [marker_id]
+
+
+def test_markers_scope_waveform():
+    # Default: marker solo nel pane waveform (primo), non nei pane envelope.
+    xml = _parse(_build_sv_xml("/x.wav", 1000, 25.0, _envelopes(), "multi"))
+    data_layer = [l for l in xml.findall("./data/layer") if l.get("type") == "timeinstants"]
+    assert len(data_layer) == 1
+    marker_id = data_layer[0].get("id")
+
+    panes = xml.findall("./display/view")
+    assert len(panes) == 2
+    waveform_ids = [l.get("id") for l in panes[0].findall("layer") if l.get("type") == "timeinstants"]
+    envelope_ids = [l.get("id") for l in panes[1].findall("layer") if l.get("type") == "timeinstants"]
+    assert waveform_ids == [marker_id]
+    assert envelope_ids == []
+
+
+def test_spectrogram_in_waveform_pane():
+    xml = _parse(_build_sv_xml("/x.wav", 1000, 25.0, _envelopes(), "multi"))
+    # Layer spectrogram definito in data
+    spec_layers = [l for l in xml.findall("./data/layer") if l.get("type") == "spectrogram"]
+    assert len(spec_layers) == 1
+    sl = spec_layers[0]
+    assert sl.get("windowSize") == "8192"
+    assert sl.get("windowHopSize") == "2048"
+    assert sl.get("colourScheme") == "1"
+    assert sl.get("channel") == "-1"
+
+    # Presente nel pane waveform (primo pane)
+    waveform_pane = xml.findall("./display/view")[0]
+    pane_spec = [l for l in waveform_pane.findall("layer") if l.get("type") == "spectrogram"]
+    assert len(pane_spec) == 1
 
 
 def test_markers_disabled():

@@ -81,7 +81,8 @@ def _sample_rate(audio_path: str) -> int:
 
 def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
                   envelopes: List[Tuple[str, List, str]], layout: Layout,
-                  markers: bool = True) -> bytes:
+                  markers: bool = True,
+                  markers_scope: Literal["all", "waveform"] = "waveform") -> bytes:
     root = ET.Element("sv")
     data = ET.SubElement(root, "data")
 
@@ -106,10 +107,23 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
         "aggressive": "0", "autoNormalize": "0", "oversampling": "1",
         "colourName": "Bright Blue", "colour": "#1e96ff", "darkBackground": "true",
     })
+    # Spectrogram: finestra 8192, overlap 75% (hop=2048), tutti i canali mixati,
+    # colore White on Black, scala logaritmica in frequenza.
+    ET.SubElement(data, "layer", {
+        "id": "3", "type": "spectrogram", "name": "Spectrogram", "model": "0",
+        "channel": "-1",
+        "windowSize": "8192", "windowHopSize": "2048",
+        "colourScheme": "1", "colourRotation": "0",
+        "gain": "1", "threshold": "-80",
+        "minFrequency": "0", "maxFrequency": "0",
+        "frequencyScale": "1", "binDisplay": "0",
+        "normalizeColumns": "0", "normalizeVisibleArea": "0",
+        "darkBackground": "true",
+    })
 
     # Modelli + dataset + layer per ogni envelope
     layer_ids: List[Tuple[str, str, str]] = []  # (layer_id, model_id, path)
-    next_id = 3
+    next_id = 4
     for i, (path, points, env_type) in enumerate(envelopes):
         model_id = str(next_id);    next_id += 1
         dataset_id = str(next_id);  next_id += 1
@@ -190,8 +204,10 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
             "model": "0", "visible": "true",
         })
 
-    def _marker_layer(pane):
+    def _marker_layer(pane, *, waveform_pane: bool = False):
         if marker_ref is None:
+            return
+        if markers_scope == "waveform" and not waveform_pane:
             return
         layer_id, model_id = marker_ref
         ET.SubElement(pane, "layer", {
@@ -202,10 +218,14 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
     waveform_pane = _pane(display)
     _ruler_layer(waveform_pane)
     ET.SubElement(waveform_pane, "layer", {
+        "id": "3", "type": "spectrogram", "name": "Spectrogram",
+        "model": "0", "visible": "true",
+    })
+    ET.SubElement(waveform_pane, "layer", {
         "id": "2", "type": "waveform", "name": "Waveform",
         "model": "0", "visible": "true",
     })
-    _marker_layer(waveform_pane)
+    _marker_layer(waveform_pane, waveform_pane=True)
 
     if layout == "single":
         env_pane = _pane(display)
@@ -234,12 +254,14 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
 
 
 def variant_to_sv(variant_yaml_path: str, audio_path: str, out_path: str,
-                  layout: Layout = "multi", markers: bool = True) -> str:
+                  layout: Layout = "multi", markers: bool = True,
+                  markers_scope: Literal["all", "waveform"] = "waveform") -> str:
     """Legge un variant YAML + audio, scrive un file .sv pronto per SV.
 
     Con ``markers=True`` (default) aggiunge un layer ``timeinstants`` con un
-    marker all'inizio di ogni plateau (confine di stato), navigabile in SV con
-    PgUp/PgDown.
+    marker all'inizio di ogni plateau. ``markers_scope`` controlla in quali
+    pane appaiono: ``"all"`` (default) li replica in ogni pane, ``"waveform"``
+    li mostra solo nel pane della forma d'onda.
     """
     import yaml
 
@@ -252,7 +274,8 @@ def variant_to_sv(variant_yaml_path: str, audio_path: str, out_path: str,
 
     sr = _sample_rate(audio_path)
     compressed = _build_sv_xml(os.path.abspath(audio_path), sr, duration,
-                               envelopes, layout, markers=markers)
+                               envelopes, layout, markers=markers,
+                               markers_scope=markers_scope)
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     with open(out_path, "wb") as fh:

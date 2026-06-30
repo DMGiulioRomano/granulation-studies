@@ -198,7 +198,8 @@ def cmd_compose(study: str, seed: int | None, steps: int | None, start: str | No
     return 0
 
 
-def cmd_sv(study: str, layout: str, markers: bool = True, stream: str | None = None) -> int:
+def cmd_sv(study: str, layout: str, markers: bool = True, stream: str | None = None,
+           markers_scope: str = "all") -> int:
     from .sv_export import variant_to_sv
 
     specs = _load_specs(study, stream)
@@ -222,15 +223,17 @@ def cmd_sv(study: str, layout: str, markers: bool = True, stream: str | None = N
         for fname in sorted(os.listdir(variant_dir)):
             if not fname.endswith(".yml"):
                 continue
-            name = fname[:-4]
-            audio = os.path.join(audio_dir, name + ".aif")
+            variant_name = fname[:-4]
+            # Il basename include il nome dello stream per distinguere i file in SV.
+            basename = f"{sub}_{variant_name}" if sub else variant_name
+            audio = os.path.join(audio_dir, basename + ".aif")
             if not os.path.exists(audio):
-                print(f"[sv] {name}: audio mancante, salto.", file=sys.stderr)
+                print(f"[sv] {basename}: audio mancante, salto.", file=sys.stderr)
                 continue
             suffix = f"_{layout}" if layout == "single" else ""
-            out = os.path.join(sv_dir, name + suffix + ".sv")
+            out = os.path.join(sv_dir, basename + suffix + ".sv")
             variant_to_sv(os.path.join(variant_dir, fname), audio, out,
-                          layout=layout, markers=markers)
+                          layout=layout, markers=markers, markers_scope=markers_scope)
             total.append(out)
             print(f"[sv] {out}")
 
@@ -288,6 +291,8 @@ def build_parser() -> argparse.ArgumentParser:
                      help="multi: un pannello per parametro (default); single: tutti in un pannello")
     svp.add_argument("--no-markers", action="store_true",
                      help="non emette i marker di inizio plateau (confini degli stati)")
+    svp.add_argument("--markers-scope", choices=["all", "waveform"], default="waveform",
+                     help="waveform: marker solo nel pane della forma d'onda (default); all: marker in ogni pane")
     svp.add_argument("--stream", default=None, help="genera sv solo per questa stream (default: tutte)")
 
     return p
@@ -308,7 +313,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "render-final":
         return cmd_render_final(args.study)
     if args.command == "sv":
-        return cmd_sv(args.study, args.layout, markers=not args.no_markers, stream=args.stream)
+        return cmd_sv(args.study, args.layout, markers=not args.no_markers, stream=args.stream,
+                      markers_scope=args.markers_scope)
     return 1
 
 

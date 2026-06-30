@@ -138,7 +138,14 @@ def render_variants(
     for yaml_path in yaml_files:
         rel = os.path.relpath(yaml_path, variant_dir)
         name = os.path.splitext(rel)[0]
-        audio_path = os.path.join(audio_dir, f"{name}.aif")
+        # Se il path ha 3 componenti (mode/stream_id/variant), aggiungo
+        # il nome dello stream al basename per distinguerli in SV.
+        parts = name.split(os.sep)
+        if len(parts) >= 3:
+            audio_basename = f"{parts[-2]}_{parts[-1]}"
+        else:
+            audio_basename = parts[-1]
+        audio_path = os.path.join(audio_dir, *parts[:-1], audio_basename + ".aif")
         os.makedirs(os.path.dirname(os.path.abspath(audio_path)), exist_ok=True)
 
         generated = engine_bridge.render(

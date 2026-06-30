@@ -39,21 +39,26 @@ axes:
   grain_duration:
     path: grain.duration
     values: [0.001, 0.0025, 0.005, 0.0075, 0.01, 0.02, 0.03, 0.04, 0.05, 0.075]     
-  distribution:
-    path: distribution
-    values: [0.0, 0.5, 1.0]       # baseline omesso → default engine 0.0
+  #distribution:
+  #  path: distribution
+  #  values: [0.0, 0.5, 1.0]       # baseline omesso → default engine 0.0
 
 sweep:
   # envelope | discrete | both. 1=OAT, 2=coppie, 3=terzine, 4=fattoriale completo.
   mode: envelope
-  orders: [1, 2, 3]
-  # Permutazioni esplicite di e3: ciascuna sceglie un asse diverso come "lento"
-  # (asse esterno del prodotto cartesiano). Il primo nome nell'ordinamento è
-  # l'asse che cambia meno (outer loop); l'ultimo cambia più spesso (inner loop).
-  orderings:
-    - [density, grain_duration, distribution]      # distribution veloce (default lessicografico)
-    - [distribution, density, grain_duration]      # grain_duration veloce
-    - [grain_duration, distribution, density]      # density veloce
+  #orders: [1, 2, 3]
+  # Permutazioni esplicite (funziona per e2, e3, qualsiasi ordine): ciascuna
+  # sceglie quale asse è "lento" (outer loop) e quale "veloce" (inner loop).
+  # Il primo nome è l'asse che cambia meno; l'ultimo cambia più spesso.
+  # Esempio per e2 con 2 assi:
+  #orderings:
+  #  - [density, grain_duration]      # density lento, grain_duration veloce
+  #  - [grain_duration, density]      # grain_duration lento, density veloce
+  # Esempio per e3 con 3 assi:
+  #orderings:
+  #  - [density, grain_duration, distribution]      # distribution veloce
+  #  - [distribution, density, grain_duration]      # grain_duration veloce
+  #  - [grain_duration, distribution, density]      # density veloce
 
 # Varianti di ascolto: ogni stream è un override parziale del documento sopra.
 # I campi omessi restano dalla base. Le liste rimpiazzano (non si concatenano).
@@ -73,15 +78,20 @@ streams:
   lettura_avanzata:
     base:
       pointer:
-        start: 0.7
+        start: 0
+
+  lettura_avanzata_2:
+    base:
+      pointer:
+        start: 0.6
 
   # Alta densità con transizioni lente: esplora solo densità molto elevate,
   # con plateau lunghi per dare tempo all'ascolto di stabilizzarsi.
   alta_densita:
     axes:
       density:
-        values: [50, 75, 100, 150, 200, 300]
+        values: [100, 150, 200, 300]
       plateau: 10
       transition: 8
     sweep:
-      orders: [1, 2]          # salta le terzine (troppo lungo con plateau=10)
+      orders: [1, 2]          
