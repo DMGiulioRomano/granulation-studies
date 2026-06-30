@@ -17,20 +17,18 @@ samples_dir: samples
 base:
   onset: 0
   duration: 6          # usato solo dalle varianti discrete (mode: discrete | both)
-  sample: corpus.wav
+  sample: white_noise.wav
   time_mode: normalized
   grain:
     envelope: hanning
   volume: -6
-  pointer:
-    speed: 0
-    start: .3
 # Gli assi: path YAML e valori di test. `baseline` (valore a riposo quando l'asse
 # non è mosso) è opzionale: se omesso si risolve dal default engine via `path`.
 # `plateau`/`transition` (secondi) governano il timing degli envelope.
 axes:
   plateau: 5
   transition: 5
+  interpolation: cubic
   density:
     path: density
     baseline: 20           # obbligatorio: density non ha default engine
