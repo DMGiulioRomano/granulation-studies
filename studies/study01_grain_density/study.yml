@@ -51,6 +51,6 @@ sweep:
   # (asse esterno del prodotto cartesiano). Il primo nome nell'ordinamento è
   # l'asse che cambia meno (outer loop); l'ultimo cambia più spesso (inner loop).
   orderings:
-    - [density, grain_duration, distribution]      # density lento  (default lexicografico)
-    - [grain_duration, density, distribution]      # grain_duration lento, density veloce
-    - [distribution, density, grain_duration]      # distribution lento, density veloce
+    - [density, grain_duration, distribution]      # distribution veloce (default lessicografico)
+    - [distribution, density, grain_duration]      # grain_duration veloce
+    - [grain_duration, distribution, density]      # density veloce
