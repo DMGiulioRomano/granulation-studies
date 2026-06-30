@@ -58,6 +58,12 @@ def test_markers_emitted_in_data_and_every_pane():
     assert [p.get("frame") for p in pts] == ["0", "10000", "20000"]
     assert [p.get("label") for p in pts] == ["1", "2", "3"]  # plateau 1-based
 
+    # Il modello marker dev'essere mutato, altrimenti SV suona un click a
+    # ogni instant durante il playback.
+    pp = [p for p in xml.findall("./data/playparameters")
+          if p.get("model") == inst_models[0].get("id")]
+    assert len(pp) == 1 and pp[0].get("mute") == "true"
+
     data_layer = [l for l in xml.findall("./data/layer") if l.get("type") == "timeinstants"]
     assert len(data_layer) == 1
     marker_id = data_layer[0].get("id")

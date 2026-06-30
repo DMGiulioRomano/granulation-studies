@@ -152,6 +152,13 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
             "dimensions": "1", "resolution": "1",
             "notifyOnAdd": "true", "dataset": marker_dataset_id,
         })
+        # Mute esplicito: un modello sparse e' audibile di default e SV
+        # sintetizza un click percussivo a ogni instant durante il playback.
+        # Senza questo, ogni marker produrrebbe un "click" udibile.
+        ET.SubElement(data, "playparameters", {
+            "mute": "true", "pan": "0", "gain": "1",
+            "clipId": "", "model": marker_model_id,
+        })
         mds = ET.SubElement(data, "dataset", {"id": marker_dataset_id, "dimensions": "1"})
         for idx, t_norm in enumerate(plateau_starts, start=1):
             frame = str(round(t_norm * duration_sec * sample_rate))
