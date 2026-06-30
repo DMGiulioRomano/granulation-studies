@@ -17,11 +17,14 @@ samples_dir: samples
 base:
   onset: 0
   duration: 6          # usato solo dalle varianti discrete (mode: discrete | both)
-  sample: white_noise.wav
+  sample: corpus.wav
   time_mode: normalized
   grain:
     envelope: hanning
   volume: -6
+  pointer:
+    speed_ratio: 0
+    start: .3
 # Gli assi: path YAML e valori di test. `baseline` (valore a riposo quando l'asse
 # non è mosso) è opzionale: se omesso si risolve dal default engine via `path`.
 # `plateau`/`transition` (secondi) governano il timing degli envelope.
@@ -44,3 +47,10 @@ sweep:
   # envelope | discrete | both. 1=OAT, 2=coppie, 3=terzine, 4=fattoriale completo.
   mode: envelope
   orders: [1, 2, 3]
+  # Permutazioni esplicite di e3: ciascuna sceglie un asse diverso come "lento"
+  # (asse esterno del prodotto cartesiano). Il primo nome nell'ordinamento è
+  # l'asse che cambia meno (outer loop); l'ultimo cambia più spesso (inner loop).
+  orderings:
+    - [density, grain_duration, distribution]      # density lento  (default lexicografico)
+    - [grain_duration, density, distribution]      # grain_duration lento, density veloce
+    - [distribution, density, grain_duration]      # distribution lento, density veloce

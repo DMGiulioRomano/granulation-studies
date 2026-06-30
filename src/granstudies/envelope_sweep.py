@@ -134,11 +134,30 @@ def generate_envelope_variants(spec: StudySpec) -> List[EnvelopeVariant]:
     le baseline) non produce envelope (nessun asse mosso).
     """
     variants: List[EnvelopeVariant] = []
+
+    # Orderings espliciti: generano varianti indipendentemente da orders.
+    explicit_keys: set = set()
+    for ordering in spec.orderings:
+        axes_ordered = [spec.axis(n) for n in ordering]
+        moved = [ax.name for ax in axes_ordered]
+        key = tuple(moved)
+        explicit_keys.add(key)
+        variants.append(
+            EnvelopeVariant(
+                name=_name(len(moved), moved),
+                order=len(moved),
+                moved=moved,
+                combinations=cartesian_combinations(axes_ordered),
+            )
+        )
+
     for order in sorted(set(spec.orders)):
         if order <= 0:
             continue
         for combo in itertools.combinations(spec.axes, order):
             moved = [ax.name for ax in combo]
+            if tuple(moved) in explicit_keys:
+                continue  # ponytail: già emessa come ordering esplicito
             combinations = cartesian_combinations(list(combo))
             variants.append(
                 EnvelopeVariant(

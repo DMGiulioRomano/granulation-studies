@@ -171,3 +171,54 @@ def test_overrides_o1_only_one_envelope():
     assert isinstance(ov["density"], list)
     assert ov["grain.duration"] == 0.05      # fermo al baseline
     assert ov["pan"] == 0.0
+
+
+# --- orderings espliciti -------------------------------------------------------
+
+def _spec_orderings(orderings):
+    return parse_study_spec({
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {
+            "plateau": 5, "transition": 5,
+            "density": {"path": "density", "baseline": 20, "values": [5, 50, 400]},
+            "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05, 0.2]},
+            "pan": {"path": "pan", "baseline": 0.0, "values": [-1.0, 0.0, 1.0]},
+        },
+        "sweep": {"mode": "envelope", "orders": [3], "orderings": orderings},
+    })
+
+
+def test_orderings_produce_correct_names():
+    spec = _spec_orderings([
+        ["density", "grain_duration", "pan"],
+        ["grain_duration", "density", "pan"],
+    ])
+    variants = generate_envelope_variants(spec)
+    names = [v.name for v in variants]
+    assert "e3__density__grain_duration__pan" in names
+    assert "e3__grain_duration__density__pan" in names
+
+
+def test_orderings_outer_axis_is_slowest():
+    # Con [grain_duration, density, pan]: grain_duration è outer -> la sua sequenza
+    # nei plateau ripete ogni len(density)*len(pan) = 9 passi.
+    spec = _spec_orderings([["grain_duration", "density", "pan"]])
+    v = generate_envelope_variants(spec)[0]
+    ov = v.overrides(spec)
+    gd_seq = [ov["grain.duration"][i][1] for i in range(0, len(ov["grain.duration"]), 2)]
+    # outer axis: blocchi da 9 con lo stesso valore
+    assert gd_seq[:9] == [0.01] * 9
+    assert gd_seq[9:18] == [0.05] * 9
+    density_seq = [ov["density"][i][1] for i in range(0, len(ov["density"]), 2)]
+    # middle axis: blocchi da 3 (pan è inner, cicla più veloce)
+    assert density_seq[:3] == [5, 5, 5]
+    assert density_seq[3:6] == [50, 50, 50]
+
+
+def test_orderings_no_duplicate_with_combinations():
+    # Se un ordering coincide con la combinazione lessicografica, non deve comparire due volte.
+    spec = _spec_orderings([["density", "grain_duration", "pan"]])
+    variants = generate_envelope_variants(spec)
+    names = [v.name for v in variants]
+    assert names.count("e3__density__grain_duration__pan") == 1

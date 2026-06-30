@@ -42,6 +42,7 @@ class StudySpec:
     base: Dict[str, Any]
     axes: List[Axis]
     orders: List[int]
+    orderings: List[List[str]] = field(default_factory=list)
     mode: str = "discrete"          # discrete | envelope | both
     plateau: float = 5.0            # secondi per plateau (ascolto stabile)
     transition: float = 5.0         # secondi per transizione tra plateau
@@ -64,6 +65,14 @@ def _validate(spec: StudySpec) -> None:
                 f"order {order} fuori range: con {n} assi gli ordini validi "
                 f"sono 0..{n}."
             )
+    axis_names = {ax.name for ax in spec.axes}
+    for ordering in spec.orderings:
+        unknown = set(ordering) - axis_names
+        if unknown:
+            raise ValueError(f"orderings: assi sconosciuti {sorted(unknown)}")
+        dupes = [n for n in ordering if ordering.count(n) > 1]
+        if dupes:
+            raise ValueError(f"orderings: assi duplicati {sorted(set(dupes))}")
     seen = set()
     for ax in spec.axes:
         if ax.name in seen:
@@ -139,6 +148,7 @@ def parse_study_spec(data: Dict[str, Any], study_id: str | None = None) -> Study
         )
     sweep_cfg = data.get("sweep") or {}
     orders = list(sweep_cfg.get("orders", list(range(1, len(axes) + 1))))
+    orderings = [list(o) for o in sweep_cfg.get("orderings", [])]
     spec = StudySpec(
         study_id=study_id or data.get("study_id") or "study",
         title=data.get("title"),
@@ -148,6 +158,7 @@ def parse_study_spec(data: Dict[str, Any], study_id: str | None = None) -> Study
         base=dict(data.get("base") or {}),
         axes=axes,
         orders=orders,
+        orderings=orderings,
         mode=sweep_cfg.get("mode", "discrete"),
         plateau=float(axes_raw.get("plateau", 5.0)),
         transition=float(axes_raw.get("transition", 5.0)),
