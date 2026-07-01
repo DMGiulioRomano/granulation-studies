@@ -39,9 +39,9 @@ axes:
   grain_duration:
     path: grain.duration
     values: [0.001, 0.0025, 0.005, 0.0075, 0.01, 0.02, 0.03, 0.04, 0.05, 0.075]     
-  #distribution:
-  #  path: distribution
-  #  values: [0.0, 0.5, 1.0]       # baseline omesso → default engine 0.0
+  distribution:
+    path: distribution
+    values: [0.0, 0.5, 1.0]       # baseline omesso → default engine 0.0
 
 sweep:
   # envelope | discrete | both. 1=OAT, 2=coppie, 3=terzine, 4=fattoriale completo.
@@ -71,7 +71,7 @@ streams:
   grana_lunga:
     axes:
       grain_duration:
-        values: [0.05, 0.075, 0.1, 0.15, 0.2, 0.3, 0.5]
+        values: [0.1, 0.15, 0.2, 0.3, 0.5]
 
   # Lettura avanzata nel sample: cambia il punto di partenza del pointer.
   # Permette di confrontare la stessa esplorazione parametrica su un materiale diverso.
@@ -83,6 +83,7 @@ streams:
   lettura_avanzata_2:
     base:
       pointer:
+        speed_ratio: .06
         start: 0.6
 
   # Alta densità con transizioni lente: esplora solo densità molto elevate,

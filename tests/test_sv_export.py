@@ -99,8 +99,9 @@ def test_spectrogram_in_waveform_pane():
     assert len(spec_layers) == 1
     sl = spec_layers[0]
     assert sl.get("windowSize") == "8192"
-    assert sl.get("windowHopSize") == "2048"
-    assert sl.get("colourScheme") == "1"
+    assert sl.get("windowHopLevel") == "3"
+    assert sl.get("colourScheme") == "2"
+    assert sl.get("frequencyScale") == "0"
     assert sl.get("channel") == "-1"
 
     # Presente nel pane waveform (primo pane)

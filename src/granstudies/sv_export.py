@@ -107,16 +107,17 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
         "aggressive": "0", "autoNormalize": "0", "oversampling": "1",
         "colourName": "Bright Blue", "colour": "#1e96ff", "darkBackground": "true",
     })
-    # Spectrogram: finestra 8192, overlap 75% (hop=2048), tutti i canali mixati,
-    # colore White on Black, scala logaritmica in frequenza.
+    # Spectrogram: finestra 8192, overlap 75% (windowHopLevel=3), tutti i canali
+    # mixati, colore White on Black (colourScheme=2 in ColourMapper.cpp), scala
+    # lineare in frequenza (frequencyScale=0).
     ET.SubElement(data, "layer", {
         "id": "3", "type": "spectrogram", "name": "Spectrogram", "model": "0",
         "channel": "-1",
-        "windowSize": "8192", "windowHopSize": "2048",
-        "colourScheme": "1", "colourRotation": "0",
+        "windowSize": "8192", "windowHopLevel": "3",
+        "colourScheme": "2", "colourRotation": "0",
         "gain": "1", "threshold": "-80",
         "minFrequency": "0", "maxFrequency": "0",
-        "frequencyScale": "1", "binDisplay": "0",
+        "frequencyScale": "0", "binDisplay": "0",
         "normalizeColumns": "0", "normalizeVisibleArea": "0",
         "darkBackground": "true",
     })
