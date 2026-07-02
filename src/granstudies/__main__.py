@@ -68,10 +68,10 @@ def cmd_sweep(study: str, stream: str | None = None) -> int:
     if not specs:
         return 1
     out = os.path.join(gen_dir(study), "variants")
-    total = 0
+    written_all: set[str] = set()
     for spec in specs:
         written = write_variants(spec, out)
-        total += len(written)
+        written_all.update(written)
         label = f" [{spec.stream_id}]" if spec.stream_id else ""
         n_disc = sum(1 for p in written if (os.sep + "discrete" + os.sep) in p)
         n_env = sum(1 for p in written if (os.sep + "envelope" + os.sep) in p)
@@ -81,10 +81,47 @@ def cmd_sweep(study: str, stream: str | None = None) -> int:
             print(f"[sweep]{label} {n_env} varianti envelope")
         if not written:
             print(f"[sweep]{label} nessuna variante generata (mode={spec.mode})")
+    _warn_orphans(out, written_all, scoped=stream is not None)
     return 0
 
 
-def cmd_render(study: str, no_score: bool) -> int:
+def _warn_orphans(variants_dir: str, written: set[str], scoped: bool) -> None:
+    """Segnala gli YAML in ``variants_dir`` non prodotti da questo sweep.
+
+    Sono varianti di assi/stream rimossi da study.yml: senza avviso resterebbero
+    li' per sempre (il render incrementale le salta e basta). Con ``scoped``
+    (sweep di una sola stream) il controllo resta nelle cartelle toccate, per
+    non flaggare le stream non rigenerate. Solo avviso, nessuna cancellazione.
+    """
+    if scoped:
+        candidates = {os.path.dirname(p) for p in written}
+    else:
+        candidates = {variants_dir}
+    orphans = []
+    for base in candidates:
+        for root, _, files in os.walk(base):
+            for fname in files:
+                if fname.endswith((".yml", ".yaml")):
+                    path = os.path.join(root, fname)
+                    if path not in written:
+                        orphans.append(path)
+    if orphans:
+        print(
+            f"[sweep] ATTENZIONE: {len(orphans)} varianti orfane "
+            "(non piu' generate da study.yml):",
+            file=sys.stderr,
+        )
+        for path in sorted(orphans):
+            print(f"  {path}", file=sys.stderr)
+        print(
+            "  Rimuovile a mano (con i relativi audio) se non servono piu'.",
+            file=sys.stderr,
+        )
+
+
+def cmd_render(
+    study: str, no_score: bool, force: bool = False, jobs: int | None = None
+) -> int:
     from .render import render_variants
 
     spec = _load_spec(study)
@@ -98,8 +135,12 @@ def cmd_render(study: str, no_score: bool) -> int:
         audio_dir=os.path.join(g, "audio"),
         score_dir=None if no_score else os.path.join(g, "score"),
         samples_dir=samples_dir(spec.samples_dir),
+        force=force,
+        jobs=jobs,
     )
-    print(f"[render] {len(manifest)} varianti renderizzate in {g}")
+    skipped = sum(1 for e in manifest if e["skipped"])
+    done = len(manifest) - skipped
+    print(f"[render] {done} varianti renderizzate, {skipped} saltate (aggiornate) in {g}")
     return 0
 
 
@@ -268,6 +309,10 @@ def build_parser() -> argparse.ArgumentParser:
     rp = sub.add_parser("render", help="renderizza audio + partitura")
     rp.add_argument("study")
     rp.add_argument("--no-score", action="store_true", help="salta i PDF di partitura")
+    rp.add_argument("--force", action="store_true",
+                    help="rirenderizza anche le varianti gia' aggiornate")
+    rp.add_argument("--jobs", type=int, default=None,
+                    help="numero di render in parallelo (default: min(8, cpu))")
 
     dp = sub.add_parser("describe", help="descrittori + results.yml")
     dp.add_argument("study")
@@ -303,7 +348,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "sweep":
         return cmd_sweep(args.study, args.stream)
     if args.command == "render":
-        return cmd_render(args.study, args.no_score)
+        return cmd_render(args.study, args.no_score, args.force, args.jobs)
     if args.command == "describe":
         return cmd_describe(args.study)
     if args.command == "matrix":

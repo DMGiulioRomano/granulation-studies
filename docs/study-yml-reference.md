@@ -81,7 +81,9 @@ generated/<study_id>/
 ```bash
 make sweep  STUDY=<id>                    # genera tutte le stream
 make sweep  STUDY=<id> STREAM=nome        # genera solo quella stream
-make render STUDY=<id>                    # renderizza tutto (ricorsivo, tutte le stream)
+make render STUDY=<id>                    # renderizza le varianti cambiate (incrementale, in parallelo)
+make render STUDY=<id> FORCE=1            # rirenderizza tutto (es. dopo update engine o sample)
+make render STUDY=<id> JOBS=4             # limita i worker paralleli (default: min(8, cpu))
 make sv     STUDY=<id>                    # genera .sv per tutte le stream
 make sv     STUDY=<id> STREAM=nome        # genera .sv per una stream
 ```

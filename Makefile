@@ -32,7 +32,7 @@ help:
 	@echo "  make setup                 venv + submodule engine + dipendenze"
 	@echo "  make tests                 esegue pytest (gate pre-commit)"
 	@echo "  make sweep STUDY=...        genera le varianti YAML  (STUDY = nome cartella in studies/, es. study01_grain_density)"
-	@echo "  make render STUDY=...       renderizza audio + partitura PDF"
+	@echo "  make render STUDY=...       renderizza audio (incrementale, parallelo; FORCE=1 rifa' tutto, JOBS=n worker)"
 	@echo "  make describe STUDY=...     descrittori audio -> results.yml"
 	@echo "  make matrix STUDY=...       matrice di parentela -> kinship.json"
 	@echo "  make compose STUDY=...      genera final.yml dal percorso/grafo"

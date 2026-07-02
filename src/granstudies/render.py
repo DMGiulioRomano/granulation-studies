@@ -32,8 +32,18 @@ _Dumper.add_representer(list, _list_representer)
 
 
 def _dump(path: str, doc: Dict[str, Any]) -> None:
+    """Scrive lo YAML solo se il contenuto e' cambiato.
+
+    L'mtime del file resta fermo quando la variante e' identica: e' il segnale
+    che ``render_variants`` usa per saltare i render gia' aggiornati.
+    """
+    text = yaml.dump(doc, Dumper=_Dumper, sort_keys=False, allow_unicode=True)
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as fh:
+            if fh.read() == text:
+                return
     with open(path, "w", encoding="utf-8") as fh:
-        yaml.dump(doc, fh, Dumper=_Dumper, sort_keys=False, allow_unicode=True)
+        fh.write(text)
 
 
 def _write_discrete(spec: StudySpec, out_dir: str) -> List[str]:
@@ -109,16 +119,44 @@ def write_variants(spec: StudySpec, out_dir: str) -> List[str]:
     return written
 
 
+def _render_one(
+    yaml_path: str,
+    audio_path: str,
+    pdf_path: str | None,
+    samples_dir: str,
+    output_sr: int,
+) -> str:
+    """Renderizza una singola variante (worker per il pool di processi)."""
+    engine_bridge.render(
+        yaml_path, audio_path, samples_dir=samples_dir, output_sr=output_sr
+    )
+    if pdf_path:
+        engine_bridge.score_pdf(yaml_path, pdf_path, samples_dir=samples_dir)
+    return audio_path
+
+
+def _is_up_to_date(target: str, source: str) -> bool:
+    return os.path.exists(target) and os.path.getmtime(target) >= os.path.getmtime(source)
+
+
 def render_variants(
     variant_dir: str,
     audio_dir: str,
     score_dir: str | None,
     samples_dir: str,
     output_sr: int = 48000,
+    force: bool = False,
+    jobs: int | None = None,
 ) -> List[Dict[str, Any]]:
     """Renderizza ogni YAML in ``variant_dir`` -> audio (e PDF se ``score_dir``).
 
-    Returns: manifest, una entry per variante con i path prodotti.
+    Incrementale: una variante il cui audio (e PDF) e' piu' recente dello YAML
+    viene saltata (``force=True`` per rirenderizzare tutto). Le varianti da
+    fare girano in parallelo su un pool di processi (``jobs``, default
+    min(8, cpu)); ogni render dell'engine e' mono-core e indipendente.
+
+    Returns: manifest, una entry per variante con i path prodotti e il flag
+    ``skipped``.
     """
     os.makedirs(audio_dir, exist_ok=True)
     if score_dir:
@@ -135,6 +173,7 @@ def render_variants(
     yaml_files.sort()
 
     manifest: List[Dict[str, Any]] = []
+    pending: List[tuple] = []
     for yaml_path in yaml_files:
         rel = os.path.relpath(yaml_path, variant_dir)
         name = os.path.splitext(rel)[0]
@@ -146,20 +185,36 @@ def render_variants(
         else:
             audio_basename = parts[-1]
         audio_path = os.path.join(audio_dir, *parts[:-1], audio_basename + ".aif")
-        os.makedirs(os.path.dirname(os.path.abspath(audio_path)), exist_ok=True)
+        pdf_path = os.path.join(score_dir, f"{name}.pdf") if score_dir else None
 
-        generated = engine_bridge.render(
-            yaml_path, audio_path, samples_dir=samples_dir, output_sr=output_sr
-        )
-        entry: Dict[str, Any] = {
-            "name": name,
-            "yaml": yaml_path,
-            "audio": generated[0] if generated else None,
-        }
-        if score_dir:
-            pdf_path = os.path.join(score_dir, f"{name}.pdf")
-            os.makedirs(os.path.dirname(os.path.abspath(pdf_path)), exist_ok=True)
-            engine_bridge.score_pdf(yaml_path, pdf_path, samples_dir=samples_dir)
+        entry: Dict[str, Any] = {"name": name, "yaml": yaml_path, "audio": audio_path}
+        if pdf_path:
             entry["score"] = pdf_path
+        entry["skipped"] = (
+            not force
+            and _is_up_to_date(audio_path, yaml_path)
+            and (pdf_path is None or _is_up_to_date(pdf_path, yaml_path))
+        )
         manifest.append(entry)
+        if entry["skipped"]:
+            continue
+        os.makedirs(os.path.dirname(os.path.abspath(audio_path)), exist_ok=True)
+        if pdf_path:
+            os.makedirs(os.path.dirname(os.path.abspath(pdf_path)), exist_ok=True)
+        pending.append((yaml_path, audio_path, pdf_path, samples_dir, output_sr))
+
+    if pending:
+        # ponytail: cap a 8 worker, una variante lunga puo' tenere in RAM
+        # l'intero buffer audio; alzare con jobs= se la memoria lo consente.
+        workers = jobs or min(8, os.cpu_count() or 1, len(pending))
+        if workers == 1:
+            for args in pending:
+                _render_one(*args)
+        else:
+            from concurrent.futures import ProcessPoolExecutor, as_completed
+
+            with ProcessPoolExecutor(max_workers=workers) as pool:
+                futures = [pool.submit(_render_one, *args) for args in pending]
+                for fut in as_completed(futures):
+                    fut.result()
     return manifest

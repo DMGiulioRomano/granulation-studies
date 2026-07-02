@@ -2,7 +2,7 @@
 
 .PHONY: render
 render: _require-study $(MARKER)
-	$(PY) -m granstudies render $(STUDY) --no-score
+	$(PY) -m granstudies render $(STUDY) --no-score $(if $(FORCE),--force,) $(if $(JOBS),--jobs $(JOBS),)
 
 .PHONY: render-final
 render-final: _require-study $(MARKER)

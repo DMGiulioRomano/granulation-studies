@@ -3,7 +3,8 @@ import os
 import yaml
 
 from granstudies.study_spec import parse_study_spec
-from granstudies.render import write_variants
+from granstudies import render as render_mod
+from granstudies.render import render_variants, write_variants
 
 
 def _spec(mode):
@@ -100,6 +101,77 @@ def test_both_mode_writes_both_sets(tmp_path):
     assert os.path.isdir(tmp_path / "envelope")
     assert any((os.sep + "discrete" + os.sep) in p for p in written)
     assert any((os.sep + "envelope" + os.sep) in p for p in written)
+
+
+# --- render incrementale ---------------------------------------------------
+
+def test_dump_preserves_mtime_when_unchanged(tmp_path):
+    written = write_variants(_spec("envelope"), str(tmp_path))
+    past = 1_000_000_000
+    for p in written:
+        os.utime(p, (past, past))
+    rewritten = write_variants(_spec("envelope"), str(tmp_path))
+    assert sorted(rewritten) == sorted(written)
+    assert all(os.path.getmtime(p) == past for p in written)
+
+
+def _fake_engine_render(calls):
+    def fake(yaml_path, output_path, samples_dir, output_sr=48000):
+        calls.append(yaml_path)
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+        with open(output_path, "w") as fh:
+            fh.write("x")
+        return [output_path]
+
+    return fake
+
+
+def test_render_variants_skips_up_to_date(tmp_path, monkeypatch):
+    variant_dir = str(tmp_path / "variants")
+    n = len(write_variants(_spec("envelope"), variant_dir))
+    calls = []
+    monkeypatch.setattr(render_mod.engine_bridge, "render", _fake_engine_render(calls))
+    kwargs = dict(
+        variant_dir=variant_dir,
+        audio_dir=str(tmp_path / "audio"),
+        score_dir=None,
+        samples_dir="unused",
+        jobs=1,
+    )
+    first = render_variants(**kwargs)
+    assert len(calls) == n
+    assert not any(e["skipped"] for e in first)
+    # secondo giro: tutto aggiornato, nessun render
+    second = render_variants(**kwargs)
+    assert len(calls) == n
+    assert all(e["skipped"] for e in second)
+    # force: rirenderizza tutto
+    third = render_variants(**kwargs, force=True)
+    assert len(calls) == 2 * n
+    assert not any(e["skipped"] for e in third)
+
+
+def test_render_variants_rerenders_only_changed(tmp_path, monkeypatch):
+    variant_dir = str(tmp_path / "variants")
+    written = write_variants(_spec("envelope"), variant_dir)
+    calls = []
+    monkeypatch.setattr(render_mod.engine_bridge, "render", _fake_engine_render(calls))
+    kwargs = dict(
+        variant_dir=variant_dir,
+        audio_dir=str(tmp_path / "audio"),
+        score_dir=None,
+        samples_dir="unused",
+        jobs=1,
+    )
+    render_variants(**kwargs)
+    calls.clear()
+    # tocco un solo YAML -> si rirenderizza solo quello
+    changed = written[0]
+    now = os.path.getmtime(changed) + 10
+    os.utime(changed, (now, now))
+    manifest = render_variants(**kwargs)
+    assert calls == [changed]
+    assert sum(1 for e in manifest if not e["skipped"]) == 1
 
 
 # --- confronto golden: documento YAML completo letto da disco -------------------
