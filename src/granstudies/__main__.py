@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from typing import Any, Dict
 
 import yaml
@@ -145,6 +146,7 @@ def cmd_render(
     if not os.path.isdir(variant_dir):
         print(f"[render] nessuna variante: esegui prima 'sweep {study}'.", file=sys.stderr)
         return 1
+    t0 = time.perf_counter()
     manifest = render_variants(
         variant_dir=variant_dir,
         audio_dir=os.path.join(g, "audio"),
@@ -153,9 +155,11 @@ def cmd_render(
         force=force,
         jobs=jobs,
     )
+    elapsed = time.perf_counter() - t0
+    tempo = f"{elapsed:.1f}s" if elapsed < 60 else f"{int(elapsed // 60)}m{elapsed % 60:04.1f}s"
     skipped = sum(1 for e in manifest if e["skipped"])
     done = len(manifest) - skipped
-    print(f"[render] {done} varianti renderizzate, {skipped} saltate (aggiornate) in {g}")
+    print(f"[render] {done} varianti renderizzate, {skipped} saltate (aggiornate) in {tempo} -> {g}")
     return 0
 
 
