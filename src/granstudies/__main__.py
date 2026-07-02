@@ -68,17 +68,32 @@ def cmd_sweep(study: str, stream: str | None = None) -> int:
     if not specs:
         return 1
     out = os.path.join(gen_dir(study), "variants")
+    # Snapshot degli mtime pre-sweep: _dump non tocca i file a contenuto
+    # identico, quindi "mtime cambiato o file nuovo" = variante da rirenderizzare
+    # (stesso segnale usato dal render incrementale).
+    before: dict[str, float] = {}
+    if os.path.isdir(out):
+        for root, _, files in os.walk(out):
+            for fname in files:
+                p = os.path.join(root, fname)
+                before[p] = os.path.getmtime(p)
     written_all: set[str] = set()
     for spec in specs:
         written = write_variants(spec, out)
         written_all.update(written)
         label = f" [{spec.stream_id}]" if spec.stream_id else ""
-        n_disc = sum(1 for p in written if (os.sep + "discrete" + os.sep) in p)
-        n_env = sum(1 for p in written if (os.sep + "envelope" + os.sep) in p)
-        if n_disc:
-            print(f"[sweep]{label} {n_disc} varianti discrete")
-        if n_env:
-            print(f"[sweep]{label} {n_env} varianti envelope")
+        dirty = {p for p in written if before.get(p) != os.path.getmtime(p)}
+        for mode in ("discrete", "envelope"):
+            tot = [p for p in written if (os.sep + mode + os.sep) in p]
+            if not tot:
+                continue
+            changed = sorted(p for p in dirty if (os.sep + mode + os.sep) in p)
+            if changed:
+                print(f"[sweep]{label} {len(tot)} varianti {mode}, {len(changed)} da rirenderizzare:")
+                for p in changed:
+                    print(f"    {os.path.splitext(os.path.basename(p))[0]}")
+            else:
+                print(f"[sweep]{label} {len(tot)} varianti {mode}, nessuna cambiata")
         if not written:
             print(f"[sweep]{label} nessuna variante generata (mode={spec.mode})")
     _warn_orphans(out, written_all, scoped=stream is not None)
