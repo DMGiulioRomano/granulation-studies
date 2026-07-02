@@ -78,7 +78,7 @@ streams:
   lettura_avanzata:
     base:
       pointer:
-        start: 0
+        start: 0.1
 
   lettura_avanzata_2:
     base:
@@ -92,7 +92,7 @@ streams:
     axes:
       density:
         values: [100, 150, 200, 300]
-      plateau: 10
+      plateau: 5 
       transition: 8
     sweep:
       orders: [1, 2]          
