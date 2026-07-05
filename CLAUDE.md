@@ -27,10 +27,16 @@ Ogni studio ha una cartella `ascolto/` dentro la sua directory:
 
 ```
 studies/{studio_id}/ascolto/
-├── YYYY-MM-DD.md   ← log della sessione, diario di bordo in prosa
+├── YYYY-MM-DD.md   ← log della giornata, diario di bordo in prosa
 ├── index.md        ← sintesi cronologica, aggiornata su richiesta
 └── riepilogo.md    ← tabella consolidata regioni/transizioni, aggiornata su richiesta
 ```
+
+Un solo file per giorno: `YYYY-MM-DD.md`. Se in una giornata ci sono più
+sessioni di ascolto, non si creano file separati né suffissi — si aggiungono
+come sezioni `## Sessione N — <tema> (sample: ...)` dentro lo stesso file, in
+ordine cronologico. Il `sample` sta nell'heading di sessione, non nel
+frontmatter.
 
 Il log è **prosa libera**. Nel descrivere un oggetto in ascolto, il filo
 ricorrente è: **cosa** si ascolta → **range dove il percetto resta uguale**
@@ -49,11 +55,11 @@ Quando l'utente dice "crea il log di oggi" o simile:
 data: YYYY-MM-DD
 studio: {studio_id}
 study_yml_commit: {hash}
-sample:
 ---
 ```
 
-3. Corpo vuoto — lo scrive l'utente in prosa.
+3. Corpo vuoto — lo scrive l'utente in prosa, in sezioni `## Sessione N — <tema>
+   (sample: ...)` se la giornata ha più sessioni.
 
 ### Aggiornare index e riepilogo
 

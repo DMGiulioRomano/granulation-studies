@@ -10,7 +10,9 @@
 #   make compose STUDY=study01_grain_density
 #   make render-final STUDY=study01_grain_density
 
-PYTHON ?= python3
+# Interprete di sistema per creare il venv: preferisci 3.11 (versione del
+# progetto), poi python3/python. Override esplicito: make setup PYTHON=...
+PYTHON := $(shell command -v python3.11 || command -v python3 || command -v python)
 VENV   := .venv
 VENV_BIN := $(VENV)/bin
 PY     := $(VENV_BIN)/python

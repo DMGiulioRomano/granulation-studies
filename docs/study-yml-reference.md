@@ -25,7 +25,11 @@ base:                             # *
 axes:                             # * almeno un asse
   plateau: 5                     # secondi di ascolto stabile per valore (default 5.0)
   transition: 5                  # secondi di transizione tra plateau (default 5.0)
-  interpolation: linear          # linear | cubic (default linear)
+  interpolation: linear          # linear | cubic | step (default linear)
+                                 # step: nessuna rampa, ogni valore è tenuto e salta
+                                 # netto al successivo. plateau/transizione collassano:
+                                 # un solo gradino per valore di durata `transition`
+                                 # (plateau ignorato, durata stream = N*transition).
 
   density:                       # nome dell'asse (libero)
     path: density                # * path YAML nell'engine

@@ -55,6 +55,23 @@ def test_breakpoints_times_monotonic_and_normalized():
     assert times[-1] == 1.0
 
 
+# --- envelope_breakpoints (step) ----------------------------------------------
+
+def test_breakpoints_step_one_point_per_value():
+    # step: un solo punto per valore, equispaziati in [0, 1], nessun doppio punto.
+    bp = envelope_breakpoints([5, 50, 400], plateau=5, transition=5, step=True)
+    assert bp == [
+        [0.0, 5],
+        [0.333333, 50],
+        [0.666667, 400],
+    ]
+
+
+def test_breakpoints_step_single_value():
+    bp = envelope_breakpoints([42], plateau=5, transition=5, step=True)
+    assert bp == [[0.0, 42], [1.0, 42]]
+
+
 # --- cartesian_combinations ----------------------------------------------------
 
 def test_cartesian_two_axes_lexicographic():
@@ -171,6 +188,38 @@ def test_overrides_o1_only_one_envelope():
     assert isinstance(ov["density"], list)
     assert ov["grain.duration"] == 0.05      # fermo al baseline
     assert ov["pan"] == 0.0
+
+
+# --- modalita' step (interpolation: step) --------------------------------------
+
+def _spec_step(orders, transition=5):
+    return parse_study_spec({
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {
+            "plateau": 5, "transition": transition, "interpolation": "step",
+            "density": {"path": "density", "baseline": 20, "values": [5, 50, 400]},
+            "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05, 0.2]},
+            "pan": {"path": "pan", "baseline": 0.0, "values": [-1.0, 0.0, 1.0]},
+        },
+        "sweep": {"mode": "envelope", "orders": orders},
+    })
+
+
+def test_step_duration_uses_transition_only():
+    spec = _spec_step([1], transition=4)
+    v = generate_envelope_variants(spec)[0]
+    # N=3 valori, step: 3*4 = 12 (plateau ignorato)
+    assert v.duration(spec) == 12
+
+
+def test_step_overrides_single_point_per_value():
+    spec = _spec_step([1])
+    v = next(x for x in generate_envelope_variants(spec) if x.name == "e1__density")
+    ov = v.overrides(spec)
+    # un solo punto per valore (no doppio punto plateau)
+    assert ov["density"] == [[0.0, 5], [0.333333, 50], [0.666667, 400]]
+    assert ov["grain.duration"] == 0.05     # asse fermo, scalare
 
 
 # --- orderings espliciti -------------------------------------------------------

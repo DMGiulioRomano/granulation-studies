@@ -22,9 +22,16 @@ from .study_spec import Axis, StudySpec
 
 
 def envelope_breakpoints(
-    values: List[float], plateau: float, transition: float
+    values: List[float], plateau: float, transition: float, *, step: bool = False
 ) -> List[List[float]]:
     """Breakpoint normalizzati ``[[t, v], ...]`` per una sequenza di plateau.
+
+    Con ``step=True`` (envelope ``type: step``) plateau e transizione collassano:
+    l'engine tiene ogni valore fino al breakpoint successivo e poi salta netto,
+    quindi il doppio punto per plateau e' ridondante. Si emette **un solo punto
+    per valore**, equispaziato in ``[0, 1]`` (``t_i = i / N``); l'ultimo valore
+    e' tenuto fino a fine stream dall'engine. La durata reale (un ``transition``
+    per gradino) e' governata da ``EnvelopeVariant.duration``.
 
     Per ``N = len(values)`` plateau, ogni plateau occupa ``W_plateau`` e ogni
     transizione ``W_transition`` della durata totale normalizzata::
@@ -45,6 +52,9 @@ def envelope_breakpoints(
         return []
     if n == 1:
         return [[0.0, values[0]], [1.0, values[0]]]
+
+    if step:
+        return [[round(i / n, 6), v] for i, v in enumerate(values)]
 
     total = n * plateau + (n - 1) * transition
     w_plateau = plateau / total
@@ -100,6 +110,7 @@ class EnvelopeVariant:
         Tutti i valori sono clampati ai bounds engine.
         """
         moved_set = set(self.moved)
+        step = spec.interpolation == "step"
         out: Dict[str, Any] = {}
         for ax in spec.axes:
             if ax.name in moved_set:
@@ -108,17 +119,24 @@ class EnvelopeVariant:
                     for combo in self.combinations
                 ]
                 out[ax.path] = envelope_breakpoints(
-                    seq, spec.plateau, spec.transition
+                    seq, spec.plateau, spec.transition, step=step
                 )
             else:
                 out[ax.path] = bounds_mod.clamp(ax.path, ax.baseline)
         return out
 
     def duration(self, spec: StudySpec) -> float:
-        """Durata reale dello stream: ``N*plateau + (N-1)*transition``."""
+        """Durata reale dello stream.
+
+        Envelope a plateau: ``N*plateau + (N-1)*transition``. In modalita' step
+        (``interpolation: step``) plateau/transizione collassano in un unico
+        gradino per valore: ``N*transition``.
+        """
         n = len(self.combinations)
         if n == 0:
             return 0.0
+        if spec.interpolation == "step":
+            return n * spec.transition
         return n * spec.plateau + (n - 1) * spec.transition
 
 
