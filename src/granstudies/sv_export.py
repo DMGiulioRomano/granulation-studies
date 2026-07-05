@@ -23,9 +23,12 @@ from typing import Any, List, Literal, Tuple
 # serializzati come stringa nell'attributo plotStyle del layer.
 #   "3" = PlotLines        -> spezzata di segmenti retti tra i breakpoint
 #   "7" = PlotCubicHermite -> curva cubica monotona (Fritsch-Carlson)
+#   "8" = Stepped          -> sample-and-hold, salto netto al breakpoint successivo
+# (7 e 8 esistono solo nel fork DMGiulioRomano/svgui.)
 _PLOT_STYLE_BY_TYPE = {
     "linear": "3",
     "cubic": "7",
+    "step": "8",
 }
 _PLOT_STYLE_DEFAULT = "3"  # fallback prudente: segmenti retti
 
@@ -40,7 +43,7 @@ _COLOURS = [
 Layout = Literal["multi", "single"]
 
 
-_ENVELOPE_TYPES = {"linear", "cubic"}
+_ENVELOPE_TYPES = {"linear", "cubic", "step"}
 
 
 def _find_envelopes(obj: Any, prefix: str = "") -> List[Tuple[str, List, str]]:
@@ -68,8 +71,12 @@ def _plateau_starts(envelopes: List[Tuple[str, List, str]]) -> List[float]:
     griglia temporale, percio' i ``t_start`` coincidono: li uniamo e dedup.
     """
     starts = set()
-    for _path, points, _type in envelopes:
-        for i in range(0, len(points), 2):
+    for _path, points, env_type in envelopes:
+        # step: un solo punto per valore (nessun doppio punto plateau), ogni
+        # punto e' un inizio-gradino. linear/cubic: breakpoint a coppie
+        # ``t_start, t_end`` -> gli inizi sono agli indici pari.
+        stride = 1 if env_type == "step" else 2
+        for i in range(0, len(points), stride):
             starts.add(round(float(points[i][0]), 6))
     return sorted(starts)
 

@@ -2,12 +2,21 @@ import bz2
 import xml.etree.ElementTree as ET
 
 from granstudies.envelope_sweep import envelope_breakpoints
-from granstudies.sv_export import _plateau_starts, _build_sv_xml
+from granstudies.sv_export import _plateau_starts, _build_sv_xml, _find_envelopes
 
 
 def _parse(compressed: bytes) -> ET.Element:
     xml = bz2.decompress(compressed).decode("utf-8")
     return ET.fromstring(xml)
+
+
+# --- _find_envelopes -----------------------------------------------------------
+
+def test_find_envelopes_recognizes_step():
+    doc = {"grain": {"duration": {"type": "step",
+                                  "points": [[0.0, 5], [0.5, 50]],
+                                  "time_mode": "normalized"}}}
+    assert _find_envelopes(doc) == [("grain.duration", [[0.0, 5], [0.5, 50]], "step")]
 
 
 # --- _plateau_starts -----------------------------------------------------------
@@ -36,6 +45,24 @@ def test_plateau_starts_repeated_value_not_merged():
 def test_plateau_starts_single_value():
     points = envelope_breakpoints([42], plateau=5, transition=5)  # [[0,42],[1,42]]
     assert _plateau_starts([("density", points, "linear")]) == [0.0]
+
+
+def test_plateau_starts_step_one_marker_per_value():
+    # Geometria step: un solo punto per valore -> ogni punto e' un inizio-gradino.
+    pts = envelope_breakpoints([5, 50, 400], plateau=5, transition=5, step=True)
+    assert _plateau_starts([("density", pts, "step")]) == [0.0, 0.333333, 0.666667]
+
+
+# --- plotStyle per tipo --------------------------------------------------------
+
+def test_step_layer_uses_stepped_plot_style():
+    # SV (fork): enum PlotStyle -> Stepped = 8. Il layer timevalues dell'envelope
+    # step dev'essere disegnato a scalini, non a segmenti obliqui.
+    pts = envelope_breakpoints([5, 50, 400], plateau=5, transition=5, step=True)
+    xml = _parse(_build_sv_xml("/x.wav", 1000, 15.0, [("density", pts, "step")], "multi"))
+    tv = [l for l in xml.findall("./data/layer") if l.get("type") == "timevalues"]
+    assert len(tv) == 1
+    assert tv[0].get("plotStyle") == "8"
 
 
 # --- marker layer nel .sv ------------------------------------------------------
