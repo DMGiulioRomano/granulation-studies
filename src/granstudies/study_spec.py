@@ -24,6 +24,7 @@ class Axis:
     path: str
     baseline: float
     values: List[float]
+    interpolation: str = "linear"   # linear | cubic | step
 
 
 # Chiavi riservate sotto ``axes:`` che non descrivono un asse ma il timing
@@ -163,6 +164,7 @@ def parse_study_spec(data: Dict[str, Any], study_id: str | None = None) -> Study
 
         _defaults_cache = parameter_defaults()
 
+    study_interpolation = axes_raw.get("interpolation", "linear")
     axes: List[Axis] = []
     for name, cfg in axes_raw.items():
         if name in _AXES_RESERVED_KEYS:
@@ -173,6 +175,7 @@ def parse_study_spec(data: Dict[str, Any], study_id: str | None = None) -> Study
                 path=cfg["path"],
                 baseline=_resolve_baseline(name, cfg, _defaults_cache),
                 values=list(cfg["values"]),
+                interpolation=cfg.get("interpolation", study_interpolation),
             )
         )
     sweep_cfg = data.get("sweep") or {}

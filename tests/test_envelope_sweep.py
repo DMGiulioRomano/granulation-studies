@@ -72,6 +72,44 @@ def test_breakpoints_step_single_value():
     assert bp == [[0.0, 42], [1.0, 42]]
 
 
+# --- interpolation per-asse ----------------------------------------------------
+
+def test_axis_interpolation_default_linear():
+    spec = _spec([1])
+    assert spec.axis("density").interpolation == "linear"
+
+
+def test_axis_interpolation_per_axis_override():
+    spec = parse_study_spec({
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {
+            "plateau": 5, "transition": 5,
+            "density": {"path": "density", "baseline": 20, "values": [5, 50], "interpolation": "step"},
+            "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05], "interpolation": "cubic"},
+        },
+        "sweep": {"mode": "envelope", "orders": [1]},
+    })
+    assert spec.axis("density").interpolation == "step"
+    assert spec.axis("grain_duration").interpolation == "cubic"
+
+
+def test_axis_interpolation_inherits_study_default():
+    spec = parse_study_spec({
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {
+            "plateau": 5, "transition": 5, "interpolation": "step",
+            "density": {"path": "density", "baseline": 20, "values": [5, 50]},
+            "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05], "interpolation": "cubic"},
+        },
+        "sweep": {"mode": "envelope", "orders": [1]},
+    })
+    # density eredita il default-studio (step), grain fa override (cubic)
+    assert spec.axis("density").interpolation == "step"
+    assert spec.axis("grain_duration").interpolation == "cubic"
+
+
 # --- cartesian_combinations ----------------------------------------------------
 
 def test_cartesian_two_axes_lexicographic():
