@@ -14,7 +14,10 @@ from typing import Any, Dict, List
 import yaml
 
 from . import bounds as bounds_mod
-from .value_generators import resolve as resolve_values
+from .value_generators import GENERATORS, resolve as resolve_values
+
+# Chiavi che scelgono come popolare i valori di un asse: mutuamente esclusive.
+_GENERATOR_KEYS = frozenset({"values", *GENERATORS})
 
 
 @dataclass(frozen=True)
@@ -133,6 +136,26 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
     return result
 
 
+def _replace_generators(merged: Dict[str, Any], override: Dict[str, Any]) -> None:
+    """Se un override sceglie un generatore per un asse, rimpiazza quello ereditato.
+
+    Il deep-merge conserva le chiavi della base: un asse con ``values`` di base a
+    cui lo stream aggiunge ``ramp`` finirebbe con entrambe (collisione). Coerente
+    con la semantica "le liste rimpiazzano": la chiave-generatore dell'override
+    vince, si tolgono le altre ereditate su quello stesso asse.
+    """
+    ov_axes = override.get("axes") or {}
+    merged_axes = merged.get("axes") or {}
+    for name, ov in ov_axes.items():
+        if not isinstance(ov, dict):
+            continue
+        chosen = _GENERATOR_KEYS & ov.keys()
+        ax = merged_axes.get(name)
+        if chosen and isinstance(ax, dict):
+            for k in _GENERATOR_KEYS - chosen:
+                ax.pop(k, None)
+
+
 def resolve_streams(data: Dict[str, Any], study_id: str | None = None) -> List["StudySpec"]:
     """Ritorna una lista di StudySpec, uno per stream.
 
@@ -145,6 +168,7 @@ def resolve_streams(data: Dict[str, Any], study_id: str | None = None) -> List["
     result = []
     for stream_id, override in streams.items():
         merged = _deep_merge(data, override or {})
+        _replace_generators(merged, override or {})
         merged.pop("streams", None)
         merged.setdefault("sweep", {})["stream_id"] = stream_id
         result.append(parse_study_spec(merged, sid))

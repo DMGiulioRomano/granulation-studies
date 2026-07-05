@@ -1,6 +1,6 @@
 import pytest
 
-from granstudies.study_spec import parse_study_spec
+from granstudies.study_spec import parse_study_spec, resolve_streams
 
 
 def _spec_dict():
@@ -60,6 +60,28 @@ def test_axis_rejects_both_values_and_ramp():
     d["axes"]["a"]["ramp"] = {"start": 5, "stop": 50, "step": 5}  # gia' ha values
     with pytest.raises(ValueError):
         parse_study_spec(d)
+
+
+def test_stream_ramp_override_replaces_inherited_values():
+    # Uno stream che sceglie 'ramp' su un asse che nella base ha 'values':
+    # il generatore dell'override rimpiazza quello ereditato (niente collisione).
+    data = {
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {"grain_duration": {"path": "grain.duration", "values": [0.001, 0.01]}},
+        "sweep": {"mode": "envelope", "orders": [1]},
+        "streams": {
+            "prova": {
+                "axes": {
+                    "grain_duration": {"ramp": {"start": 0.003, "stop": 0.005, "step": 0.00025}}
+                }
+            }
+        },
+    }
+    spec = resolve_streams(data)[0]
+    assert spec.axis("grain_duration").values == [
+        0.003, 0.00325, 0.0035, 0.00375, 0.004, 0.00425, 0.0045, 0.00475, 0.005,
+    ]
 
 
 def test_validate_rejects_empty_axes():
