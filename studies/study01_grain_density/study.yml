@@ -96,8 +96,6 @@ streams:
         start: 0.3
     axes:
       density:
-        interpolation: step
-      grain_duration:
         interpolation: cubic
 
   lettura_avanzata_2:
