@@ -320,6 +320,31 @@ def test_step_overrides_single_point_per_value():
     assert ov["grain.duration"] == 0.05     # asse fermo, scalare
 
 
+# --- collasso keyed sugli assi mossi (non sullo scalare studio) ----------------
+
+def _spec_both_step_per_axis(orders):
+    # nessun interpolation top-level: entrambi gli assi step per-asse.
+    return parse_study_spec({
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {
+            "plateau": 5, "transition": 4,
+            "density": {"path": "density", "baseline": 20, "values": [5, 50, 400], "interpolation": "step"},
+            "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05, 0.2], "interpolation": "step"},
+        },
+        "sweep": {"mode": "envelope", "orders": orders},
+    })
+
+
+def test_all_step_per_axis_collapses_like_top_level():
+    spec = _spec_both_step_per_axis([1])
+    v = next(x for x in generate_envelope_variants(spec) if x.name == "e1__density")
+    # tutti gli assi mossi step -> collasso: durata N*transition, punto singolo i/n
+    assert v.duration(spec) == 12
+    ov = v.overrides(spec)
+    assert ov["density"] == [[0.0, 5], [0.333333, 50], [0.666667, 400]]
+
+
 # --- orderings espliciti -------------------------------------------------------
 
 def _spec_orderings(orderings):
