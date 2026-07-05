@@ -13,7 +13,7 @@ import math
 import random
 from typing import Any, Callable, Dict, List, Sequence, Union
 
-Threshold = Union[float, Sequence[float]]
+Threshold = Union[float, Sequence[float], Dict[str, Any]]
 
 
 def ramp(start: float, stop: float, step: float) -> List[float]:
@@ -31,9 +31,10 @@ def ramp(start: float, stop: float, step: float) -> List[float]:
     return [round(start + sign * step * i, 9) for i in range(n + 1)]
 
 
-def _interp_breakpoints(pts: Sequence[Sequence[float]], frac: float) -> float:
-    """Interpolazione lineare su ``[[t, v], ...]`` (t in ``[0, 1]``), con hold
-    fuori dai bordi. Segmenti a valore costante = "tieni", poi cambia."""
+def _interp_breakpoints(pts: Sequence[Sequence[float]], frac: float, kind: str = "linear") -> float:
+    """Soglia su ``[[t, v], ...]`` (t in ``[0, 1]``) al punto ``frac``, con hold
+    fuori dai bordi. ``kind``: ``linear`` (rampa tra i punti) o ``step`` (tieni
+    il valore sinistro, salta al breakpoint)."""
     pts = sorted(pts, key=lambda p: p[0])
     if frac <= pts[0][0]:
         return pts[0][1]
@@ -41,6 +42,8 @@ def _interp_breakpoints(pts: Sequence[Sequence[float]], frac: float) -> float:
         return pts[-1][1]
     for (t0, v0), (t1, v1) in zip(pts, pts[1:]):
         if t0 <= frac <= t1:
+            if kind == "step":
+                return v0
             return v0 if t1 == t0 else v0 + (v1 - v0) * (frac - t0) / (t1 - t0)
     return pts[-1][1]  # irraggiungibile: frac e' tra primo e ultimo t
 
@@ -48,10 +51,13 @@ def _interp_breakpoints(pts: Sequence[Sequence[float]], frac: float) -> float:
 def _threshold_at(spec: Threshold, frac: float) -> float:
     """Soglia (min o max) al punto ``frac`` in ``[0, 1]`` della sequenza.
 
-    Tre forme: scalare -> banda costante; ``[a, b]`` (due scalari) ->
-    interpolazione lineare ``a -> b`` sull'intera sequenza (shorthand);
-    ``[[t, v], ...]`` -> breakpoint temporizzati, per scegliere *quando* cambia.
+    E' un envelope di secondo ordine (una banda che genera valori). Forme:
+    scalare -> costante; ``[a, b]`` (due scalari) -> lineare ``a -> b``;
+    ``[[t, v], ...]`` -> breakpoint temporizzati (linear); ``{type, points}`` ->
+    breakpoint con ``type`` d'interpolazione esplicito (``linear`` | ``step``).
     """
+    if isinstance(spec, dict):
+        return _interp_breakpoints(spec["points"], frac, spec.get("type", "linear"))
     if not isinstance(spec, (list, tuple)):
         return spec
     if all(isinstance(p, (list, tuple)) for p in spec):

@@ -27,6 +27,13 @@ def test_rand_band_breakpoints_control_when_it_changes():
     assert rand(n=3, min=band, max=band, seed=0) == [0.0, 0.0, 10.0]
 
 
+def test_rand_band_step_interpolation_holds_then_jumps():
+    # type: step tiene il valore sinistro e salta al breakpoint.
+    # points [[0,0],[1,10]], n=3 (frac 0/0.5/1): step -> [0,0,10] (linear -> [0,5,10]).
+    band = {"type": "step", "points": [[0, 0], [1, 10]]}
+    assert rand(n=3, min=band, max=band, seed=0) == [0.0, 0.0, 10.0]
+
+
 def test_rand_rejects_bad_config():
     with pytest.raises(ValueError):
         rand(n=0, min=0, max=1)
