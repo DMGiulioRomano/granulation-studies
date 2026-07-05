@@ -22,7 +22,12 @@ from .study_spec import Axis, StudySpec
 
 
 def envelope_breakpoints(
-    values: List[float], plateau: float, transition: float, *, step: bool = False
+    values: List[float],
+    plateau: float,
+    transition: float,
+    *,
+    step: bool = False,
+    plateau_single: bool = False,
 ) -> List[List[float]]:
     """Breakpoint normalizzati ``[[t, v], ...]`` per una sequenza di plateau.
 
@@ -45,6 +50,14 @@ def envelope_breakpoints(
     avviene nel gap tra ``t_end`` e il ``t_start`` del prossimo (interpolazione
     lineare a carico dell'engine).
 
+    Con ``plateau_single=True`` (asse ``step`` che *convive* con assi non-step
+    nello stesso file) si tiene la stessa griglia a plateau — durata piena — ma
+    si emette **un solo punto per valore** al ``t_start`` del plateau (layout C):
+    i due breakpoint identici del layout plateau sono ridondanti sotto ``step``,
+    perche' l'engine tiene il valore fino al punto successivo e poi salta. Il
+    salto cade cosi' sull'inizio del plateau successivo, sincronizzato con gli
+    assi non-step. L'ultimo valore e' tenuto fino a fine stream dall'engine.
+
     Caso ``N == 1``: unico plateau costante ``[[0, v], [1, v]]``.
     """
     n = len(values)
@@ -59,17 +72,19 @@ def envelope_breakpoints(
     total = n * plateau + (n - 1) * transition
     w_plateau = plateau / total
     w_transition = transition / total
-    step = w_plateau + w_transition
+    step_w = w_plateau + w_transition
 
     points: List[List[float]] = []
     for i, v in enumerate(values):
-        t_start = i * step
-        t_end = t_start + w_plateau
+        t_start = i * step_w
         points.append([round(t_start, 6), v])
-        points.append([round(t_end, 6), v])
-    # L'ultimo t_end deve cadere esattamente su 1.0 (no deriva float).
-    points[-1][0] = 1.0
+        if not plateau_single:
+            t_end = t_start + w_plateau
+            points.append([round(t_end, 6), v])
     points[0][0] = 0.0
+    if not plateau_single:
+        # L'ultimo t_end deve cadere esattamente su 1.0 (no deriva float).
+        points[-1][0] = 1.0
     return points
 
 
@@ -110,7 +125,7 @@ class EnvelopeVariant:
         Tutti i valori sono clampati ai bounds engine.
         """
         moved_set = set(self.moved)
-        step = spec.interpolation == "step"
+        all_step = self._all_step(spec)
         out: Dict[str, Any] = {}
         for ax in spec.axes:
             if ax.name in moved_set:
@@ -118,12 +133,26 @@ class EnvelopeVariant:
                     bounds_mod.clamp(ax.path, combo[ax.name])
                     for combo in self.combinations
                 ]
+                # File tutto-step: layout collassato (durata ridotta). Misto:
+                # griglia a plateau piena, con l'asse step a punto singolo (C).
                 out[ax.path] = envelope_breakpoints(
-                    seq, spec.plateau, spec.transition, step=step
+                    seq,
+                    spec.plateau,
+                    spec.transition,
+                    step=all_step,
+                    plateau_single=(not all_step and ax.interpolation == "step"),
                 )
             else:
                 out[ax.path] = bounds_mod.clamp(ax.path, ax.baseline)
         return out
+
+    def _all_step(self, spec: StudySpec) -> bool:
+        """True se *tutti* gli assi mossi del file sono ``step``.
+
+        Solo in questo caso plateau/durata collassano (layout B). In presenza di
+        anche un solo asse non-step la griglia a plateau resta piena.
+        """
+        return all(spec.axis(name).interpolation == "step" for name in self.moved)
 
     def envelope_types(self, spec: StudySpec) -> Dict[str, str]:
         """path YAML -> tipo di interpolazione, solo per gli assi mossi.
@@ -136,14 +165,14 @@ class EnvelopeVariant:
     def duration(self, spec: StudySpec) -> float:
         """Durata reale dello stream.
 
-        Envelope a plateau: ``N*plateau + (N-1)*transition``. In modalita' step
-        (``interpolation: step``) plateau/transizione collassano in un unico
-        gradino per valore: ``N*transition``.
+        Envelope a plateau: ``N*plateau + (N-1)*transition``. Se *tutti* gli assi
+        mossi sono ``step`` plateau/transizione collassano in un unico gradino
+        per valore: ``N*transition``. In caso misto la durata resta piena.
         """
         n = len(self.combinations)
         if n == 0:
             return 0.0
-        if spec.interpolation == "step":
+        if self._all_step(spec):
             return n * spec.transition
         return n * spec.plateau + (n - 1) * spec.transition
 

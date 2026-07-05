@@ -257,6 +257,37 @@ def test_overrides_o1_only_one_envelope():
     assert ov["pan"] == 0.0
 
 
+# --- misto: step + cubic nello stesso file (o2) --------------------------------
+
+def test_mixed_o2_step_axis_single_point_cubic_axis_double():
+    spec = _spec_mixed([2])
+    v = next(x for x in generate_envelope_variants(spec) if x.name == "e2__density__grain_duration")
+    ov = v.overrides(spec)
+    # grain (cubic) -> layout plateau doppio-punto: 2 punti per plateau, 9 plateau
+    assert len(ov["grain.duration"]) == 18
+    # density (step) -> layout C: un solo punto per valore
+    assert len(ov["density"]) == 9
+    # i valori seguono comunque il prodotto lessicografico
+    assert [p[1] for p in ov["density"]] == [5, 5, 5, 50, 50, 50, 400, 400, 400]
+
+
+def test_mixed_o2_step_points_aligned_to_plateau_starts():
+    spec = _spec_mixed([2])
+    v = next(x for x in generate_envelope_variants(spec) if x.name == "e2__density__grain_duration")
+    ov = v.overrides(spec)
+    # ogni punto step di density cade sul t_start del plateau i-esimo di grain
+    plateau_starts = [ov["grain.duration"][2 * i][0] for i in range(9)]
+    step_times = [p[0] for p in ov["density"]]
+    assert step_times == plateau_starts
+
+
+def test_mixed_o2_duration_is_full_plateau():
+    spec = _spec_mixed([2])
+    v = next(x for x in generate_envelope_variants(spec) if x.order == 2)
+    # misto -> nessun collasso: N=9 -> 9*5 + 8*5 = 85
+    assert v.duration(spec) == 85
+
+
 # --- modalita' step (interpolation: step) --------------------------------------
 
 def _spec_step(orders, transition=5):
