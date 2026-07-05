@@ -87,12 +87,18 @@ streams:
         start: 0.2
     axes:
       interpolation: step
+  # Misto: density a scalini (step) mentre grain_duration scorre morbido (cubic),
+  # sulla stessa griglia a plateau (durata piena, non collassata). Confronto
+  # diretto con lettura_avanzata / _b (tutto-step) a parità di pointer.start.
   lettura_avanzata_c:
     base:
       pointer:
         start: 0.3
     axes:
-      interpolation: step
+      density:
+        interpolation: step
+      grain_duration:
+        interpolation: cubic
 
   lettura_avanzata_2:
     base:
