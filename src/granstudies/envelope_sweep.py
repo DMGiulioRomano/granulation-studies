@@ -125,6 +125,14 @@ class EnvelopeVariant:
                 out[ax.path] = bounds_mod.clamp(ax.path, ax.baseline)
         return out
 
+    def envelope_types(self, spec: StudySpec) -> Dict[str, str]:
+        """path YAML -> tipo di interpolazione, solo per gli assi mossi.
+
+        Il tipo (``linear``/``cubic``/``step``) e' per-asse: nello stesso file
+        assi diversi possono avere forme diverse sulla griglia condivisa.
+        """
+        return {spec.axis(name).path: spec.axis(name).interpolation for name in self.moved}
+
     def duration(self, spec: StudySpec) -> float:
         """Durata reale dello stream.
 

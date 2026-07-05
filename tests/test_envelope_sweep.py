@@ -196,6 +196,35 @@ def test_duration_o4_with_four_axes():
     assert v.duration(spec) == 805
 
 
+# --- EnvelopeVariant.envelope_types --------------------------------------------
+
+def _spec_mixed(orders):
+    return parse_study_spec({
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {
+            "plateau": 5, "transition": 5,
+            "density": {"path": "density", "baseline": 20, "values": [5, 50, 400], "interpolation": "step"},
+            "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05, 0.2], "interpolation": "cubic"},
+            "pan": {"path": "pan", "baseline": 0.0, "values": [-1.0, 0.0, 1.0]},
+        },
+        "sweep": {"mode": "envelope", "orders": orders},
+    })
+
+
+def test_envelope_types_mixed_o2():
+    spec = _spec_mixed([2])
+    v = next(x for x in generate_envelope_variants(spec) if x.name == "e2__density__grain_duration")
+    assert v.envelope_types(spec) == {"density": "step", "grain.duration": "cubic"}
+
+
+def test_envelope_types_only_moved_axes():
+    spec = _spec_mixed([1])
+    v = next(x for x in generate_envelope_variants(spec) if x.name == "e1__density")
+    # solo l'asse mosso compare nella mappa dei type
+    assert v.envelope_types(spec) == {"density": "step"}
+
+
 # --- EnvelopeVariant.overrides -------------------------------------------------
 
 def test_overrides_o2_synchronized_and_fixed_axes():
