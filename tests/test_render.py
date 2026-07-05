@@ -95,6 +95,35 @@ def test_envelope_o2_has_two_synchronized_envelopes(tmp_path):
     assert doc["duration"] == 85
 
 
+def _spec_mixed():
+    return parse_study_spec(
+        {
+            "study_id": "s",
+            "base": {"sample": "x.wav", "duration": 6, "time_mode": "normalized"},
+            "axes": {
+                "plateau": 5,
+                "transition": 5,
+                "density": {"path": "density", "baseline": 20, "values": [5, 50, 400], "interpolation": "step"},
+                "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05, 0.2], "interpolation": "cubic"},
+            },
+            "sweep": {"mode": "envelope", "orders": [2]},
+        }
+    )
+
+
+def test_envelope_o2_mixed_per_axis_types(tmp_path):
+    written = write_variants(_spec_mixed(), str(tmp_path))
+    doc = _load(_find(written, "e2__density__grain_duration.yml"))
+    stream = doc["streams"][0]
+    # type per-asse nel documento renderizzato
+    assert stream["density"]["type"] == "step"
+    assert stream["grain"]["duration"]["type"] == "cubic"
+    # density (step) a punto singolo, grain (cubic) doppio-punto; sincronizzati
+    assert len(stream["density"]["points"]) == 9
+    assert len(stream["grain"]["duration"]["points"]) == 18
+    assert doc["duration"] == 85
+
+
 def test_both_mode_writes_both_sets(tmp_path):
     written = write_variants(_spec("both"), str(tmp_path))
     assert os.path.isdir(tmp_path / "discrete")

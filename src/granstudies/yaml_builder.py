@@ -45,20 +45,23 @@ def build_stream(
     *,
     envelope_time_mode: str | None = None,
     envelope_type: str = "linear",
+    envelope_types: Mapping[str, str] | None = None,
 ) -> Dict[str, Any]:
     """Crea un nuovo dict stream = copia di ``base_stream`` con override applicati.
 
     Se ``envelope_time_mode`` e' valorizzato (es. ``"normalized"``), gli override
     *lista* (breakpoint ``[[t, v], ...]``) vengono wrappati nel dict envelope
-    dell'engine ``{type: <envelope_type>, points: ..., time_mode: <mode>}``. Lasciato a
-    ``None`` (default) le liste passano grezze: cosi' la pipeline ``compose``
-    (envelope assoluti) resta invariata.
+    dell'engine ``{type: <tipo>, points: ..., time_mode: <mode>}``. Il ``<tipo>``
+    e' preso per-path da ``envelope_types`` (assi con forme diverse nello stesso
+    file); in mancanza ricade su ``envelope_type``. Lasciato a ``None`` (default)
+    le liste passano grezze: cosi' la pipeline ``compose`` resta invariata.
     """
+    types = envelope_types or {}
     stream = copy.deepcopy(dict(base_stream))
     for path, value in overrides.items():
         if envelope_time_mode is not None and isinstance(value, list):
             value = {
-                "type": envelope_type,
+                "type": types.get(path, envelope_type),
                 "points": value,
                 "time_mode": envelope_time_mode,
             }
@@ -75,6 +78,7 @@ def build_document(
     duration: float | None = None,
     envelope_time_mode: str | None = None,
     envelope_type: str = "linear",
+    envelope_types: Mapping[str, str] | None = None,
 ) -> Dict[str, Any]:
     """Crea un documento YAML engine completo con un singolo stream.
 
@@ -90,6 +94,6 @@ def build_document(
     if duration is not None:
         doc["duration"] = duration
     doc["streams"] = [
-        build_stream(base_stream, overrides, envelope_time_mode=envelope_time_mode, envelope_type=envelope_type)
+        build_stream(base_stream, overrides, envelope_time_mode=envelope_time_mode, envelope_type=envelope_type, envelope_types=envelope_types)
     ]
     return doc
