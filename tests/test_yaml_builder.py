@@ -59,6 +59,28 @@ def test_build_stream_wraps_list_override_when_envelope_mode():
     }
 
 
+def test_build_stream_per_path_envelope_types():
+    out = build_stream(
+        {"density": 20, "grain": {"duration": 0.05}},
+        {"density": [[0, 5], [1, 5]], "grain.duration": [[0, 0.01], [1, 0.2]]},
+        envelope_time_mode="normalized",
+        envelope_types={"density": "step", "grain.duration": "cubic"},
+    )
+    assert out["density"]["type"] == "step"
+    assert out["grain"]["duration"]["type"] == "cubic"
+
+
+def test_build_stream_envelope_types_fallback_to_scalar():
+    # path non presente nella mappa -> ricade sul default envelope_type
+    out = build_stream(
+        {"density": 20},
+        {"density": [[0, 5], [1, 5]]},
+        envelope_time_mode="normalized",
+        envelope_types={},
+    )
+    assert out["density"]["type"] == "linear"
+
+
 def test_build_stream_list_override_raw_by_default():
     # backward compat (compose): senza envelope_time_mode la lista resta grezza
     out = build_stream({"density": 20}, {"density": [[0, 5], [1, 5]]})

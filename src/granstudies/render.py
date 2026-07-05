@@ -84,7 +84,7 @@ def _envelope_document(spec: StudySpec, ev: EnvelopeVariant) -> Dict[str, Any]:
         seed=spec.seed,
         duration=duration,
         envelope_time_mode="normalized",
-        envelope_type=spec.interpolation,
+        envelope_types=ev.envelope_types(spec),
     )
 
 

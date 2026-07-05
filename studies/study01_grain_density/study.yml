@@ -30,18 +30,18 @@ base:
 # `plateau`/`transition` (secondi) governano il timing degli envelope.
 axes:
   plateau: 5
-  transition: 5
-  interpolation: cubic
+  transition: 2.5
+  interpolation: step
   density:
     path: density
     baseline: 20           # obbligatorio: density non ha default engine
-    values: [5, 10, 15, 20, 25, 30, 35, 50, 100, 200]
+    values: [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100, 200]
   grain_duration:
     path: grain.duration
-    values: [0.001, 0.0025, 0.005, 0.0075, 0.01, 0.02, 0.03, 0.04, 0.05, 0.075]     
-  distribution:
-    path: distribution
-    values: [0.0, 0.5, 1.0]       # baseline omesso → default engine 0.0
+    values: [.001, .00125, .0015, .00175, .002, .00225, .0025, .00275, .003, .00325, .0035, .00375, .004, .00425, .0045, .00475, .005, .00525, .0055, .00575, .006, .00625, .0065, .00675, .007, .00725, .0075, .00775, .008, .00825, .0085, .00875, .009, .00925, .0095, .00975, .01, .015, .0175, .02, .025, .03, .04, .05, .075]
+  #distribution:
+  #  path: distribution
+  #  values: [0.0, 0.5, 1.0]       # baseline omesso → default engine 0.0
 
 sweep:
   # envelope | discrete | both. 1=OAT, 2=coppie, 3=terzine, 4=fattoriale completo.
@@ -79,6 +79,24 @@ streams:
     base:
       pointer:
         start: 0.1
+    axes:
+      interpolation: step
+  lettura_avanzata_b:
+    base:
+      pointer:
+        start: 0.2
+    axes:
+      interpolation: step
+  # Misto: density a scalini (step) mentre grain_duration scorre morbido (cubic),
+  # sulla stessa griglia a plateau (durata piena, non collassata). Confronto
+  # diretto con lettura_avanzata / _b (tutto-step) a parità di pointer.start.
+  lettura_avanzata_c:
+    base:
+      pointer:
+        start: 0.3
+    axes:
+      density:
+        interpolation: cubic
 
   lettura_avanzata_2:
     base:
@@ -96,6 +114,3 @@ streams:
       transition: 8
     sweep:
       orders: [1, 2]          
-  scalini:
-    axes:
-      interpolation: step

@@ -72,6 +72,44 @@ def test_breakpoints_step_single_value():
     assert bp == [[0.0, 42], [1.0, 42]]
 
 
+# --- interpolation per-asse ----------------------------------------------------
+
+def test_axis_interpolation_default_linear():
+    spec = _spec([1])
+    assert spec.axis("density").interpolation == "linear"
+
+
+def test_axis_interpolation_per_axis_override():
+    spec = parse_study_spec({
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {
+            "plateau": 5, "transition": 5,
+            "density": {"path": "density", "baseline": 20, "values": [5, 50], "interpolation": "step"},
+            "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05], "interpolation": "cubic"},
+        },
+        "sweep": {"mode": "envelope", "orders": [1]},
+    })
+    assert spec.axis("density").interpolation == "step"
+    assert spec.axis("grain_duration").interpolation == "cubic"
+
+
+def test_axis_interpolation_inherits_study_default():
+    spec = parse_study_spec({
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {
+            "plateau": 5, "transition": 5, "interpolation": "step",
+            "density": {"path": "density", "baseline": 20, "values": [5, 50]},
+            "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05], "interpolation": "cubic"},
+        },
+        "sweep": {"mode": "envelope", "orders": [1]},
+    })
+    # density eredita il default-studio (step), grain fa override (cubic)
+    assert spec.axis("density").interpolation == "step"
+    assert spec.axis("grain_duration").interpolation == "cubic"
+
+
 # --- cartesian_combinations ----------------------------------------------------
 
 def test_cartesian_two_axes_lexicographic():
@@ -158,6 +196,35 @@ def test_duration_o4_with_four_axes():
     assert v.duration(spec) == 805
 
 
+# --- EnvelopeVariant.envelope_types --------------------------------------------
+
+def _spec_mixed(orders):
+    return parse_study_spec({
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {
+            "plateau": 5, "transition": 5,
+            "density": {"path": "density", "baseline": 20, "values": [5, 50, 400], "interpolation": "step"},
+            "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05, 0.2], "interpolation": "cubic"},
+            "pan": {"path": "pan", "baseline": 0.0, "values": [-1.0, 0.0, 1.0]},
+        },
+        "sweep": {"mode": "envelope", "orders": orders},
+    })
+
+
+def test_envelope_types_mixed_o2():
+    spec = _spec_mixed([2])
+    v = next(x for x in generate_envelope_variants(spec) if x.name == "e2__density__grain_duration")
+    assert v.envelope_types(spec) == {"density": "step", "grain.duration": "cubic"}
+
+
+def test_envelope_types_only_moved_axes():
+    spec = _spec_mixed([1])
+    v = next(x for x in generate_envelope_variants(spec) if x.name == "e1__density")
+    # solo l'asse mosso compare nella mappa dei type
+    assert v.envelope_types(spec) == {"density": "step"}
+
+
 # --- EnvelopeVariant.overrides -------------------------------------------------
 
 def test_overrides_o2_synchronized_and_fixed_axes():
@@ -190,6 +257,37 @@ def test_overrides_o1_only_one_envelope():
     assert ov["pan"] == 0.0
 
 
+# --- misto: step + cubic nello stesso file (o2) --------------------------------
+
+def test_mixed_o2_step_axis_single_point_cubic_axis_double():
+    spec = _spec_mixed([2])
+    v = next(x for x in generate_envelope_variants(spec) if x.name == "e2__density__grain_duration")
+    ov = v.overrides(spec)
+    # grain (cubic) -> layout plateau doppio-punto: 2 punti per plateau, 9 plateau
+    assert len(ov["grain.duration"]) == 18
+    # density (step) -> layout C: un solo punto per valore
+    assert len(ov["density"]) == 9
+    # i valori seguono comunque il prodotto lessicografico
+    assert [p[1] for p in ov["density"]] == [5, 5, 5, 50, 50, 50, 400, 400, 400]
+
+
+def test_mixed_o2_step_points_aligned_to_plateau_starts():
+    spec = _spec_mixed([2])
+    v = next(x for x in generate_envelope_variants(spec) if x.name == "e2__density__grain_duration")
+    ov = v.overrides(spec)
+    # ogni punto step di density cade sul t_start del plateau i-esimo di grain
+    plateau_starts = [ov["grain.duration"][2 * i][0] for i in range(9)]
+    step_times = [p[0] for p in ov["density"]]
+    assert step_times == plateau_starts
+
+
+def test_mixed_o2_duration_is_full_plateau():
+    spec = _spec_mixed([2])
+    v = next(x for x in generate_envelope_variants(spec) if x.order == 2)
+    # misto -> nessun collasso: N=9 -> 9*5 + 8*5 = 85
+    assert v.duration(spec) == 85
+
+
 # --- modalita' step (interpolation: step) --------------------------------------
 
 def _spec_step(orders, transition=5):
@@ -220,6 +318,31 @@ def test_step_overrides_single_point_per_value():
     # un solo punto per valore (no doppio punto plateau)
     assert ov["density"] == [[0.0, 5], [0.333333, 50], [0.666667, 400]]
     assert ov["grain.duration"] == 0.05     # asse fermo, scalare
+
+
+# --- collasso keyed sugli assi mossi (non sullo scalare studio) ----------------
+
+def _spec_both_step_per_axis(orders):
+    # nessun interpolation top-level: entrambi gli assi step per-asse.
+    return parse_study_spec({
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {
+            "plateau": 5, "transition": 4,
+            "density": {"path": "density", "baseline": 20, "values": [5, 50, 400], "interpolation": "step"},
+            "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05, 0.2], "interpolation": "step"},
+        },
+        "sweep": {"mode": "envelope", "orders": orders},
+    })
+
+
+def test_all_step_per_axis_collapses_like_top_level():
+    spec = _spec_both_step_per_axis([1])
+    v = next(x for x in generate_envelope_variants(spec) if x.name == "e1__density")
+    # tutti gli assi mossi step -> collasso: durata N*transition, punto singolo i/n
+    assert v.duration(spec) == 12
+    ov = v.overrides(spec)
+    assert ov["density"] == [[0.0, 5], [0.333333, 50], [0.666667, 400]]
 
 
 # --- orderings espliciti -------------------------------------------------------
