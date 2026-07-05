@@ -1,6 +1,30 @@
 import pytest
 
-from granstudies.value_generators import ramp, resolve
+from granstudies.value_generators import ramp, rand, resolve
+
+
+def test_rand_deterministic_within_band():
+    a = rand(n=8, min=0.001, max=0.01, seed=1988)
+    b = rand(n=8, min=0.001, max=0.01, seed=1988)
+    assert a == b                       # stesso seed -> stessa sequenza
+    assert len(a) == 8
+    assert all(0.001 <= v <= 0.01 for v in a)
+
+
+def test_rand_different_seed_differs():
+    assert rand(n=8, min=0, max=1, seed=1) != rand(n=8, min=0, max=1, seed=2)
+
+
+def test_rand_time_varying_band_interpolates():
+    # Banda collassata (min==max mobili): il valore e' forzato all'interpolazione.
+    assert rand(n=3, min=[0.0, 1.0], max=[0.0, 1.0], seed=0) == [0.0, 0.5, 1.0]
+
+
+def test_rand_rejects_bad_config():
+    with pytest.raises(ValueError):
+        rand(n=0, min=0, max=1)
+    with pytest.raises(ValueError):
+        rand(n=3, min=1, max=0)   # min > max
 
 
 def test_resolve_explicit_values_passthrough():
