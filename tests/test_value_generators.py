@@ -20,6 +20,13 @@ def test_rand_time_varying_band_interpolates():
     assert rand(n=3, min=[0.0, 1.0], max=[0.0, 1.0], seed=0) == [0.0, 0.5, 1.0]
 
 
+def test_rand_band_breakpoints_control_when_it_changes():
+    # min/max come [[t, v], ...]: tieni 0 fino a t=0.5, poi sali a 10.
+    # Banda collassata (min==max) -> valore forzato all'interpolazione.
+    band = [[0, 0], [0.5, 0], [1, 10]]
+    assert rand(n=3, min=band, max=band, seed=0) == [0.0, 0.0, 10.0]
+
+
 def test_rand_rejects_bad_config():
     with pytest.raises(ValueError):
         rand(n=0, min=0, max=1)

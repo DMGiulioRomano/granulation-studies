@@ -31,16 +31,33 @@ def ramp(start: float, stop: float, step: float) -> List[float]:
     return [round(start + sign * step * i, 9) for i in range(n + 1)]
 
 
+def _interp_breakpoints(pts: Sequence[Sequence[float]], frac: float) -> float:
+    """Interpolazione lineare su ``[[t, v], ...]`` (t in ``[0, 1]``), con hold
+    fuori dai bordi. Segmenti a valore costante = "tieni", poi cambia."""
+    pts = sorted(pts, key=lambda p: p[0])
+    if frac <= pts[0][0]:
+        return pts[0][1]
+    if frac >= pts[-1][0]:
+        return pts[-1][1]
+    for (t0, v0), (t1, v1) in zip(pts, pts[1:]):
+        if t0 <= frac <= t1:
+            return v0 if t1 == t0 else v0 + (v1 - v0) * (frac - t0) / (t1 - t0)
+    return pts[-1][1]  # irraggiungibile: frac e' tra primo e ultimo t
+
+
 def _threshold_at(spec: Threshold, frac: float) -> float:
     """Soglia (min o max) al punto ``frac`` in ``[0, 1]`` della sequenza.
 
-    Scalare -> banda costante; ``[a, b]`` -> interpolazione lineare ``a -> b``,
-    cioe' la soglia varia nel tempo lungo la griglia condivisa.
+    Tre forme: scalare -> banda costante; ``[a, b]`` (due scalari) ->
+    interpolazione lineare ``a -> b`` sull'intera sequenza (shorthand);
+    ``[[t, v], ...]`` -> breakpoint temporizzati, per scegliere *quando* cambia.
     """
-    if isinstance(spec, (list, tuple)):
-        a, b = spec
-        return a + (b - a) * frac
-    return spec
+    if not isinstance(spec, (list, tuple)):
+        return spec
+    if all(isinstance(p, (list, tuple)) for p in spec):
+        return _interp_breakpoints(spec, frac)
+    a, b = spec  # shorthand [a, b] == [[0, a], [1, b]]
+    return a + (b - a) * frac
 
 
 def rand(n: int, min: Threshold, max: Threshold, seed: int = 0) -> List[float]:
