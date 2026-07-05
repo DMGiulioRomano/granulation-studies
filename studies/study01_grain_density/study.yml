@@ -96,3 +96,6 @@ streams:
       transition: 8
     sweep:
       orders: [1, 2]          
+  scalini:
+    axes:
+      interpolation: step
