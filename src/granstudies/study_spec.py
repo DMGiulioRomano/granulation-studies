@@ -14,6 +14,7 @@ from typing import Any, Dict, List
 import yaml
 
 from . import bounds as bounds_mod
+from .value_generators import resolve as resolve_values
 
 
 @dataclass(frozen=True)
@@ -174,7 +175,7 @@ def parse_study_spec(data: Dict[str, Any], study_id: str | None = None) -> Study
                 name=name,
                 path=cfg["path"],
                 baseline=_resolve_baseline(name, cfg, _defaults_cache),
-                values=list(cfg["values"]),
+                values=resolve_values(cfg),
                 interpolation=cfg.get("interpolation", study_interpolation),
             )
         )

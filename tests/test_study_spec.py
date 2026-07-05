@@ -44,6 +44,24 @@ def test_validate_rejects_value_out_of_bounds():
         parse_study_spec(d)
 
 
+def test_axis_ramp_generates_values():
+    d = _spec_dict()
+    d["axes"]["b"] = {
+        "path": "volume",
+        "baseline": -6,
+        "ramp": {"start": -12, "stop": -6, "step": 3},
+    }
+    spec = parse_study_spec(d)
+    assert spec.axis("b").values == [-12, -9, -6]
+
+
+def test_axis_rejects_both_values_and_ramp():
+    d = _spec_dict()
+    d["axes"]["a"]["ramp"] = {"start": 5, "stop": 50, "step": 5}  # gia' ha values
+    with pytest.raises(ValueError):
+        parse_study_spec(d)
+
+
 def test_validate_rejects_empty_axes():
     with pytest.raises(ValueError):
         parse_study_spec({"axes": {}})
