@@ -47,6 +47,13 @@ def test_breakpoints_single_value():
     assert bp == [[0.0, 42], [1.0, 42]]
 
 
+def test_breakpoints_plateau_zero_collapses_to_single_point():
+    # plateau=0: nessun plateau da tenere, solo transizioni. Un punto per valore
+    # equispaziato (i/(n-1)), niente doppioni coincidenti.
+    bp = envelope_breakpoints([10, 20, 30, 40], plateau=0, transition=2.5)
+    assert bp == [[0.0, 10], [0.333333, 20], [0.666667, 30], [1.0, 40]]
+
+
 def test_breakpoints_times_monotonic_and_normalized():
     bp = envelope_breakpoints([1, 2, 3, 4], plateau=3, transition=7)
     times = [t for t, _ in bp]

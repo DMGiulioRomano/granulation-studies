@@ -78,7 +78,9 @@ def envelope_breakpoints(
     for i, v in enumerate(values):
         t_start = i * step_w
         points.append([round(t_start, 6), v])
-        if not plateau_single:
+        # plateau a larghezza zero (plateau=0): il t_end coinciderebbe col t_start,
+        # un doppione inutile. Solo transizioni -> un punto per valore.
+        if not plateau_single and w_plateau > 0:
             t_end = t_start + w_plateau
             points.append([round(t_end, 6), v])
     points[0][0] = 0.0
