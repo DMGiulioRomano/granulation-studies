@@ -51,9 +51,9 @@ sweep:
   # sceglie quale asse è "lento" (outer loop) e quale "veloce" (inner loop).
   # Il primo nome è l'asse che cambia meno; l'ultimo cambia più spesso.
   # Esempio per e2 con 2 assi:
-  #orderings:
-  #  - [density, grain_duration]      # density lento, grain_duration veloce
-  #  - [grain_duration, density]      # grain_duration lento, density veloce
+  orderings:
+    - [density, grain_duration]      # density lento, grain_duration veloce
+    - [grain_duration, density]      # grain_duration lento, density veloce
   # Esempio per e3 con 3 assi:
   #orderings:
   #  - [density, grain_duration, distribution]      # distribution veloce
@@ -87,16 +87,51 @@ streams:
         start: 0.2
     axes:
       interpolation: step
+
+  # Copia di lettura_avanzata ma NON cartesiana: density e grain_duration si
+  # muovono INSIEME (zip). Serve stessa lunghezza sui due assi -> qui 20 valori
+  # ciascuno via ramp. Un solo ordering (con parallel l'ordine non conta).
+  lettura_avanzata_parallel:
+    base:
+      pointer:
+        start: 0.1
+    axes:
+      interpolation: step
+      density:
+        ramp: {start: 5, stop: 100, step: 5}          # 20 valori: 5,10,...,100
+      grain_duration:
+        ramp: {start: .001, stop: .0105, step: .0005} # 20 valori: .001,.0015,...,.0105
+    sweep:
+      combine: parallel
+      orderings:
+        - [density, grain_duration]
   # Misto: density a scalini (step) mentre grain_duration scorre morbido (cubic),
   # sulla stessa griglia a plateau (durata piena, non collassata). Confronto
   # diretto con lettura_avanzata / _b (tutto-step) a parità di pointer.start.
   lettura_avanzata_c:
     base:
       pointer:
-        start: 0.3
+        start: 0.3    
     axes:
+      plateau: 1
       density:
         interpolation: cubic
+        rand:
+          n: 50
+          min: [[0, 10], [.6, 2], [1, .1]]
+          max: [[0, 20], [.6, 5], [1, 3]]
+          seed: 1988
+      # Prova generatore rand: banda tenuta a .003 fino al 60% della sequenza,
+      # poi si apre (min scende a .002, max sale a .008). Seeded = riproducibile.
+      grain_duration:
+        interpolation: cubic
+        rand:
+          n: 50
+          min: [[0, .001], [.6, .002], [1, .01]]
+          max: [[0, .002], [.6, .005], [1, .1]]
+          seed: 1988
+    sweep:
+      combine: parallel
 
   lettura_avanzata_2:
     base:
