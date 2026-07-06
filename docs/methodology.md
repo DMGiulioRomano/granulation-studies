@@ -31,6 +31,10 @@ path: in quel caso viene risolto automaticamente dal registry dell'engine. I pat
 `pitch.*` (unit-driven, nessun default) e i parametri con `default: null`
 (es. `density`) richiedono un baseline esplicito.
 
+I valori di test si danno con **una** chiave-generatore per asse tra `values`
+(lista esplicita), `ramp` (rampa aritmetica) e `rand` (banda casuale seeded).
+Sintassi e forme di banda: vedi `study-yml-reference.md`.
+
 ### 2. Sweep (OAT → fattoriale)
 
 `sweep` supporta tre modalita', scelte via `sweep.mode` in `study.yml`:
@@ -55,8 +59,11 @@ confrontabili. Il numero di varianti per N assi con v valori ciascuno e'
 `1 + Σ_k C(N,k)·v^k` (la baseline piu' le combinazioni).
 
 **Modalita' `envelope`**: un file per combinazione di *k* assi, in cui quei *k*
-assi attraversano il prodotto cartesiano dei loro valori in ordine lessicografico.
-Ogni valore occupa un *plateau* (ascolto stabile) e il passaggio al successivo
+assi attraversano i loro valori in ordine lessicografico. Con
+`sweep.combine: cartesian` (default) si prende il **prodotto cartesiano** dei
+valori; con `sweep.combine: parallel` gli assi si muovono **insieme** (zip: il
+plateau *i* usa l'*i*-esimo valore di ogni asse, richiede assi di ugual
+lunghezza). Ogni valore occupa un *plateau* (ascolto stabile) e il passaggio al successivo
 avviene tramite una *transition* lineare. I tempi sono normalizzati in `[0, 1]`
 (`time_mode: normalized`); la durata reale dello stream e' `N·plateau + (N-1)·transition`.
 I parametri `plateau` e `transition` (in secondi, default 5.0) si impostano
