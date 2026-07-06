@@ -40,7 +40,9 @@ axes:                             # * almeno un asse
   density:                       # nome dell'asse (libero)
     path: density                # * path YAML nell'engine
     baseline: 20                 # valore a riposo; obbligatorio se l'engine non ha default
-    values: [5, 10, 20, 50]      # * lista valori di test (rimpiazza, non concatena)
+    values: [5, 10, 20, 50]      # * i valori di test. UNA sola chiave-generatore per asse
+                                 # tra {values, ramp, rand} (vedi "Generatori" sotto).
+                                 # values = lista esplicita (rimpiazza, non concatena).
     interpolation: step          # opzionale: override per-asse (default = quello di studio)
 
   grain_duration:
@@ -82,6 +84,68 @@ streams:
     sweep:                       # override parziale di sweep
       orders: [1, 2]             # es. salta le terzine
 ```
+
+## Generatori di valori d'asse
+
+I valori di test di un asse si danno con **esattamente una** chiave-generatore
+tra `values`, `ramp`, `rand` (mutuamente esclusive: zero o più di una è errore).
+In una stream, la chiave-generatore dell'override rimpiazza quella ereditata
+sullo stesso asse (non si sommano).
+
+### `values` — lista esplicita
+
+```yaml
+values: [5, 10, 20, 50]        # i valori così come sono
+```
+
+### `ramp` — rampa aritmetica
+
+```yaml
+ramp: {start: 5, stop: 100, step: 5}   # 5, 10, 15, ..., 100
+```
+
+- `step` deve essere `> 0`. La direzione si deduce da `start`/`stop`
+  (discendente se `start > stop`).
+- Uno `stop` che cade sulla griglia è incluso; uno che non ci cade non viene
+  mai oltrepassato (conteggio intero anti-drift float).
+
+### `rand` — banda casuale, seeded
+
+`n` valori estratti uniformemente dentro una banda `[min, max]` che può essere
+fissa o mobile lungo la sequenza. Deterministico: stesso `seed` → stessa
+sequenza (serve al ciclo rigenera-e-confronta).
+
+```yaml
+rand:
+  n: 50                        # quanti valori (>= 1)
+  min: .001                    # estremo inferiore della banda (vedi forme sotto)
+  max: .01                     # estremo superiore
+  seed: 1988                   # opzionale, default 0
+```
+
+`min` e `max` sono un **envelope di 2° ordine** (una banda che genera valori);
+ognuno dei due accetta queste forme:
+
+| Forma | Significato |
+|-------|-------------|
+| scalare `.003` | banda a livello costante |
+| `[a, b]` | rampa lineare `a → b` lungo la sequenza |
+| `[[t, v], ...]` | breakpoint temporizzati, `t` in `[0, 1]`, interpolati **linear** (hold fuori dai bordi) |
+| `{type, points}` | breakpoint con `type` esplicito: `linear` (rampa) o `step` (tieni-e-salta) |
+
+Esempio con banda mobile (si apre dopo il 60% della sequenza):
+
+```yaml
+rand:
+  n: 50
+  min: [[0, 10], [.6, 2], [1, .1]]
+  max: [[0, 20], [.6, 5], [1, 3]]
+  seed: 1988
+```
+
+> Con `sweep.combine: parallel` (vedi sopra) più assi generati con lo stesso `n`
+> si muovono insieme: si sentono più modulazioni contemporaneamente, senza il
+> prodotto cartesiano.
 
 ## Output con `streams:`
 
