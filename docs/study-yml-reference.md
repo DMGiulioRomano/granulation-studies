@@ -52,6 +52,13 @@ axes:                             # * almeno un asse
 # Configurazione dello sweep.
 sweep:
   mode: envelope                 # discrete | envelope | both (default discrete)
+  combine: cartesian             # cartesian | parallel (default cartesian)
+                                 # cartesian: prodotto — un asse fermo mentre l'altro
+                                 #   scorre, N^k plateau.
+                                 # parallel: zip — gli assi si muovono INSIEME (plateau i
+                                 #   = i-esimo valore di ogni asse), N plateau. Richiede
+                                 #   assi di ugual lunghezza (utile con rand a stesso n:
+                                 #   si sentono più modulazioni contemporaneamente).
   orders: [1, 2, 3]             # ordini da generare: 1=OAT, 2=coppie, 3=terzine…
   orderings:                     # permutazioni esplicite (funziona per e2, e3, qualsiasi ordine)
     - [density, grain_duration]                # primo = asse lento (outer), ultimo = veloce (inner)

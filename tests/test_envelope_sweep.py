@@ -1,7 +1,10 @@
+import pytest
+
 from granstudies.study_spec import parse_study_spec
 from granstudies.envelope_sweep import (
     envelope_breakpoints,
     cartesian_combinations,
+    parallel_combinations,
     EnvelopeVariant,
     generate_envelope_variants,
 )
@@ -131,6 +134,34 @@ def test_cartesian_two_axes_lexicographic():
     assert combos[8] == {"density": 400, "grain_duration": 0.2}
 
 
+# --- parallel_combinations -----------------------------------------------------
+
+def test_parallel_two_axes_zips_not_product():
+    spec = _spec([2])
+    combos = parallel_combinations([spec.axis("density"), spec.axis("grain_duration")])
+    # zip: 3 plateau (non 9), gli assi si muovono insieme
+    assert combos == [
+        {"density": 5, "grain_duration": 0.01},
+        {"density": 50, "grain_duration": 0.05},
+        {"density": 400, "grain_duration": 0.2},
+    ]
+
+
+def test_parallel_rejects_unequal_lengths():
+    spec = parse_study_spec({
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {
+            "plateau": 5, "transition": 5,
+            "density": {"path": "density", "baseline": 20, "values": [5, 50, 400]},
+            "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05]},
+        },
+        "sweep": {"mode": "envelope", "orders": [2]},
+    })
+    with pytest.raises(ValueError):
+        parallel_combinations([spec.axis("density"), spec.axis("grain_duration")])
+
+
 # --- generate_envelope_variants ------------------------------------------------
 
 def test_naming_o1():
@@ -201,6 +232,50 @@ def test_duration_o4_with_four_axes():
     assert len(v.combinations) == 81
     # N=81 -> 81*5 + 80*5 = 805
     assert v.duration(spec) == 805
+
+
+# --- combine: parallel (end-to-end) --------------------------------------------
+
+def _spec_parallel(orders):
+    return parse_study_spec({
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {
+            "plateau": 5, "transition": 5,
+            "density": {"path": "density", "baseline": 20, "values": [5, 50, 400]},
+            "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05, 0.2]},
+            "pan": {"path": "pan", "baseline": 0.0, "values": [-1.0, 0.0, 1.0]},
+        },
+        "sweep": {"mode": "envelope", "orders": orders, "combine": "parallel"},
+    })
+
+
+def test_parallel_o2_combinations_are_zipped():
+    spec = _spec_parallel([2])
+    v = next(x for x in generate_envelope_variants(spec) if x.name == "e2__density__grain_duration")
+    # zip -> 3 plateau (non 9), assi mossi insieme
+    assert v.combinations == [
+        {"density": 5, "grain_duration": 0.01},
+        {"density": 50, "grain_duration": 0.05},
+        {"density": 400, "grain_duration": 0.2},
+    ]
+    # durata riflette N=3, non N=9
+    assert v.duration(spec) == 3 * 5 + 2 * 5
+
+
+def test_parallel_respects_orderings():
+    spec = parse_study_spec({
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {
+            "plateau": 5, "transition": 5,
+            "density": {"path": "density", "baseline": 20, "values": [5, 50, 400]},
+            "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05, 0.2]},
+        },
+        "sweep": {"mode": "envelope", "orderings": [["density", "grain_duration"]], "combine": "parallel"},
+    })
+    v = generate_envelope_variants(spec)[0]
+    assert len(v.combinations) == 3
 
 
 # --- EnvelopeVariant.envelope_types --------------------------------------------

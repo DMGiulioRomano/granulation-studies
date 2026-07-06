@@ -104,6 +104,33 @@ def cartesian_combinations(axes: List[Axis]) -> List[Dict[str, float]]:
     return combos
 
 
+def combinations_for(axes: List[Axis], combine: str) -> List[Dict[str, float]]:
+    """Combinazioni degli assi secondo la strategia ``combine`` dello studio."""
+    if combine == "parallel":
+        return parallel_combinations(axes)
+    return cartesian_combinations(axes)
+
+
+def parallel_combinations(axes: List[Axis]) -> List[Dict[str, float]]:
+    """Combinazioni in *parallelo* (zip): gli assi si muovono insieme.
+
+    Invece del prodotto cartesiano (un asse fermo mentre l'altro scorre), il
+    plateau ``i`` prende l'``i``-esimo valore di *ogni* asse: si sentono le
+    modulazioni degli assi contemporaneamente, senza esplosione ``N^k``. Richiede
+    che gli assi abbiano la stessa lunghezza (niente troncamento silenzioso).
+    """
+    lengths = {len(ax.values) for ax in axes}
+    if len(lengths) > 1:
+        detail = ", ".join(f"{ax.name}={len(ax.values)}" for ax in axes)
+        raise ValueError(
+            f"combine: parallel richiede assi di ugual lunghezza ({detail})."
+        )
+    return [
+        {ax.name: ax.values[i] for ax in axes}
+        for i in range(next(iter(lengths), 0))
+    ]
+
+
 @dataclass(frozen=True)
 class EnvelopeVariant:
     """Una combinazione di assi mossi insieme tramite envelope sincronizzati.
@@ -204,7 +231,7 @@ def generate_envelope_variants(spec: StudySpec) -> List[EnvelopeVariant]:
                 name=_name(len(moved), moved),
                 order=len(moved),
                 moved=moved,
-                combinations=cartesian_combinations(axes_ordered),
+                combinations=combinations_for(axes_ordered, spec.combine),
             )
         )
 
@@ -215,7 +242,7 @@ def generate_envelope_variants(spec: StudySpec) -> List[EnvelopeVariant]:
             moved = [ax.name for ax in combo]
             if tuple(moved) in explicit_keys:
                 continue  # ponytail: già emessa come ordering esplicito
-            combinations = cartesian_combinations(list(combo))
+            combinations = combinations_for(list(combo), spec.combine)
             variants.append(
                 EnvelopeVariant(
                     name=_name(order, moved),

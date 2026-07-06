@@ -84,6 +84,24 @@ def test_stream_ramp_override_replaces_inherited_values():
     ]
 
 
+def test_combine_defaults_to_cartesian():
+    spec = parse_study_spec(_spec_dict())
+    assert spec.combine == "cartesian"
+
+
+def test_combine_parallel_is_read():
+    d = _spec_dict()
+    d["sweep"]["combine"] = "parallel"
+    assert parse_study_spec(d).combine == "parallel"
+
+
+def test_combine_rejects_unknown_value():
+    d = _spec_dict()
+    d["sweep"]["combine"] = "diagonale"
+    with pytest.raises(ValueError):
+        parse_study_spec(d)
+
+
 def test_validate_rejects_empty_axes():
     with pytest.raises(ValueError):
         parse_study_spec({"axes": {}})
