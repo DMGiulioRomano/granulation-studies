@@ -149,24 +149,32 @@ rand:
 > si muovono insieme: si sentono più modulazioni contemporaneamente, senza il
 > prodotto cartesiano.
 
-## Output con `streams:`
+## Layout di `generated/`
 
-Il nome della stream è incorporato nel basename dei file generati (non solo
-nella sotto-cartella) per facilitare l'identificazione in Sonic Visualiser.
+Primo livello = tipo di artefatto, secondo livello = **processo** (`sweep` /
+`stack`). Il nome della stream è incorporato nel basename dei file sweep (non
+solo nella sotto-cartella) per facilitare l'identificazione in Sonic
+Visualiser; il documento stack è uno solo (gli stream vi sono collassati).
 
 ```
 generated/<study_id>/
-  variants/envelope/<stream_id>/e1__density.yml
-  audio/envelope/<stream_id>/<stream_id>_e1__density.aif
-  sv/envelope/<stream_id>/<stream_id>_e1__density.sv
+  yaml/sweep/envelope/<stream_id>/e1__density.yml
+  yaml/stack/stack.yml
+  audio/sweep/envelope/<stream_id>/<stream_id>_e1__density.aif
+  audio/stack/stack.aif
+  sv/sweep/envelope/<stream_id>/<stream_id>_e1__density.sv
 ```
+
+`generated/` è rigenerabile: dopo un aggiornamento basta rilanciare
+`make sweep` / `make stack`.
 
 ## Comandi Make
 
 ```bash
 make sweep  STUDY=<id>                    # genera tutte le stream
 make sweep  STUDY=<id> STREAM=nome        # genera solo quella stream
-make render STUDY=<id>                    # renderizza le varianti cambiate (incrementale, in parallelo)
+make stack  STUDY=<id>                    # genera il documento multi-stream (stack)
+make render STUDY=<id>                    # renderizza gli YAML cambiati (incrementale, in parallelo)
 make render STUDY=<id> FORCE=1            # rirenderizza tutto (es. dopo update engine o sample)
 make render STUDY=<id> JOBS=4             # limita i worker paralleli (default: min(8, cpu))
 make sv     STUDY=<id>                    # genera .sv per tutte le stream

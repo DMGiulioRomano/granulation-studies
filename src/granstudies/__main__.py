@@ -1,6 +1,7 @@
 """CLI di granstudies: orchestrazione della pipeline a stadi.
 
-    granstudies sweep    STUDY      genera le varianti YAML
+    granstudies sweep    STUDY      genera le varianti YAML (processo sweep)
+    granstudies stack    STUDY      genera il documento multi-stream (processo stack)
     granstudies render   STUDY      renderizza audio + partitura
     granstudies describe STUDY      calcola descrittori, aggiorna results.yml
     granstudies matrix   STUDY      costruisce kinship.json
@@ -45,12 +46,16 @@ def _load_spec(study: str):
     return load_study_spec(os.path.join(study_dir(study), "study.yml"))
 
 
+def _load_data(study: str) -> Dict[str, Any]:
+    path = os.path.join(study_dir(study), "study.yml")
+    with open(path, "r", encoding="utf-8") as fh:
+        return yaml.safe_load(fh)
+
+
 def _load_specs(study: str, stream: str | None = None) -> list:
     from .study_spec import resolve_streams
 
-    path = os.path.join(study_dir(study), "study.yml")
-    with open(path, "r", encoding="utf-8") as fh:
-        data = yaml.safe_load(fh)
+    data = _load_data(study)
     sid = data.get("study_id") or study
     specs = resolve_streams(data, sid)
     if stream:
@@ -65,10 +70,15 @@ def _load_specs(study: str, stream: str | None = None) -> list:
 def cmd_sweep(study: str, stream: str | None = None) -> int:
     from .render import write_variants
 
+    # Attivazione per presenza: parte solo il processo il cui blocco e'
+    # definito nel documento (nessun selettore mode a scegliere tra i due).
+    if "sweep" not in _load_data(study):
+        print(f"[sweep] nessun blocco 'sweep:' in {study}/study.yml — niente da fare.")
+        return 0
     specs = _load_specs(study, stream)
     if not specs:
         return 1
-    out = os.path.join(gen_dir(study), "variants")
+    out = os.path.join(gen_dir(study), "yaml", "sweep")
     # Snapshot degli mtime pre-sweep: _dump non tocca i file a contenuto
     # identico, quindi "mtime cambiato o file nuovo" = variante da rirenderizzare
     # (stesso segnale usato dal render incrementale).
@@ -135,6 +145,25 @@ def _warn_orphans(variants_dir: str, written: set[str], scoped: bool) -> None:
         )
 
 
+def cmd_stack(study: str) -> int:
+    from .render import write_stack
+
+    if "stack" not in _load_data(study):
+        print(f"[stack] nessun blocco 'stack:' in {study}/study.yml — niente da fare.")
+        return 0
+    specs = _load_specs(study)
+    if not specs:
+        return 1
+    out = os.path.join(gen_dir(study), "yaml")
+    target = os.path.join(out, "stack", "stack.yml")
+    before = os.path.getmtime(target) if os.path.exists(target) else None
+    written = write_stack(specs, out)
+    changed = before != os.path.getmtime(written[0])
+    stato = "aggiornato" if changed else "invariato"
+    print(f"[stack] documento multi-stream ({len(specs)} stream, {stato}) -> {written[0]}")
+    return 0
+
+
 def cmd_render(
     study: str, no_score: bool, force: bool = False, jobs: int | None = None
 ) -> int:
@@ -142,9 +171,11 @@ def cmd_render(
 
     spec = _load_spec(study)
     g = gen_dir(study)
-    variant_dir = os.path.join(g, "variants")
+    # Il render e' generico: discende yaml/ ricorsivamente (sweep/ e stack/) e
+    # rispecchia i sotto-path sotto audio/ e score/.
+    variant_dir = os.path.join(g, "yaml")
     if not os.path.isdir(variant_dir):
-        print(f"[render] nessuna variante: esegui prima 'sweep {study}'.", file=sys.stderr)
+        print(f"[render] nessuno YAML: esegui prima 'sweep {study}' o 'stack {study}'.", file=sys.stderr)
         return 1
     t0 = time.perf_counter()
     manifest = render_variants(
@@ -169,10 +200,12 @@ def cmd_describe(study: str) -> int:
 
     spec = _load_spec(study)
     g = gen_dir(study)
-    # La curation lavora solo sulle varianti discrete: l'audio sta in
-    # ``audio/discrete/`` (layout di ``write_variants``); fallback flat per
-    # backward compat con output precedenti.
-    audio_dir = os.path.join(g, "audio", "discrete")
+    # La curation lavora solo sulle varianti discrete dello sweep: l'audio sta
+    # in ``audio/sweep/discrete/``; fallback sui layout precedenti
+    # (``audio/discrete/``, flat) per output non ancora rigenerati.
+    audio_dir = os.path.join(g, "audio", "sweep", "discrete")
+    if not os.path.isdir(audio_dir):
+        audio_dir = os.path.join(g, "audio", "discrete")
     if not os.path.isdir(audio_dir):
         audio_dir = os.path.join(g, "audio")
     if not os.path.isdir(audio_dir):
@@ -269,9 +302,9 @@ def cmd_sv(study: str, layout: str, markers: bool = True, stream: str | None = N
     total: list = []
     for spec in specs:
         sub = spec.stream_id or ""
-        variant_dir = os.path.join(g, "variants", "envelope", sub) if sub else os.path.join(g, "variants", "envelope")
-        audio_dir = os.path.join(g, "audio", "envelope", sub) if sub else os.path.join(g, "audio", "envelope")
-        sv_dir = os.path.join(g, "sv", "envelope", sub) if sub else os.path.join(g, "sv", "envelope")
+        variant_dir = os.path.join(g, "yaml", "sweep", "envelope", sub) if sub else os.path.join(g, "yaml", "sweep", "envelope")
+        audio_dir = os.path.join(g, "audio", "sweep", "envelope", sub) if sub else os.path.join(g, "audio", "sweep", "envelope")
+        sv_dir = os.path.join(g, "sv", "sweep", "envelope", sub) if sub else os.path.join(g, "sv", "sweep", "envelope")
 
         if not os.path.isdir(variant_dir):
             print(f"[sv] [{sub or 'default'}] nessuna variante envelope: esegui prima 'sweep {study}'.", file=sys.stderr)
@@ -325,6 +358,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("study")
     sp.add_argument("--stream", default=None, help="genera solo questa stream (default: tutte)")
 
+    stp = sub.add_parser("stack", help="genera il documento multi-stream (stack)")
+    stp.add_argument("study")
+
     rp = sub.add_parser("render", help="renderizza audio + partitura")
     rp.add_argument("study")
     rp.add_argument("--no-score", action="store_true", help="salta i PDF di partitura")
@@ -366,6 +402,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "sweep":
         return cmd_sweep(args.study, args.stream)
+    if args.command == "stack":
+        return cmd_stack(args.study)
     if args.command == "render":
         return cmd_render(args.study, args.no_score, args.force, args.jobs)
     if args.command == "describe":

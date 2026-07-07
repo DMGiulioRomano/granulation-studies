@@ -4,6 +4,10 @@
 sweep: _require-study $(MARKER)
 	$(PY) -m granstudies sweep $(STUDY) $(if $(STREAM),--stream $(STREAM),)
 
+.PHONY: stack
+stack: _require-study $(MARKER)
+	$(PY) -m granstudies stack $(STUDY)
+
 .PHONY: describe
 describe: _require-study $(MARKER)
 	$(PY) -m granstudies describe $(STUDY)
@@ -24,4 +28,4 @@ sv: _require-study render
 	$(PY) -m granstudies sv $(STUDY) $(if $(LAYOUT),--layout $(LAYOUT),) $(if $(STREAM),--stream $(STREAM),)
 
 .PHONY: all-study
-all-study: sweep render #describe matrix compose render-final
+all-study: sweep stack render #describe matrix compose render-final

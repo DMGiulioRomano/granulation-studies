@@ -16,6 +16,7 @@ from . import engine_bridge
 from .study_spec import StudySpec
 from .sweep import generate_discrete_variants
 from .envelope_sweep import EnvelopeVariant, generate_envelope_variants
+from .stack import generate_stack_document
 from .yaml_builder import build_document
 
 
@@ -100,6 +101,21 @@ def _write_envelope(spec: StudySpec, out_dir: str) -> List[str]:
     return written
 
 
+def write_stack(specs: List[StudySpec], out_dir: str) -> List[str]:
+    """Scrive il documento multi-stream del processo stack.
+
+    Un solo file (``out_dir/stack/stack.yml``): stack collassa gli stream, non
+    enumera varianti. Stessa scrittura incrementale di ``_dump`` (mtime fermo a
+    contenuto identico -> il render salta i documenti gia' aggiornati).
+    """
+    doc = generate_stack_document(specs)
+    d = os.path.join(out_dir, "stack")
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, "stack.yml")
+    _dump(path, doc)
+    return [path]
+
+
 def write_variants(spec: StudySpec, out_dir: str) -> List[str]:
     """Genera lo sweep e scrive i file YAML in sotto-cartelle per modalita'.
 
@@ -177,13 +193,18 @@ def render_variants(
     for yaml_path in yaml_files:
         rel = os.path.relpath(yaml_path, variant_dir)
         name = os.path.splitext(rel)[0]
-        # Se il path ha 3 componenti (mode/stream_id/variant), aggiungo
-        # il nome dello stream al basename per distinguerli in SV.
+        # Se lo YAML sta in una sotto-cartella di stream della modalita'
+        # (.../{discrete|envelope}/<stream_id>/<variante>), aggiungo il nome
+        # dello stream al basename per distinguerli in SV. La regola e'
+        # relativa alla cartella di modalita', cosi' vale sia per il layout
+        # yaml/sweep/... sia per directory di varianti passate direttamente;
+        # i documenti stack (stack/stack.yml) restano senza prefisso.
         parts = name.split(os.sep)
-        if len(parts) >= 3:
-            audio_basename = f"{parts[-2]}_{parts[-1]}"
-        else:
-            audio_basename = parts[-1]
+        audio_basename = parts[-1]
+        for i, p in enumerate(parts[:-1]):
+            if p in ("discrete", "envelope") and len(parts) - i >= 3:
+                audio_basename = f"{parts[-2]}_{parts[-1]}"
+                break
         audio_path = os.path.join(audio_dir, *parts[:-1], audio_basename + ".aif")
         pdf_path = os.path.join(score_dir, f"{name}.pdf") if score_dir else None
 

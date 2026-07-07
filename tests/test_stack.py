@@ -98,3 +98,109 @@ def test_x_linear_with_y_rand_without_n_raises():
 def test_x_default_with_y_rand_without_n_raises():
     with pytest.raises(ValueError):
         axis_envelope({"rand": {"min": 0, "max": 1}}, None, duration=10.0)
+
+
+# --- generate_stack_document: N stream collassati in un documento ----------------
+
+def _study_data():
+    return {
+        "study_id": "s",
+        "title": "Studio stack",
+        "seed": 1988,
+        "duration": 30,
+        "base": {"sample": "x.wav", "volume": -6},
+        "axes": {
+            "density": {
+                "path": "density",
+                "baseline": 20,
+                "values": [5, 50, 400],
+                "interpolation": "cubic",
+            },
+            "grain_duration": {
+                "path": "grain.duration",
+                "values": [0.01],           # un solo valore -> resta scalare
+            },
+        },
+        "stack": {"seed": 42},
+        "streams": {
+            "voce_a": {"base": {"pointer": {"start": 0.1}}},
+            "voce_b": {"base": {"pointer": {"start": 0.4}}},
+        },
+    }
+
+
+def _specs(data=None):
+    from granstudies.study_spec import resolve_streams
+
+    return resolve_streams(data or _study_data())
+
+
+def test_document_collapses_all_streams():
+    from granstudies.stack import generate_stack_document
+
+    doc = generate_stack_document(_specs())
+    assert len(doc["streams"]) == 2
+    assert doc["duration"] == 30
+    assert doc["seed"] == 1988
+    ids = [s["stream_id"] for s in doc["streams"]]
+    assert ids == ["voce_a", "voce_b"]
+
+
+def test_document_axes_become_independent_envelopes():
+    from granstudies.stack import generate_stack_document
+
+    doc = generate_stack_document(_specs())
+    s = doc["streams"][0]
+    assert s["density"] == {
+        "type": "cubic",
+        "points": [[0.0, 5], [0.5, 50], [1.0, 400]],
+        "time_mode": "normalized",
+    }
+    assert s["time_mode"] == "normalized"
+    assert s["duration"] == 30
+
+
+def test_document_single_value_axis_stays_scalar():
+    from granstudies.stack import generate_stack_document
+
+    doc = generate_stack_document(_specs())
+    assert doc["streams"][0]["grain"]["duration"] == 0.01
+
+
+def test_document_deterministic_with_rspline_axis():
+    from granstudies.stack import generate_stack_document
+
+    data = _study_data()
+    data["axes"]["density"] = {
+        "path": "density",
+        "baseline": 20,
+        "rand": {"min": 5, "max": 50},
+        "interpolation": "cubic",
+    }
+    data["stack"]["density"] = {"rand": {"cps": {"base": 3, "range": 1}}}
+    a = generate_stack_document(_specs(data))
+    b = generate_stack_document(_specs(data))
+    assert a == b
+    # Senza seed globali, l'auto-derivazione per-stream decorrela le voci:
+    # stessi assi, envelope diversi tra voce_a e voce_b.
+    del data["stack"]["seed"]
+    c = generate_stack_document(_specs(data))
+    pts_a = c["streams"][0]["density"]["points"]
+    pts_b = c["streams"][1]["density"]["points"]
+    assert pts_a != pts_b
+
+
+def test_document_emerging_values_clamped_to_engine_bounds():
+    # I valori espliciti fuori bounds falliscono gia' al parse; quelli che
+    # EMERGONO (Y-rand deferita, banda sotto il minimo engine) vanno clampati.
+    from granstudies.stack import generate_stack_document
+
+    data = _study_data()
+    data["axes"]["grain_duration"] = {
+        "path": "grain.duration",
+        "rand": {"min": 0.0001, "max": 0.0002},   # engine min: 0.001
+    }
+    data["stack"]["grain_duration"] = {"rand": {"cps": {"base": 2, "range": 0}}}
+    doc = generate_stack_document(_specs(data))
+    pts = doc["streams"][0]["grain"]["duration"]["points"]
+    assert all(v == 0.001 for _, v in pts)                # clampati al bound
