@@ -288,3 +288,92 @@ Rende esplicito l'invariante (axes = solo Y). Piccolo, non una riscrittura:
 confermare. Le questioni della sezione 9 = interrogare qui.** Il vecchio handoff è
 superato da questo file: se trovi contraddizioni con quello, ignora quello e segui
 la sezione 8.
+
+## 11. Schema YAML di `stack:` (deciso via grilling)
+
+Blocco `stack:` **piatto** e top-level, gemello di `sweep:`. Esempio completo (study01):
+
+```yaml
+duration: 30                      # durata condivisa; stack normalizza su questa
+axes:                             # SOLO Y + interpolation (invariante)
+  seed: 1988                      # seed-Y globale (default, il per-asse vince)
+  density:
+    path: density
+    baseline: 20
+    rand: {min: [[0,10],[1,2]], max: [[0,20],[1,5]]}   # Y band, NO n (n dalla X)
+    interpolation: cubic          # curva tra i breakpoint (Y-oriented)
+  grain_duration:
+    path: grain.duration
+    ramp: {start: .001, stop: .01, step: .0005}        # Y a n fisso (Y possiede n)
+
+stack:                            # SOLO X (il processo possiede X e durata)
+  seed: 42                        # seed-X globale (chiave riservata)
+  density:                        # X-rand (rspline): la X possiede n
+    rand:
+      cps:                        # frequenza di generazione (Hz), inviluppi
+        base:  [[0, 3], [1, 10]]  # centro/pavimento
+        range: [[0, 1], [1, 1]]   # ampiezza; banda = [base, base+range]
+      seed: 7                     # seed-X per-asse (vince sul globale)
+  # grain_duration assente -> X di default 'linear' (n dalla Y = len(ramp))
+
+streams:                          # versioni; stack le collassa in un documento
+  voce_a: {base: {pointer: {start: 0.1}}}
+  voce_b: {base: {pointer: {start: 0.4}}, stack: {seed: 43}}   # override per-stream
+```
+
+**Regole (da validare):**
+- `stack:` chiavi = `seed` (riservata, seed-X globale) + nomi d'asse → config X-strategy.
+- Asse non elencato in `stack:` → X-strategy di default **`linear`** (`t_i = i/(n-1)`,
+  `n` dalla Y). `linear` non ha parametri.
+- X-strategy `rand`: `{cps: {base: <env>, range: <env>}, seed?: int}`. `<env>` = stesse
+  forme della banda Y-rand (scalare | `[a,b]` | `[[t,v],…]` | `{type, points}`), riuso di
+  `_threshold_at`. Banda al tempo `t`: `[base(t), base(t)+range(t)]`, in **Hz sulla durata
+  reale**, poi tempi normalizzati in `[0,1]`.
+- **Accoppiamento `n` (validato nei due sensi):** X-`rand` ⟺ Y-`rand` **senza `n`** (X
+  possiede n, Y campionata a `t_i`). X-`linear` ⟺ Y possiede n (`values`/`ramp`/`rand`-con-n).
+  X-rand + Y con n = errore; X-linear + Y-rand senza n = errore.
+- **Precedenza seed** (decisione 11): Y → `rand.seed` per-asse > `axes.seed` globale
+  (override per-stream) > `hash(stream_id)`. X → `stack.<asse>.rand.seed` > `stack.seed`
+  globale (override per-stream) > `hash(stream_id)`.
+- **Mute** (decisione 9): `base.volume` per-stream, engine-native, fuori da `stack:`.
+
+## 12. Implementazione — todo-list TDD
+
+Ordine a dipendenze; ogni step = un'unità red-green con il suo test rosso. Le suite
+esistenti (`tests/test_*.py`) restano verdi a ogni step.
+
+- **S0 — Refactor abilitante: plateau/transition da `axes` a `sweep`.** (sez. 5)
+  *Red:* parse di uno study con `sweep: {plateau: 3, transition: 2}` → `spec.plateau==3`
+  (oggi letto da `axes_raw`, fallisce). *Green:* `study_spec.py:37` restringe
+  `_AXES_RESERVED_KEYS` a `("interpolation",)`; `:226-228` leggono da `sweep_cfg`. Migra
+  `study01/study.yml`. Nessuna dipendenza. Sblocca l'invariante.
+- **S1 — Registry X-strategy + `linear`.** Nuovo modulo `x_strategies.py`, gemello di
+  `value_generators.py`. *Red:* `resolve_x({"linear": {}}, n=5) == [0,.25,.5,.75,1]`;
+  `n=1 → [0.0]`. Nessuna dipendenza.
+- **S2 — X-rand (rspline, genera tempi e possiede `n`).** *Red:* `rand_x` deterministico
+  con seed → sequenza fissa; tempi ordinati in `[0,1]`; `base` più alta → più punti;
+  guardia su banda ~0 (n=0) e runaway (cap n). Dipende: S1 (registry), banda condivisa.
+- **S3 — Y-rand campionata a tempi arbitrari (`rand_at`).** Variante di `rand` che pesca
+  la banda ai `t_i` dati (non a `i/(n-1)`). *Red:* `rand_at([0,.5,1], min, max, seed)`
+  deterministico ai fracs dati. Dipende: nessuna (estende `value_generators`).
+- **S4 — Assemblaggio envelope d'asse (coupling X×Y×interp).** Data la config d'asse →
+  `[[t,v],…]`: caso X-rand (tempi da S2 → Y da S3), caso linear (n dalla Y → S1 → zip).
+  *Red:* asse rspline end-to-end → coppie con conteggi uguali, deterministico; validazione
+  n-ownership (errore nei due casi). Dipende: S1,S2,S3.
+- **S5 — Assemblaggio multi-stream.** `yaml_builder`: da N stream mergeati → un documento
+  `streams: [N]` (scalari restano scalari, liste → envelope). *Red:* 2 stream → 
+  `doc["streams"]` ha 2 entry; misto scalare/envelope. Dipende: nessuna (estende `yaml_builder.py:96`).
+- **S6 — Parsing blocco `stack:` + modello seed.** Schema piatto (sez. 11); precedenza
+  seed; auto-derivazione `hash(stream_id)`; override per-stream via `_deep_merge` (già c'è).
+  *Red:* parse study con `stack:` → config X per-stream risolte; due stream senza seed →
+  sequenze diverse; seed esplicito → riproducibile; per-asse vince sul globale. Dipende: S1-S4.
+- **S7 — `cmd_stack` + layout + pipeline.** `resolve_streams` → per asse/stream envelope
+  (S4) → un documento (S5) → `generated/<study>/yaml/stack/stack.yml`. Rinomina layout
+  `{yaml,audio}/{sweep,stack}`; aggiorna join in `__main__.py`/`render.py`; restringe
+  `_warn_orphans` a `sweep/`; target make `stack`; `all-study: sweep stack render`.
+  *Red:* integrazione — `cmd_stack` su fixture → `yaml/stack/stack.yml` con N stream; render
+  lo raccoglie. Dipende: S5,S6.
+- **S8 — Rimozione `parallel` (ULTIMO, decisione 14).** Migra `lettura_avanzata_parallel`
+  e `lettura_avanzata_c` a `stack`; cancella `parallel_combinations` + campo `combine` +
+  validazione + ramo in `combinations_for`. *Red:* sweep non accetta più `combine`; gli
+  stream migrati producono output stack. Dipende: S7 funzionante e validato a orecchio.
