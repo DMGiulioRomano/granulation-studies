@@ -61,7 +61,6 @@ class StudySpec:
     orders: List[int]
     orderings: List[List[str]] = field(default_factory=list)
     mode: str = "discrete"          # discrete | envelope | both
-    combine: str = "cartesian"      # cartesian (prodotto) | parallel (zip)
     plateau: float = 5.0            # secondi per plateau (ascolto stabile)
     transition: float = 5.0         # secondi per transizione tra plateau
     interpolation: str = "linear"   # linear | cubic
@@ -104,10 +103,6 @@ class StudySpec:
 def _validate(spec: StudySpec) -> None:
     if not spec.axes:
         raise ValueError("Lo studio deve definire almeno un asse in 'axes'.")
-    if spec.combine not in ("cartesian", "parallel"):
-        raise ValueError(
-            f"sweep.combine '{spec.combine}' non valido: usa 'cartesian' o 'parallel'."
-        )
     n = len(spec.axes)
     for order in spec.orders:
         if order < 0 or order > n:
@@ -273,6 +268,12 @@ def parse_study_spec(data: Dict[str, Any], study_id: str | None = None) -> Study
         _defaults_cache = parameter_defaults()
 
     sweep_cfg = data.get("sweep") or {}
+    if "combine" in sweep_cfg:
+        raise ValueError(
+            "sweep.combine non esiste piu': lo sweep fa solo il prodotto "
+            "cartesiano. L'accoppiamento degli assi (ex parallel) vive nel "
+            "processo stack — stessa strategy-X e stesso n."
+        )
     stack_axes, stack_seed = _stack_config(data)
     axes_seed = axes_raw.get("seed")
     sid = study_id or data.get("study_id") or "study"
@@ -356,7 +357,6 @@ def parse_study_spec(data: Dict[str, Any], study_id: str | None = None) -> Study
         orders=orders,
         orderings=orderings,
         mode=sweep_cfg.get("mode", "discrete"),
-        combine=sweep_cfg.get("combine", "cartesian"),
         plateau=float(sweep_cfg.get("plateau", 5.0)),
         transition=float(sweep_cfg.get("transition", 5.0)),
         interpolation=axes_raw.get("interpolation", "linear"),

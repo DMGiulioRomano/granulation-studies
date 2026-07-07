@@ -84,21 +84,12 @@ def test_stream_ramp_override_replaces_inherited_values():
     ]
 
 
-def test_combine_defaults_to_cartesian():
-    spec = parse_study_spec(_spec_dict())
-    assert spec.combine == "cartesian"
-
-
-def test_combine_parallel_is_read():
+def test_sweep_combine_removed_raises_with_migration_hint():
+    # combine: parallel non esiste piu': l'accoppiamento degli assi vive nel
+    # processo stack (stessa X, stesso n). Errore chiaro, non silenzio.
     d = _spec_dict()
     d["sweep"]["combine"] = "parallel"
-    assert parse_study_spec(d).combine == "parallel"
-
-
-def test_combine_rejects_unknown_value():
-    d = _spec_dict()
-    d["sweep"]["combine"] = "diagonale"
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="stack"):
         parse_study_spec(d)
 
 
