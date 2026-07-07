@@ -11,9 +11,20 @@ from __future__ import annotations
 
 import math
 import random
+import zlib
 from typing import Any, Callable, Dict, List, Sequence, Union
 
 Threshold = Union[float, Sequence[float], Dict[str, Any]]
+
+
+def stable_seed(key: str) -> int:
+    """Seed deterministico da una chiave testuale (es. l'id di uno stream).
+
+    ``hash()`` di Python e' salato per processo (PYTHONHASHSEED): inutilizzabile
+    per il ciclo rigenera-e-confronta. CRC32 e' stabile tra run e macchine, e
+    resta stabile al riordino/rinomina degli altri stream.
+    """
+    return zlib.crc32(key.encode("utf-8"))
 
 
 def ramp(start: float, stop: float, step: float) -> List[float]:
