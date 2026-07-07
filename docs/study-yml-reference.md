@@ -21,10 +21,10 @@ base:                             # *
     speed_ratio: 0
     start: 0.3
 
-# Assi (parametri sotto osservazione) + timing envelope.
+# Assi (parametri sotto osservazione). axes conosce solo Y: quali parametri si
+# muovono, con che valori e con che curva. Il timing (plateau/transition) è del
+# processo sweep e vive sotto `sweep:`.
 axes:                             # * almeno un asse
-  plateau: 5                     # secondi di ascolto stabile per valore (default 5.0)
-  transition: 5                  # secondi di transizione tra plateau (default 5.0)
   interpolation: linear          # linear | cubic | step (default studio, default linear)
                                  # step: nessuna rampa, ogni valore è tenuto e salta
                                  # netto al successivo. È il DEFAULT ereditato dagli assi
@@ -51,9 +51,11 @@ axes:                             # * almeno un asse
     values: [0.001, 0.01, 0.05]
     interpolation: cubic         # es. density a scalini + grain morbido nello stesso file
 
-# Configurazione dello sweep.
+# Configurazione dello sweep (il processo possiede X: timing e durata derivata).
 sweep:
   mode: envelope                 # discrete | envelope | both (default discrete)
+  plateau: 5                     # secondi di ascolto stabile per valore (default 5.0)
+  transition: 5                  # secondi di transizione tra plateau (default 5.0)
   combine: cartesian             # cartesian | parallel (default cartesian)
                                  # cartesian: prodotto — un asse fermo mentre l'altro
                                  #   scorre, N^k plateau.
@@ -80,9 +82,9 @@ streams:
     axes:                        # override parziale di axes
       density:
         values: [100, 200, 300]  # rimpiazza l'intera lista
-      plateau: 10                # cambia il plateau per questa stream
     sweep:                       # override parziale di sweep
       orders: [1, 2]             # es. salta le terzine
+      plateau: 10                # cambia il plateau per questa stream
 ```
 
 ## Generatori di valori d'asse

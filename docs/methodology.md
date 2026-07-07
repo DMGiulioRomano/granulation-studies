@@ -67,7 +67,8 @@ lunghezza). Ogni valore occupa un *plateau* (ascolto stabile) e il passaggio al 
 avviene tramite una *transition* lineare. I tempi sono normalizzati in `[0, 1]`
 (`time_mode: normalized`); la durata reale dello stream e' `N·plateau + (N-1)·transition`.
 I parametri `plateau` e `transition` (in secondi, default 5.0) si impostano
-sotto `axes:` in `study.yml` come chiavi riservate.
+sotto `sweep:` in `study.yml`: il timing appartiene al processo sweep, mentre
+`axes:` dichiara solo i valori (Y) e la curva (`interpolation`).
 
 I valori fuori dai bounds dell'engine vengono *clampati* in entrambe le modalita'.
 

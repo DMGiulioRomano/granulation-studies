@@ -18,8 +18,6 @@ def _spec(mode):
                 "grain": {"envelope": "hanning"},
             },
             "axes": {
-                "plateau": 5,
-                "transition": 5,
                 "density": {"path": "density", "baseline": 20, "values": [5, 50, 400]},
                 "grain_duration": {
                     "path": "grain.duration",
@@ -27,7 +25,7 @@ def _spec(mode):
                     "values": [0.01, 0.05, 0.2],
                 },
             },
-            "sweep": {"mode": mode, "orders": [1, 2]},
+            "sweep": {"mode": mode, "orders": [1, 2], "plateau": 5, "transition": 5},
         }
     )
 
@@ -101,12 +99,10 @@ def _spec_mixed():
             "study_id": "s",
             "base": {"sample": "x.wav", "duration": 6, "time_mode": "normalized"},
             "axes": {
-                "plateau": 5,
-                "transition": 5,
                 "density": {"path": "density", "baseline": 20, "values": [5, 50, 400], "interpolation": "step"},
                 "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05, 0.2], "interpolation": "cubic"},
             },
-            "sweep": {"mode": "envelope", "orders": [2]},
+            "sweep": {"mode": "envelope", "orders": [2], "plateau": 5, "transition": 5},
         }
     )
 
@@ -218,8 +214,6 @@ def _golden_spec(orders):
                 "time_mode": "normalized",
             },
             "axes": {
-                "plateau": 5,
-                "transition": 5,
                 "density": {"path": "density", "baseline": 20, "values": [5, 50, 400]},
                 "grain_duration": {
                     "path": "grain.duration",
@@ -227,7 +221,7 @@ def _golden_spec(orders):
                     "values": [0.01, 0.05, 0.2],
                 },
             },
-            "sweep": {"mode": "envelope", "orders": orders},
+            "sweep": {"mode": "envelope", "orders": orders, "plateau": 5, "transition": 5},
         }
     )
 

@@ -191,23 +191,36 @@ def test_base_duration_absent_does_not_raise():
 
 # --- timing envelope + sweep.mode ----------------------------------------------
 
-def test_plateau_and_transition_are_read():
+def test_plateau_and_transition_read_from_sweep():
+    # Invariante: axes conosce solo Y; il timing (X) appartiene al processo sweep.
     spec = parse_study_spec(
         {
             "study_id": "s",
             "base": {"sample": "x.wav"},
             "axes": {
-                "plateau": 7,
-                "transition": 3,
                 "density": {"path": "density", "baseline": 20, "values": [5, 50]},
             },
-            "sweep": {"orders": [1]},
+            "sweep": {"orders": [1], "plateau": 3, "transition": 2},
         }
     )
-    assert spec.plateau == 7
-    assert spec.transition == 3
-    # plateau/transition non sono assi
-    assert [ax.name for ax in spec.axes] == ["density"]
+    assert spec.plateau == 3
+    assert spec.transition == 2
+
+
+def test_plateau_in_axes_raises_with_migration_hint():
+    # plateau/transition non vivono piu' in axes: errore chiaro, non un asse rotto.
+    with pytest.raises(ValueError, match="sweep"):
+        parse_study_spec(
+            {
+                "study_id": "s",
+                "base": {"sample": "x.wav"},
+                "axes": {
+                    "plateau": 7,
+                    "density": {"path": "density", "baseline": 20, "values": [5, 50]},
+                },
+                "sweep": {"orders": [1]},
+            }
+        )
 
 
 def test_sweep_mode_accepts_envelope_discrete_both():

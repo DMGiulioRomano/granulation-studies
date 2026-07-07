@@ -31,10 +31,10 @@ class Axis:
     interpolation: str = "linear"   # linear | cubic | step
 
 
-# Chiavi riservate sotto ``axes:`` che non descrivono un asse ma il timing
-# degli envelope (vedi ``envelope_sweep``). Restano a livello study per garantire
-# comparabilita' tra i file generati.
-_AXES_RESERVED_KEYS = ("plateau", "transition", "interpolation")
+# Chiavi riservate sotto ``axes:`` che non descrivono un asse. Solo
+# ``interpolation`` (curva di Y, per-asse): il timing (plateau/transition) e'
+# proprieta' del processo sweep e vive sotto ``sweep:`` — axes conosce solo Y.
+_AXES_RESERVED_KEYS = ("interpolation",)
 
 
 @dataclass(frozen=True)
@@ -199,6 +199,15 @@ def parse_study_spec(data: Dict[str, Any], study_id: str | None = None) -> Study
     for name, cfg in axes_raw.items():
         if name in _AXES_RESERVED_KEYS:
             continue
+        if not isinstance(cfg, dict):
+            hint = (
+                " ('plateau'/'transition' vivono in 'sweep:', non in 'axes:')"
+                if name in ("plateau", "transition")
+                else ""
+            )
+            raise ValueError(
+                f"Asse '{name}': config non valida ({cfg!r}), serve un dict{hint}."
+            )
         axes.append(
             Axis(
                 name=name,
@@ -223,8 +232,8 @@ def parse_study_spec(data: Dict[str, Any], study_id: str | None = None) -> Study
         orderings=orderings,
         mode=sweep_cfg.get("mode", "discrete"),
         combine=sweep_cfg.get("combine", "cartesian"),
-        plateau=float(axes_raw.get("plateau", 5.0)),
-        transition=float(axes_raw.get("transition", 5.0)),
+        plateau=float(sweep_cfg.get("plateau", 5.0)),
+        transition=float(sweep_cfg.get("transition", 5.0)),
         interpolation=axes_raw.get("interpolation", "linear"),
         stream_id=sweep_cfg.get("stream_id") or None,
     )
