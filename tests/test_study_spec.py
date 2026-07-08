@@ -251,7 +251,9 @@ def _stack_dict():
             "density": {
                 "path": "density",
                 "baseline": 20,
-                "rand": {"base": [[0, 10], [1, 2]], "range": [[0, 10], [1, 3]]},
+                # banda piatta senza n: la X-walk possiede il conteggio.
+                "base": [[0, 10], [1, 2]],
+                "range": [[0, 10], [1, 3]],
                 "interpolation": "cubic",
             },
             "grain_duration": {
@@ -261,7 +263,7 @@ def _stack_dict():
         },
         "stack": {
             "seed": 42,
-            "density": {"rand": {"cps": {"base": [[0, 3], [1, 10]], "range": 1}}},
+            "density": {"base": [[0, 3], [1, 10]], "range": 1},
         },
     }
 
@@ -285,7 +287,7 @@ def test_axis_carries_raw_generator_config():
     assert spec.axis("grain_duration").generator == {
         "ramp": {"start": 0.001, "stop": 0.002, "step": 0.0005}
     }
-    assert "rand" in spec.axis("density").generator
+    assert "band" in spec.axis("density").generator
 
 
 def test_y_rand_without_n_deferred_when_x_rand():
@@ -303,30 +305,33 @@ def test_y_rand_without_n_and_no_stack_raises():
         parse_study_spec(d)
 
 
-def test_y_rand_without_n_and_x_linear_raises():
+def test_y_band_without_n_and_x_linear_raises():
+    # Annullare l'entry stack riporta l'asse a linear: banda senza n senza
+    # camminata-X e' un errore di n-ownership.
     d = _stack_dict()
-    d["stack"]["density"] = {"linear": {}}
+    d["stack"]["density"] = None
     with pytest.raises(ValueError):
         parse_study_spec(d)
 
 
-def test_x_rand_with_y_owning_n_raises():
+def test_x_walk_with_y_owning_n_raises():
     d = _stack_dict()
-    d["axes"]["density"]["rand"]["n"] = 50    # Y con n + X-rand: conflitto
+    d["axes"]["density"]["n"] = 50    # Y con n + X-walk: conflitto
     with pytest.raises(ValueError):
         parse_study_spec(d)
 
 
 def test_stack_axis_unknown_raises():
     d = _stack_dict()
-    d["stack"]["inesistente"] = {"linear": {}}
+    d["stack"]["inesistente"] = {"base": 5}
     with pytest.raises(ValueError):
         parse_study_spec(d)
 
 
-def test_stack_unknown_strategy_raises():
+def test_stack_entry_without_base_raises():
+    # Una entry sotto stack senza 'base' e' malformata (niente piu' nome-strategy).
     d = _stack_dict()
-    d["stack"]["density"] = {"accelerando": {}}
+    d["stack"]["density"] = {"range": 1}
     with pytest.raises(ValueError):
         parse_study_spec(d)
 
@@ -381,18 +386,18 @@ def test_global_seeds_win_over_autoderivation():
     assert spec.resolved_x_seed() == 42
 
 
-def test_stream_x_strategy_override_replaces_inherited():
-    # Uno stream che sceglie linear su un asse che nella base ha rand:
-    # la strategy dell'override rimpiazza quella ereditata (niente collisione).
+def test_stream_x_override_null_returns_to_linear():
+    # Uno stream riporta un asse a linear annullando l'entry stack (stack: {asse:
+    # null}); l'override Y porta una banda CON n (la Y torna a possedere n). Il
+    # _replace_generators rimpiazza la banda ereditata senza collisione.
     d = _stack_dict()
-    d["axes"]["density"]["rand"]["n"] = 8      # Y possiede n, cosi' linear e' valido
-    d["stack"]["density"] = {"rand": {"cps": {"base": 5}}}
-    del d["axes"]["density"]["rand"]["n"]      # torna senza n per la base
     d["streams"] = {
         "solo_linear": {
-            "axes": {"density": {"rand": {"n": 8, "base": 0, "range": 10}}},
-            "stack": {"density": {"linear": {}}},
+            "axes": {"density": {"n": 8, "base": 0, "range": 10}},
+            "stack": {"density": None},
         }
     }
     spec = [s for s in resolve_streams(d) if s.stream_id == "solo_linear"][0]
-    assert spec.stack["density"] == {"linear": {}}
+    assert "density" not in (spec.stack or {})        # entry annullata -> linear
+    assert spec.axis("density").defers_n() is False    # la Y possiede n
+    assert len(spec.axis("density").values) == 8

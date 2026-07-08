@@ -14,11 +14,21 @@ from typing import Any, Dict, List
 import yaml
 
 from . import bounds as bounds_mod
-from .value_generators import GENERATORS, resolve as resolve_values, stable_seed
-from .x_strategies import X_STRATEGIES, x_owns_n
+from .value_generators import (
+    Y_GENERATOR_KEYS,
+    band,
+    ramp,
+    stable_seed,
+    y_generator,
+)
+from .x_strategies import x_owns_n
 
-# Chiavi che scelgono come popolare i valori di un asse: mutuamente esclusive.
-_GENERATOR_KEYS = frozenset({"values", *GENERATORS})
+# Chiavi che marcano il generatore Y di un asse (values | ramp | base): la
+# presenza di ``base`` marca la banda piatta. Mutuamente esclusive.
+_GENERATOR_KEYS = Y_GENERATOR_KEYS
+# Chiavi della banda piatta che accompagnano ``base`` (viaggiano con essa,
+# vanno rimosse insieme quando uno stream cambia generatore su quell'asse).
+_BAND_KEYS = frozenset({"base", "range", "n", "seed"})
 
 
 @dataclass(frozen=True)
@@ -36,15 +46,15 @@ class Axis:
     generator: Dict[str, Any] = field(default_factory=dict)
 
     def defers_n(self) -> bool:
-        """True se la Y non possiede ``n`` (``rand`` senza ``n``): i valori
-        emergono dalla strategy-X ``rand`` in stack, non si enumerano al parse."""
-        params = self.generator.get("rand")
+        """True se la Y non possiede ``n`` (banda senza ``n``): i valori emergono
+        dalla camminata-X in stack, non si enumerano al parse."""
+        params = self.generator.get("band")
         return isinstance(params, dict) and "n" not in params
 
 
 # Chiavi riservate sotto ``axes:`` che non descrivono un asse ma vocabolario Y
 # condiviso: ``interpolation`` (curva di Y, default di studio) e ``seed``
-# (seed-Y globale, default per ogni ``rand`` di Y senza seed proprio). Il timing
+# (seed-Y globale, default per ogni banda di Y senza seed proprio). Il timing
 # (plateau/transition) e' proprieta' del processo sweep e vive sotto ``sweep:``.
 _AXES_RESERVED_KEYS = ("interpolation", "seed")
 
@@ -180,10 +190,14 @@ def _replace_generators(merged: Dict[str, Any], override: Dict[str, Any]) -> Non
 
     Il deep-merge conserva le chiavi della base: un asse con ``values`` di base a
     cui lo stream aggiunge ``ramp`` finirebbe con entrambe (collisione). Coerente
-    con la semantica "le liste rimpiazzano": la chiave-generatore dell'override
-    vince, si tolgono le altre ereditate su quello stesso asse. Stessa regola per
-    le strategy-X nel blocco ``stack`` (un asse con ``rand`` di base a cui lo
-    stream impone ``linear``).
+    con la semantica "le liste rimpiazzano": il marcatore-generatore dell'override
+    vince, si tolgono gli altri ereditati su quello stesso asse. Passare a
+    ``values``/``ramp`` toglie anche le chiavi della banda (``base``/``range``/
+    ``n``/``seed``); passare a ``base`` toglie ``values``/``ramp``.
+
+    Lato ``stack`` (camminata-X): un override che porta ``base`` diventa/aggiorna
+    la camminata via deep-merge; per riportare un asse a ``linear`` lo stream
+    annulla l'entry (``stack: {asse: null}``), gestito in ``_stack_config``.
     """
     ov_axes = override.get("axes") or {}
     merged_axes = merged.get("axes") or {}
@@ -192,20 +206,14 @@ def _replace_generators(merged: Dict[str, Any], override: Dict[str, Any]) -> Non
             continue
         chosen = _GENERATOR_KEYS & ov.keys()
         ax = merged_axes.get(name)
-        if chosen and isinstance(ax, dict):
-            for k in _GENERATOR_KEYS - chosen:
-                ax.pop(k, None)
-    x_keys = frozenset(X_STRATEGIES)
-    ov_stack = override.get("stack") or {}
-    merged_stack = merged.get("stack") or {}
-    for name, ov in ov_stack.items():
-        if not isinstance(ov, dict):
+        if len(chosen) != 1 or not isinstance(ax, dict):
             continue
-        chosen = x_keys & ov.keys()
-        entry = merged_stack.get(name)
-        if chosen and isinstance(entry, dict):
-            for k in x_keys - chosen:
-                entry.pop(k, None)
+        (marker,) = chosen
+        for k in _GENERATOR_KEYS - chosen:      # via gli altri marcatori
+            ax.pop(k, None)
+        if marker in ("values", "ramp"):        # via le chiavi della banda
+            for k in _BAND_KEYS:
+                ax.pop(k, None)
 
 
 def resolve_streams(data: Dict[str, Any], study_id: str | None = None) -> List["StudySpec"]:
@@ -231,24 +239,35 @@ def _stack_config(data: Dict[str, Any]) -> tuple[Dict[str, Any] | None, int | No
     """Estrae dal documento il blocco ``stack:``: (config per-asse, seed-X globale).
 
     Schema piatto: ``seed`` e' l'unica chiave riservata; ogni altra chiave e' un
-    nome d'asse -> config della strategy-X. Blocco assente -> (None, None).
+    nome d'asse -> camminata-X (banda ``base``/``range``/``seed``). La *presenza*
+    dell'asse marca la camminata; l'assenza dal blocco = ``linear``. Una entry
+    annullata (``asse: null``, utile per riportare a linear in uno stream) viene
+    scartata. Blocco assente -> (None, None); ``curve`` va dentro l'Env di
+    ``base``/``range``, non come chiave dell'entry.
     """
     if "stack" not in data:
         return None, None
     raw = dict(data.get("stack") or {})
     seed = raw.pop("seed", None)
+    raw = {name: xcfg for name, xcfg in raw.items() if xcfg is not None}
     for name, xcfg in raw.items():
-        if not isinstance(xcfg, dict) or len(xcfg) != 1:
+        if isinstance(xcfg, dict) and ("rand" in xcfg or "cps" in xcfg):
             raise ValueError(
-                f"stack: asse '{name}' deve avere esattamente una strategy-X "
-                f"({{nome: params}}), trovato {xcfg!r}."
+                f"stack: asse '{name}', i wrapper 'rand:'/'cps:' non esistono "
+                "piu': dichiara la camminata piatta (base/range/seed diretti). "
+                "Es. 'rand: {cps: {base, range}}' -> 'base: ...', 'range: ...'."
             )
-        (xname,) = xcfg
-        if xname not in X_STRATEGIES:
-            opts = ", ".join(X_STRATEGIES)
+        if not isinstance(xcfg, dict) or "base" not in xcfg:
             raise ValueError(
-                f"stack: asse '{name}', strategy-X sconosciuta '{xname}' "
-                f"(usa una tra {{{opts}}})."
+                f"stack: asse '{name}' deve avere una camminata con 'base' "
+                f"(frequenza in Hz), trovato {xcfg!r}. Un asse assente dal blocco "
+                "resta 'linear' (n dalla Y)."
+            )
+        extra = set(xcfg) - {"base", "range", "seed"}
+        if extra:
+            raise ValueError(
+                f"stack: asse '{name}', chiavi non ammesse {sorted(extra)} "
+                "(solo base/range/seed; 'curve' va dentro l'Env di base/range)."
             )
     return raw, seed
 
@@ -278,7 +297,7 @@ def parse_study_spec(data: Dict[str, Any], study_id: str | None = None) -> Study
     axes_seed = axes_raw.get("seed")
     sid = study_id or data.get("study_id") or "study"
     seed_key = sweep_cfg.get("stream_id") or sid
-    # Default per i rand di Y senza seed proprio (precedenza: per-asse >
+    # Default per le bande di Y senza seed proprio (precedenza: per-asse >
     # axes.seed globale > auto-derivazione per-stream).
     default_y_seed = axes_seed if axes_seed is not None else stable_seed(f"{seed_key}:y")
 
@@ -296,34 +315,36 @@ def parse_study_spec(data: Dict[str, Any], study_id: str | None = None) -> Study
             raise ValueError(
                 f"Asse '{name}': config non valida ({cfg!r}), serve un dict{hint}."
             )
-        gen_keys = [k for k in cfg if k in _GENERATOR_KEYS]
-        if len(gen_keys) != 1:
-            resolve_values(cfg)  # solleva l'errore standard (zero o piu' chiavi)
-        gen_key = gen_keys[0]
-        gen_params = cfg[gen_key]
+        # Generatore Y riconosciuto dalla forma (values | ramp | base): chiave
+        # canonica values|ramp|band, con i parametri della banda raccolti piatti.
+        gen_key, gen_params = y_generator(cfg)
         x_cfg = (stack_axes or {}).get(name)
-        defers = gen_key == "rand" and isinstance(gen_params, dict) and "n" not in gen_params
+        defers = gen_key == "band" and "n" not in gen_params
         if defers:
-            # n-ownership, verso X: solo la strategy-X 'rand' puo' possedere n.
+            # n-ownership, verso X: solo la camminata-X 'base' puo' possedere n.
             if not x_owns_n(x_cfg):
                 raise ValueError(
-                    f"Asse '{name}': 'rand' senza 'n' richiede la strategy-X "
-                    "'rand' nel blocco 'stack:' (e' la X a possedere n); con X "
+                    f"Asse '{name}': banda senza 'n' richiede la camminata-X "
+                    "'base' nel blocco 'stack:' (e' la X a possedere n); con X "
                     "lineare dichiara 'n'."
                 )
             values: List[float] = []
         else:
-            # n-ownership, verso Y: con X-rand la Y non puo' contare i valori.
+            # n-ownership, verso Y: con la camminata-X la Y non puo' contare i valori.
             if x_owns_n(x_cfg):
                 raise ValueError(
-                    f"Asse '{name}': la strategy-X 'rand' possiede n, ma il "
-                    f"generatore Y '{gen_key}' enumera i valori — usa 'rand' "
-                    "senza 'n' (o togli la X-rand)."
+                    f"Asse '{name}': la camminata-X 'base' possiede n, ma il "
+                    f"generatore Y '{gen_key}' enumera i valori — usa la banda "
+                    "senza 'n' (o togli la camminata-X)."
                 )
-            resolved_cfg = cfg
-            if gen_key == "rand" and "seed" not in gen_params:
-                resolved_cfg = {**cfg, "rand": {**gen_params, "seed": default_y_seed}}
-            values = resolve_values(resolved_cfg)
+            if gen_key == "values":
+                values = list(gen_params)
+            elif gen_key == "ramp":
+                values = ramp(**gen_params)
+            else:  # band con n: la Y possiede il conteggio
+                params = dict(gen_params)
+                params.setdefault("seed", default_y_seed)
+                values = band(**params)
         axes.append(
             Axis(
                 name=name,
