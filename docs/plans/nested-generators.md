@@ -155,8 +155,61 @@ anti-drift incluso).
 Nota di disambiguazione, importante per non confondersi con lo stack: questo è
 l'accelerando **dei valori** (la griglia di Y si infittisce). L'accelerando
 **nel tempo** (breakpoint che si addensano sulla timeline) è dominio della
-strategy-X: una futura X-`ramp` accanto a `linear`/`rand` in `X_STRATEGIES` —
-coerente col registry, ma fuori da questa iterazione (v. Questioni aperte).
+strategy-X — e in forma deterministica **esiste già**: X-rand a banda
+collassata (§4.2).
+
+### 4.2 Censimento: cosa è promuovibile a `Env`, registro per registro
+
+X e Y non si trattano allo stesso modo: cambiano sia il **dominio** su cui un
+`Env` viene consultato, sia **quali parametri** ha senso promuovere.
+
+**Il criterio.** Un parametro è promuovibile a `Env` se e solo se la strategia
+lo consulta **ripetutamente lungo la generazione** — a ogni punto (Y) o a ogni
+passo della camminata (X). I parametri consumati una volta sola — estremi,
+cardinalità, seed — restano scalari: un `Env` valutato in un punto solo è uno
+scalare travestito. Il criterio vale anche per le strategie future: chi entra
+nel registry dichiara Env i parametri che legge per-punto, e quelli soli.
+
+**Il dominio, la vera differenza X/Y:**
+
+- **Y** consulta i suoi `Env` alla **posizione del punto sull'asse `[0,1]`
+  dello stream**: `i/(n-1)` quando `n` è della Y (sweep, X-linear), il tempo
+  reale normalizzato dei breakpoint quando `n` è della X (`rand_at`, rspline).
+  Un generatore annidato in un `Env` di Y si stende su quell'asse. Eccezione
+  interna: lo `step` di `ramp` vive sul **progresso in valore** (§4.1), perché
+  lì l'indice non è noto a priori.
+- **X** consulta i suoi `Env` sul **tempo reale normalizzato** durante la
+  camminata (`t/duration`). Un generatore annidato in `cps.base`/`cps.range`
+  si stende sulla timeline vera dello stack.
+
+La meccanica di espansione è identica (nodo → breakpoint su `[0,1]`); a
+cambiare è **cosa quel `[0,1]` misura**. Va detto nella reference, perché è la
+differenza che si sente.
+
+| Registro | Strategia | Parametro | `Env`? | Dominio |
+|---|---|---|---|---|
+| Y | `values` | gli elementi | no — è la foglia esplicita per definizione | — |
+| Y | `ramp` | `start`, `stop` | no — estremi, consumati una volta | — |
+| Y | `ramp` | `step` | **sì — nuovo (§4.1)** | progresso in valore |
+| Y | `rand` | `n` | no — cardinalità | — |
+| Y | `rand` | `base`, `range` | già `Env` oggi | posizione del punto |
+| Y | `rand` | `seed` | no — identità dell'estrazione | — |
+| X | `linear` | `n` (dalla Y) | no — cardinalità | — |
+| X | `rand` | `cps.base`, `cps.range` | già `Env` oggi | tempo reale normalizzato |
+| X | `rand` | `seed` | no | — |
+
+Quindi: i punti d'innesto dell'annidamento sono `base`/`range` (Y),
+`cps.base`/`cps.range` (X) e il nuovo `step` (Y-ramp). Tutto il resto resta
+scalare per natura, non per pigrizia.
+
+**Le bande collassate, verificate sul codice.** In X-rand `range` è opzionale
+con default `0.0` (`x_strategies.py`): `cps: {base: [2, 8]}` senza `range` è
+già oggi un **accelerando deterministico nel tempo** — la banda collassa e la
+frequenza segue `base`. Il gemello Y esiste dal PR #9: `rand` con `range`
+omesso insegue `base` deterministicamente su `n` punti. Le due bande collassate
+sono gli *inseguitori di curva* dei due registri; con l'annidamento, anche le
+curve inseguite possono essere generate. Una strategy-X `ramp` dedicata sarebbe
+quindi ridondante (stessa cosa, parametrizzata a passo invece che a frequenza).
 
 ## 5. Esempi
 
@@ -305,6 +358,9 @@ un generatore avrà un parametro dict che può confondersi, si passa allo schema
 - ramp accelerando: `step: [a, b]` produce passi monotoni attesi; ramo scalare
   invariato bit-a-bit (regressione anti-drift); `step` che tocca 0 → errore;
   tetto punti; generatore annidato dentro `step`.
+- bande collassate (idiomi §4.2): X-rand senza `range` → tempi deterministici
+  che seguono `cps.base`; Y-rand senza `range` → insegue `base`; entrambe con
+  un generatore annidato nella curva inseguita.
 - errori: `rand` annidato senza `n`; due chiavi-generatore; profondità oltre
   guardia; `range` negativo con path nel messaggio.
 - integrazione stack: study di prova con nested in `cps.base` → `stack.yml`
@@ -315,11 +371,10 @@ un generatore avrà un parametro dict che può confondersi, si passa allo schema
 
 ## 11. Questioni aperte
 
-1. **Accelerando nel tempo**: una strategy-X `ramp` in `X_STRATEGIES` (tempi
-   che si addensano/diradano sulla timeline dello stack) e, in seconda battuta,
-   una strategy-X per il mini-asse (tempi non equispaziati dentro la banda).
-   La grammatica ha spazio per entrambe; v2. L'accelerando dei valori (§4.1)
-   copre già parte del bisogno?
+1. **Strategy-X per il mini-asse** (tempi non equispaziati dentro una banda
+   annidata): la grammatica ha spazio, v2. La X-`ramp` come strategy dedicata
+   invece è ridondante — l'accelerando deterministico nel tempo è già X-rand a
+   banda collassata (§4.2). Serve davvero altro sul fronte X?
 2. **Nome della chiave di curva nel nodo**: `type` (coerente con
    `{type, points}`) o `interpolation` (coerente con gli assi)? Proposta:
    `type`, perché il nodo vive nel mondo `Env`. E `type: cubic` dentro una
