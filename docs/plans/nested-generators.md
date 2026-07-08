@@ -422,27 +422,16 @@ si passa allo schema.)*
 - una volta implementato: `study_stack_test_5` come studio-documentazione dei
   generatori annidati, nello stile dei quattro esistenti.
 
-## 11. Questioni aperte
+## 11. Questioni aperte — decise con l'utente (2026-07-08)
 
-1. **Strategy-X per il mini-asse** (tempi non equispaziati dentro una banda
-   annidata): la grammatica ha spazio, v2. La X-`ramp` come strategy dedicata
-   invece è ridondante — l'accelerando deterministico nel tempo è già camminata
-   a banda collassata (§4.2). Serve davvero altro sul fronte X?
-2. **Nome della chiave di curva nel nodo**: `type` (coerente con
-   `{type, points, curve}`) o `interpolation` (coerente con gli assi)? Proposta:
-   `type`, perché il nodo vive nel mondo `Env` — e `curve` viene con lui, con
-   la stessa semantica `u^k` della PR #12. E `type: cubic` dentro una banda:
-   lo si ammette o si resta su `linear|step`? (Oggi `_threshold_at` conosce
-   solo quelle due; la piega non lineare *dentro* il segmento è già coperta da
-   `curve`.)
-3. **`values` annidato**: lo includiamo per simmetria (proposta: sì, costa una
-   riga) o si tiene il vocabolario minimo `ramp|base`?
-4. **Guardia di profondità**: 8 basta e avanza, o si vuole più margine?
-5. **Ambiguità della banda annidata in `base`** *(nuova, dal modello piatto)*:
-   `base: {base: 2, range: 6, n: 6}` — un dict con `base` dentro `base`. Il
-   predicato la distingue senza ambiguità dalla forma `{type, points}`, ma la
-   *leggibilità* per l'umano è un'altra cosa (tre `base` annidati sono legali e
-   illeggibili). Si accetta (coerenza col modello piatto, nessun wrapper) o si
-   reintroduce un marcatore solo per i nodi annidati (es. `band:`), pagando
-   l'asimmetria con l'asse? Proposta: coerenza col modello piatto — la reference
-   già disambigua i «tre `base`» e questo sarebbe il quarto, da aggiungere lì.
+1. **Strategy-X per il mini-asse**: rinviata a v2. La grammatica ha spazio; la
+   X-`ramp` dedicata resta ridondante (camminata a banda collassata, §4.2).
+2. **Chiave di curva nel nodo**: **`type`**, valori **`linear|step`** soltanto.
+   Niente `cubic` nelle bande — conferma della scelta già presa in `07adb9e`
+   («cubic non implementato: marginale su banda campionata a caso»); la piega
+   non lineare del segmento è coperta da `curve: k`.
+3. **`values` annidato**: **sì**, per simmetria col vocabolario dell'asse.
+4. **Guardia di profondità**: **8**.
+5. **Sintassi della banda annidata**: **piatta**, coerente col modello della
+   PR #12 (`base: {n, base, range}`, nessun marcatore dedicato). Il «quarto
+   `base`» va aggiunto alla nota di disambiguazione della reference.
