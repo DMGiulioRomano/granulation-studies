@@ -8,7 +8,7 @@ inserito nella posizione annidata corretta dello stream.
 from __future__ import annotations
 
 import copy
-from typing import Any, Dict, Mapping
+from typing import Any, Dict, Mapping, Sequence
 
 
 def deep_set(d: Dict[str, Any], dotted_path: str, value: Any) -> None:
@@ -96,4 +96,31 @@ def build_document(
     doc["streams"] = [
         build_stream(base_stream, overrides, envelope_time_mode=envelope_time_mode, envelope_type=envelope_type, envelope_types=envelope_types)
     ]
+    return doc
+
+
+def build_multi_document(
+    streams: Sequence[Mapping[str, Any]],
+    *,
+    title: str | None = None,
+    seed: int | None = None,
+    duration: float | None = None,
+) -> Dict[str, Any]:
+    """Crea un documento YAML engine con N stream gia' costruiti (stack).
+
+    Dove ``build_document`` esplode un solo stream, qui gli stream (tipicamente
+    prodotti da ``build_stream``, misti scalare/envelope) vengono *collassati*
+    in un unico documento: ``streams: [N]``. Le chiavi top-level restano
+    opzionali come in ``build_document``.
+    """
+    if not streams:
+        raise ValueError("build_multi_document: serve almeno uno stream.")
+    doc: Dict[str, Any] = {}
+    if title is not None:
+        doc["title"] = title
+    if seed is not None:
+        doc["seed"] = seed
+    if duration is not None:
+        doc["duration"] = duration
+    doc["streams"] = [dict(s) for s in streams]
     return doc

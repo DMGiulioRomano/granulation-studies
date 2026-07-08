@@ -106,3 +106,42 @@ def test_build_document_wraps_list_override():
         "time_mode": "normalized",
     }
     assert doc["duration"] == 25
+
+
+# --- documento multi-stream (processo stack) -------------------------------------
+
+def test_build_multi_document_two_streams():
+    from granstudies.yaml_builder import build_multi_document
+
+    s1 = build_stream({"density": 20}, {})
+    s2 = build_stream({"density": 20}, {"density": 50})
+    doc = build_multi_document([s1, s2], title="t", seed=1, duration=30)
+    assert doc["title"] == "t" and doc["seed"] == 1 and doc["duration"] == 30
+    assert len(doc["streams"]) == 2
+    assert doc["streams"][0]["density"] == 20
+    assert doc["streams"][1]["density"] == 50
+
+
+def test_build_multi_document_mixed_scalar_and_envelope():
+    from granstudies.yaml_builder import build_multi_document
+
+    s1 = build_stream(
+        {"volume": -6},
+        {"density": [[0, 5], [1, 50]], "grain.duration": 0.05},
+        envelope_time_mode="normalized",
+        envelope_types={"density": "cubic"},
+    )
+    s2 = build_stream({"volume": -6}, {})   # stream statico: legittimo (drone)
+    doc = build_multi_document([s1, s2], duration=30)
+    assert doc["streams"][0]["density"]["type"] == "cubic"
+    assert doc["streams"][0]["grain"]["duration"] == 0.05
+    assert doc["streams"][1] == {"volume": -6}
+    assert "title" not in doc and "seed" not in doc
+
+
+def test_build_multi_document_rejects_empty():
+    import pytest
+    from granstudies.yaml_builder import build_multi_document
+
+    with pytest.raises(ValueError):
+        build_multi_document([])

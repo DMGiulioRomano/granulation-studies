@@ -5,7 +5,8 @@ Sintassi completa con tutti i campi. I campi marcati `*` sono obbligatori.
 ```yaml
 study_id: study01_grain_density   # * identificatore, usato come nome cartella
 title: "Studio 01 — ..."          # libero, finisce nell'header dei file generati
-seed: 1988                        # seed globale (sweep + render riproducibili)
+seed: 1988                        # seed globale engine (finisce nei documenti generati)
+duration: 30                      # durata condivisa (s): obbligatoria se c'è `stack:`
 samples_dir: samples              # path relativo alla root del repo (default: samples/)
 
 # Parametri fissi dello stream: tutto ciò che non è un asse.
@@ -21,10 +22,10 @@ base:                             # *
     speed_ratio: 0
     start: 0.3
 
-# Assi (parametri sotto osservazione) + timing envelope.
+# Assi (parametri sotto osservazione). axes conosce solo Y: quali parametri si
+# muovono, con che valori e con che curva. Il timing (plateau/transition) è del
+# processo sweep e vive sotto `sweep:`.
 axes:                             # * almeno un asse
-  plateau: 5                     # secondi di ascolto stabile per valore (default 5.0)
-  transition: 5                  # secondi di transizione tra plateau (default 5.0)
   interpolation: linear          # linear | cubic | step (default studio, default linear)
                                  # step: nessuna rampa, ogni valore è tenuto e salta
                                  # netto al successivo. È il DEFAULT ereditato dagli assi
@@ -51,20 +52,30 @@ axes:                             # * almeno un asse
     values: [0.001, 0.01, 0.05]
     interpolation: cubic         # es. density a scalini + grain morbido nello stesso file
 
-# Configurazione dello sweep.
+# Configurazione dello sweep (il processo possiede X: timing e durata derivata).
 sweep:
   mode: envelope                 # discrete | envelope | both (default discrete)
-  combine: cartesian             # cartesian | parallel (default cartesian)
-                                 # cartesian: prodotto — un asse fermo mentre l'altro
-                                 #   scorre, N^k plateau.
-                                 # parallel: zip — gli assi si muovono INSIEME (plateau i
-                                 #   = i-esimo valore di ogni asse), N plateau. Richiede
-                                 #   assi di ugual lunghezza (utile con rand a stesso n:
-                                 #   si sentono più modulazioni contemporaneamente).
+  plateau: 5                     # secondi di ascolto stabile per valore (default 5.0)
+  transition: 5                  # secondi di transizione tra plateau (default 5.0)
+                                 # Lo sweep fa SOLO il prodotto cartesiano (N^k plateau).
+                                 # Per muovere assi INSIEME (accoppiati) si usa il
+                                 # processo `stack:` (stessa strategy-X, stesso n).
   orders: [1, 2, 3]             # ordini da generare: 1=OAT, 2=coppie, 3=terzine…
   orderings:                     # permutazioni esplicite (funziona per e2, e3, qualsiasi ordine)
     - [density, grain_duration]                # primo = asse lento (outer), ultimo = veloce (inner)
     - [grain_duration, density]                # stessa coppia, ordine invertito
+
+# Processo stack (attivo per presenza del blocco): tutti gli stream sommati in
+# UN documento multi-stream. Vedi la sezione "Il blocco stack" sotto.
+stack:
+  seed: 42                       # seed-X globale (chiave riservata; opzionale)
+  density:                       # nome d'asse -> config della strategy-X
+    rand:                        # X-rand (rspline): i tempi emergono dalla frequenza
+      cps:
+        base:  [[0, 3], [1, 10]] # frequenza di generazione (Hz sulla durata reale)
+        range: [[0, 1], [1, 1]]  # banda = [base(t), base(t)+range(t)]
+      seed: 7                    # seed-X per-asse (vince sul globale)
+  # grain_duration assente -> strategy-X di default `linear` (n dai valori Y)
 
 # Stream: varianti di ascolto con override parziali sul documento sopra.
 # Regole del merge: i dict si fondono ricorsivamente, le liste rimpiazzano.
@@ -80,9 +91,11 @@ streams:
     axes:                        # override parziale di axes
       density:
         values: [100, 200, 300]  # rimpiazza l'intera lista
-      plateau: 10                # cambia il plateau per questa stream
     sweep:                       # override parziale di sweep
       orders: [1, 2]             # es. salta le terzine
+      plateau: 10                # cambia il plateau per questa stream
+    stack:                       # override parziale di stack (deep-merge)
+      seed: 43                   # es. riseeda solo i tempi di questa stream
 ```
 
 ## Generatori di valori d'asse
@@ -117,11 +130,16 @@ sequenza (serve al ciclo rigenera-e-confronta).
 
 ```yaml
 rand:
-  n: 50                        # quanti valori (>= 1)
+  n: 50                        # quanti valori (>= 1); OMESSO se la X è `rand` (vedi stack)
   min: .001                    # estremo inferiore della banda (vedi forme sotto)
   max: .01                     # estremo superiore
-  seed: 1988                   # opzionale, default 0
+  seed: 1988                   # opzionale (default: `axes.seed`, poi auto per-stream)
 ```
+
+`n` appartiene a chi possiede il conteggio dei punti (*n-ownership*): con la
+strategy-X `rand` del processo stack i tempi — e quindi `n` — emergono dalla
+frequenza, e la Y `rand` va dichiarata **senza** `n` (viene campionata ai tempi
+reali dei breakpoint). Fuori da quel caso `n` è obbligatorio.
 
 `min` e `max` sono un **envelope di 2° ordine** (una banda che genera valori);
 ognuno dei due accetta queste forme:
@@ -143,28 +161,76 @@ rand:
   seed: 1988
 ```
 
-> Con `sweep.combine: parallel` (vedi sopra) più assi generati con lo stesso `n`
-> si muovono insieme: si sentono più modulazioni contemporaneamente, senza il
-> prodotto cartesiano.
+> Nel processo `stack` più assi generati con lo stesso `n` e la stessa
+> strategy-X si muovono insieme (breakpoint agli stessi tempi): si sentono più
+> modulazioni contemporaneamente, senza il prodotto cartesiano.
 
-## Output con `streams:`
+## Il blocco `stack:`
 
-Il nome della stream è incorporato nel basename dei file generati (non solo
-nella sotto-cartella) per facilitare l'identificazione in Sonic Visualiser.
+Il processo stack è il gemello verticale dello sweep: **collassa** tutti gli
+stream di `streams:` in un solo documento engine (`yaml/stack/stack.yml`),
+sommati. Parte solo se il blocco `stack:` è presente (anche vuoto: `stack: {}`);
+richiede `duration:` top-level (la durata condivisa su cui normalizza i tempi).
+Per escludere uno stream dall'ascolto lo si muta con il suo `base.volume`
+(meccanismo engine); il blocco `stack:` è solo config della strategy-X, non un
+gate di partecipazione.
+
+Schema piatto: `seed` è l'unica chiave riservata (seed-X globale); ogni altra
+chiave è un **nome d'asse** → config della strategy-X.
+
+| Strategy-X | Config | Chi possiede `n` |
+|------------|--------|-------------------|
+| `linear` (default, asse assente dal blocco) | `{}` — nessun parametro | la **Y** (`values`/`ramp`/`rand` con `n`); tempi equispaziati `t_i = i/(n-1)` |
+| `rand` (alla `rspline`) | `{cps: {base: <env>, range: <env>}, seed?: int}` | la **X**: `n` emerge dalla frequenza integrata sulla durata |
+
+Con la X-rand la frequenza si pesca a ogni punto nella banda
+`[base(t), base(t)+range(t)]` (Hz sulla durata reale; `base`/`range` accettano
+le stesse forme della banda di Y-rand) e il punto successivo cade a `t + 1/f`.
+La Y dev'essere `rand` **senza** `n`, campionata ai tempi reali dei breakpoint.
+Le due direzioni sbagliate (X-rand con Y che enumera; Y-rand senza `n` con X
+lineare) sono errori di parse (*n-ownership*).
+
+In stack gli assi **non si combinano** (niente prodotto cartesiano): ogni asse
+diventa un envelope indipendente. Due assi con la stessa strategy-X e lo stesso
+`n` restano accoppiati — è l'ex `combine: parallel` dello sweep. Un asse con un
+solo valore resta **scalare** (stream statici/drone legittimi); l'interpolation
+per-asse (`linear`/`cubic`/`step`) vale anche qui.
+
+**Seed, precedenza (il più specifico vince):**
+
+- Y: `rand.seed` per-asse → `axes.seed` globale → auto-derivato per-stream;
+- X: `stack.<asse>.rand.seed` → `stack.seed` globale → auto-derivato per-stream.
+
+L'auto-derivazione è un hash stabile (CRC32) dell'id dello stream, con salt
+distinti per Y e X: senza seed globali gli stream impilati si **decorrelano da
+soli**, restando riproducibili tra run.
+
+## Layout di `generated/`
+
+Primo livello = tipo di artefatto, secondo livello = **processo** (`sweep` /
+`stack`). Il nome della stream è incorporato nel basename dei file sweep (non
+solo nella sotto-cartella) per facilitare l'identificazione in Sonic
+Visualiser; il documento stack è uno solo (gli stream vi sono collassati).
 
 ```
 generated/<study_id>/
-  variants/envelope/<stream_id>/e1__density.yml
-  audio/envelope/<stream_id>/<stream_id>_e1__density.aif
-  sv/envelope/<stream_id>/<stream_id>_e1__density.sv
+  yaml/sweep/envelope/<stream_id>/e1__density.yml
+  yaml/stack/stack.yml
+  audio/sweep/envelope/<stream_id>/<stream_id>_e1__density.aif
+  audio/stack/stack.aif
+  sv/sweep/envelope/<stream_id>/<stream_id>_e1__density.sv
 ```
+
+`generated/` è rigenerabile: dopo un aggiornamento basta rilanciare
+`make sweep` / `make stack`.
 
 ## Comandi Make
 
 ```bash
 make sweep  STUDY=<id>                    # genera tutte le stream
 make sweep  STUDY=<id> STREAM=nome        # genera solo quella stream
-make render STUDY=<id>                    # renderizza le varianti cambiate (incrementale, in parallelo)
+make stack  STUDY=<id>                    # genera il documento multi-stream (stack)
+make render STUDY=<id>                    # renderizza gli YAML cambiati (incrementale, in parallelo)
 make render STUDY=<id> FORCE=1            # rirenderizza tutto (es. dopo update engine o sample)
 make render STUDY=<id> JOBS=4             # limita i worker paralleli (default: min(8, cpu))
 make sv     STUDY=<id>                    # genera .sv per tutte le stream

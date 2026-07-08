@@ -196,7 +196,19 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
     display = ET.SubElement(root, "display")
     ET.SubElement(display, "window", {"width": "1728", "height": "1057"})
 
-    n_panes = 1 + (1 if layout == "single" else len(envelopes))
+    # multi: un pane per *gruppo* di envelope. Il gruppo e' la parte del path
+    # prima di '/' (lo stream_id, presente solo negli export stack): cosi' gli
+    # assi di uno stesso stream stanno in un pane unico. Per lo sweep i path non
+    # hanno '/', quindi ogni envelope e' un gruppo a se' -> un pane per envelope,
+    # identico a prima.
+    from itertools import groupby
+
+    def _group_key(item: Tuple[str, str, str]) -> str:
+        return item[2].split("/", 1)[0]
+
+    multi_groups = [list(g) for _k, g in groupby(layer_ids, key=_group_key)]
+
+    n_panes = 1 + (1 if layout == "single" else len(multi_groups))
     pane_height = str(max(150, 912 // n_panes))
 
     def _pane(parent):
@@ -244,14 +256,15 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
                 "model": model_id, "visible": "true",
             })
         _marker_layer(env_pane)
-    else:  # multi
-        for layer_id, model_id, path in layer_ids:
+    else:  # multi: un pane per gruppo (per stream negli export stack)
+        for group in multi_groups:
             pane = _pane(display)
             _ruler_layer(pane)
-            ET.SubElement(pane, "layer", {
-                "id": layer_id, "type": "timevalues", "name": path,
-                "model": model_id, "visible": "true",
-            })
+            for layer_id, model_id, path in group:
+                ET.SubElement(pane, "layer", {
+                    "id": layer_id, "type": "timevalues", "name": path,
+                    "model": model_id, "visible": "true",
+                })
             _marker_layer(pane)
 
     ET.SubElement(root, "selections")
@@ -284,6 +297,194 @@ def variant_to_sv(variant_yaml_path: str, audio_path: str, out_path: str,
     compressed = _build_sv_xml(os.path.abspath(audio_path), sr, duration,
                                envelopes, layout, markers=markers,
                                markers_scope=markers_scope)
+
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    with open(out_path, "wb") as fh:
+        fh.write(compressed)
+    return out_path
+
+
+def _stack_envelopes(doc: Any) -> List[Tuple[str, List, str]]:
+    """Envelope di *tutti* gli stream del documento stack, con path prefissato.
+
+    A differenza del singolo file sweep (un solo stream), il documento stack
+    collassa N stream sommati in un audio: per non confonderli nei pannelli, il
+    path di ogni envelope e' prefissato dallo stream_id (``base/density``). Gli
+    assi scalari non producono envelope, quindi restano fuori.
+    """
+    out: List[Tuple[str, List, str]] = []
+    for stream in doc.get("streams", []):
+        sid = stream.get("stream_id", "stream")
+        for path, points, env_type in _find_envelopes(stream):
+            out.append((f"{sid}/{path}", points, env_type))
+    return out
+
+
+def _build_sv_xml_stems(stems: List[Tuple[str, str, int, float, List[Tuple[str, List, str]]]]) -> bytes:
+    """Un pane per stem: waveform + spectrogram + tutti i suoi envelope insieme.
+
+    ``stems``: lista di (stream_id, audio_path_assoluto, sample_rate, duration_sec, envelopes).
+    Ogni stem ha il proprio model audio (i file stem sono resi con onset
+    relativo a 0, v. ``StemsRenderMode``), cosi' ognuno mantiene la propria
+    durata e sample rate.
+    """
+    root = ET.Element("sv")
+    data = ET.SubElement(root, "data")
+
+    display = ET.SubElement(root, "display")
+    ET.SubElement(display, "window", {"width": "1728", "height": "1057"})
+
+    n_panes = len(stems)
+    pane_height = str(max(150, 912 // max(n_panes, 1)))
+
+    def _pane():
+        return ET.SubElement(display, "view", {
+            "centre": "0", "zoom": "1024", "deepZoom": "1",
+            "followPan": "1", "followZoom": "1", "tracking": "page",
+            "type": "pane", "centreLineVisible": "1", "height": pane_height,
+        })
+
+    next_id = 0
+    for stream_index, (stream_id, audio_path, sr, duration, envelopes) in enumerate(stems):
+        wave_model_id = str(next_id); next_id += 1
+        spec_layer_id = str(next_id); next_id += 1
+        wave_layer_id = str(next_id); next_id += 1
+        end_frame = round(duration * sr)
+
+        # SV usa il mainModel come riferimento del transport (durata, sample
+        # rate, play/pausa): senza uno, la barra spaziatrice non ha nulla da
+        # suonare. Il primo stem fa da main; gli altri restano playparameters
+        # non mutati, cosi' vengono comunque mixati in playback.
+        ET.SubElement(data, "model", {
+            "id": wave_model_id, "name": os.path.basename(audio_path),
+            "sampleRate": str(sr), "start": "0", "end": str(end_frame),
+            "type": "wavefile", "file": audio_path,
+            "mainModel": "true" if stream_index == 0 else "false",
+        })
+        ET.SubElement(data, "playparameters", {
+            "mute": "false", "pan": "0", "gain": "1", "clipId": "", "model": wave_model_id,
+        })
+        ET.SubElement(data, "layer", {
+            "id": spec_layer_id, "type": "spectrogram", "name": f"{stream_id} :: Spectrogram",
+            "model": wave_model_id, "channel": "-1",
+            "windowSize": "8192", "windowHopLevel": "3",
+            "colourScheme": "2", "colourRotation": "0",
+            "gain": "1", "threshold": "-80",
+            "minFrequency": "0", "maxFrequency": "0",
+            "frequencyScale": "0", "binDisplay": "0",
+            "normalizeColumns": "0", "normalizeVisibleArea": "0",
+            "darkBackground": "true",
+        })
+        ET.SubElement(data, "layer", {
+            "id": wave_layer_id, "type": "waveform", "name": f"{stream_id} :: Waveform",
+            "model": wave_model_id, "gain": "1", "showMeans": "1", "greyscale": "1",
+            "channelMode": "0", "channel": "-1", "scale": "0", "middleLineHeight": "0.5",
+            "aggressive": "0", "autoNormalize": "0", "oversampling": "1",
+            "colourName": "Bright Blue", "colour": "#1e96ff", "darkBackground": "true",
+        })
+
+        pane = _pane()
+        ET.SubElement(pane, "layer", {
+            "id": "ruler_" + stream_id, "type": "timeruler", "name": "Ruler",
+            "model": wave_model_id, "visible": "true",
+        })
+        ET.SubElement(pane, "layer", {
+            "id": spec_layer_id, "type": "spectrogram", "name": f"{stream_id} :: Spectrogram",
+            "model": wave_model_id, "visible": "true",
+        })
+        ET.SubElement(pane, "layer", {
+            "id": wave_layer_id, "type": "waveform", "name": f"{stream_id} :: Waveform",
+            "model": wave_model_id, "visible": "true",
+        })
+
+        for i, (path, points, env_type) in enumerate(envelopes):
+            env_model_id = str(next_id); next_id += 1
+            env_dataset_id = str(next_id); next_id += 1
+            env_layer_id = str(next_id); next_id += 1
+
+            ET.SubElement(data, "model", {
+                "id": env_model_id, "name": f"{stream_id}/{path}",
+                "sampleRate": str(sr), "type": "sparse",
+                "dimensions": "2", "resolution": "1",
+                "notifyOnAdd": "true", "dataset": env_dataset_id,
+            })
+            ds = ET.SubElement(data, "dataset", {"id": env_dataset_id, "dimensions": "2"})
+            for t_norm, value in points:
+                frame = str(round(t_norm * duration * sr))
+                ET.SubElement(ds, "point", {"frame": frame, "value": str(value), "label": ""})
+
+            colour, colour_name = _COLOURS[i % len(_COLOURS)]
+            plot_style = _PLOT_STYLE_BY_TYPE.get(env_type, _PLOT_STYLE_DEFAULT)
+            ET.SubElement(data, "layer", {
+                "id": env_layer_id, "type": "timevalues", "name": f"{stream_id}/{path}",
+                "model": env_model_id, "plotStyle": plot_style, "verticalScale": "0",
+                "colourName": colour_name, "colour": colour, "darkBackground": "true",
+            })
+            ET.SubElement(pane, "layer", {
+                "id": env_layer_id, "type": "timevalues", "name": f"{stream_id}/{path}",
+                "model": env_model_id, "visible": "true",
+            })
+
+    ET.SubElement(root, "selections")
+
+    xml_bytes = b'<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE sonic-visualiser>\n'
+    xml_bytes += ET.tostring(root, encoding="unicode").encode("utf-8")
+    return bz2.compress(xml_bytes)
+
+
+def stack_stems_to_sv(stack_yaml_path: str, audio_dir: str, out_path: str) -> str | None:
+    """.sv con un pane per stem audio (un file audio per stream), non per il mix.
+
+    A differenza di ``stack_to_sv`` (un solo pane waveform contro l'audio
+    sommato), qui ogni stream ha il proprio pane con la propria waveform +
+    spectrogram + tutti i suoi envelope insieme. Richiede gli stem gia'
+    renderizzati (``render --stem``, attivo di default): ``{base}__{stream_id}.aif``
+    accanto al mix in ``audio_dir`` (v. ``DefaultNamingStrategy``). Ritorna
+    ``None`` (senza scrivere nulla) se manca anche un solo stem.
+    """
+    import yaml
+
+    with open(stack_yaml_path, "r", encoding="utf-8") as fh:
+        doc = yaml.safe_load(fh)
+
+    stems = []
+    for stream in doc.get("streams", []):
+        stream_id = stream.get("stream_id", "stream")
+        audio_path = os.path.join(audio_dir, f"stack__{stream_id}.aif")
+        if not os.path.exists(audio_path):
+            print(f"[sv] stem mancante per '{stream_id}': {audio_path} (esegui 'render --stem')")
+            return None
+        duration = float(stream.get("duration", doc.get("duration", 1.0)))
+        envelopes = _find_envelopes(stream)
+        stems.append((stream_id, os.path.abspath(audio_path), _sample_rate(audio_path), duration, envelopes))
+
+    compressed = _build_sv_xml_stems(stems)
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    with open(out_path, "wb") as fh:
+        fh.write(compressed)
+    return out_path
+
+
+def stack_to_sv(stack_yaml_path: str, audio_path: str, out_path: str,
+                layout: Layout = "multi") -> str:
+    """Scrive un .sv per il documento multi-stream ``stack.yml`` contro il suo audio.
+
+    Un solo file per lo stack (gli stream sono sommati in un audio): gli envelope
+    di tutti gli stream finiscono nei pannelli, path prefissato per stream. Niente
+    marker di plateau: sono un concetto di sweep (griglia plateau/transition
+    sincronizzata), assente in stack dove ogni asse ha la sua X.
+    """
+    import yaml
+
+    with open(stack_yaml_path, "r", encoding="utf-8") as fh:
+        doc = yaml.safe_load(fh)
+
+    duration = float(doc.get("duration", 1.0))
+    envelopes = _stack_envelopes(doc)
+
+    sr = _sample_rate(audio_path)
+    compressed = _build_sv_xml(os.path.abspath(audio_path), sr, duration,
+                               envelopes, layout, markers=False)
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     with open(out_path, "wb") as fh:

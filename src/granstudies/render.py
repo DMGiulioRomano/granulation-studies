@@ -16,6 +16,7 @@ from . import engine_bridge
 from .study_spec import StudySpec
 from .sweep import generate_discrete_variants
 from .envelope_sweep import EnvelopeVariant, generate_envelope_variants
+from .stack import generate_stack_document
 from .yaml_builder import build_document
 
 
@@ -100,6 +101,21 @@ def _write_envelope(spec: StudySpec, out_dir: str) -> List[str]:
     return written
 
 
+def write_stack(specs: List[StudySpec], out_dir: str) -> List[str]:
+    """Scrive il documento multi-stream del processo stack.
+
+    Un solo file (``out_dir/stack/stack.yml``): stack collassa gli stream, non
+    enumera varianti. Stessa scrittura incrementale di ``_dump`` (mtime fermo a
+    contenuto identico -> il render salta i documenti gia' aggiornati).
+    """
+    doc = generate_stack_document(specs)
+    d = os.path.join(out_dir, "stack")
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, "stack.yml")
+    _dump(path, doc)
+    return [path]
+
+
 def write_variants(spec: StudySpec, out_dir: str) -> List[str]:
     """Genera lo sweep e scrive i file YAML in sotto-cartelle per modalita'.
 
@@ -125,14 +141,28 @@ def _render_one(
     pdf_path: str | None,
     samples_dir: str,
     output_sr: int,
-) -> str:
-    """Renderizza una singola variante (worker per il pool di processi)."""
-    engine_bridge.render(
-        yaml_path, audio_path, samples_dir=samples_dir, output_sr=output_sr
-    )
+    per_stream: bool = False,
+    use_cache: bool = False,
+    cache_dir: str | None = None,
+) -> Dict[str, Any]:
+    """Renderizza una singola variante (worker per il pool di processi).
+
+    Il mix (``audio_path``) viene sempre prodotto: e' quello che ``sv``
+    consuma (l'engine non esporta SV in modalita' stem, v1). Se
+    ``per_stream``, viene fatta ANCHE una seconda pass in STEMS mode (con
+    caching incrementale se ``use_cache``): doppio lavoro sull'engine, ma
+    lascia intatto il resto della pipeline.
+    """
+    mix = engine_bridge.render(yaml_path, audio_path, samples_dir=samples_dir, output_sr=output_sr)
     if pdf_path:
         engine_bridge.score_pdf(yaml_path, pdf_path, samples_dir=samples_dir)
-    return audio_path
+    result: Dict[str, Any] = {"audio": mix[0] if mix else audio_path}
+    if per_stream:
+        result["stems"] = engine_bridge.render(
+            yaml_path, audio_path, samples_dir=samples_dir, output_sr=output_sr,
+            per_stream=True, use_cache=use_cache, cache_dir=cache_dir,
+        )
+    return result
 
 
 def _is_up_to_date(target: str, source: str) -> bool:
@@ -147,6 +177,9 @@ def render_variants(
     output_sr: int = 48000,
     force: bool = False,
     jobs: int | None = None,
+    per_stream: bool = False,
+    use_cache: bool = False,
+    cache_dir: str | None = None,
 ) -> List[Dict[str, Any]]:
     """Renderizza ogni YAML in ``variant_dir`` -> audio (e PDF se ``score_dir``).
 
@@ -154,6 +187,14 @@ def render_variants(
     viene saltata (``force=True`` per rirenderizzare tutto). Le varianti da
     fare girano in parallelo su un pool di processi (``jobs``, default
     min(8, cpu)); ogni render dell'engine e' mono-core e indipendente.
+
+    ``per_stream``: STEMS mode, un file per stream invece del MIX unico —
+    ``entry["audio"]`` diventa una lista di path. In questo caso il file di
+    base non viene mai scritto, quindi lo skip per mtime a livello di
+    variante non e' applicabile: ogni variante passa sempre dall'engine, che
+    con ``use_cache=True`` applica il proprio caching incrementale
+    per-stream (skip interno dei soli stream invariati, vedi
+    ``StreamCacheManager``).
 
     Returns: manifest, una entry per variante con i path prodotti e il flag
     ``skipped``.
@@ -177,21 +218,34 @@ def render_variants(
     for yaml_path in yaml_files:
         rel = os.path.relpath(yaml_path, variant_dir)
         name = os.path.splitext(rel)[0]
-        # Se il path ha 3 componenti (mode/stream_id/variant), aggiungo
-        # il nome dello stream al basename per distinguerli in SV.
+        # Se lo YAML sta in una sotto-cartella di stream della modalita'
+        # (.../{discrete|envelope}/<stream_id>/<variante>), aggiungo il nome
+        # dello stream al basename per distinguerli in SV. La regola e'
+        # relativa alla cartella di modalita', cosi' vale sia per il layout
+        # yaml/sweep/... sia per directory di varianti passate direttamente;
+        # i documenti stack (stack/stack.yml) restano senza prefisso.
         parts = name.split(os.sep)
-        if len(parts) >= 3:
-            audio_basename = f"{parts[-2]}_{parts[-1]}"
-        else:
-            audio_basename = parts[-1]
+        audio_basename = parts[-1]
+        for i, p in enumerate(parts[:-1]):
+            if p in ("discrete", "envelope") and len(parts) - i >= 3:
+                audio_basename = f"{parts[-2]}_{parts[-1]}"
+                break
         audio_path = os.path.join(audio_dir, *parts[:-1], audio_basename + ".aif")
         pdf_path = os.path.join(score_dir, f"{name}.pdf") if score_dir else None
 
         entry: Dict[str, Any] = {"name": name, "yaml": yaml_path, "audio": audio_path}
         if pdf_path:
             entry["score"] = pdf_path
+
+        # Se e' la prima volta che questa variante passa per gli stem (nessun
+        # manifest cache per lei) lo skip a mtime del mix non basta: gli stem
+        # non esistono ancora anche se il mix e' aggiornato.
+        stems_never_built = per_stream and not os.path.exists(
+            os.path.join(cache_dir or "cache", f"{os.path.splitext(os.path.basename(yaml_path))[0]}.json")
+        )
         entry["skipped"] = (
             not force
+            and not stems_never_built
             and _is_up_to_date(audio_path, yaml_path)
             and (pdf_path is None or _is_up_to_date(pdf_path, yaml_path))
         )
@@ -201,20 +255,24 @@ def render_variants(
         os.makedirs(os.path.dirname(os.path.abspath(audio_path)), exist_ok=True)
         if pdf_path:
             os.makedirs(os.path.dirname(os.path.abspath(pdf_path)), exist_ok=True)
-        pending.append((yaml_path, audio_path, pdf_path, samples_dir, output_sr))
+        pending.append((
+            entry,
+            (yaml_path, audio_path, pdf_path, samples_dir, output_sr,
+             per_stream, use_cache, cache_dir),
+        ))
 
     if pending:
         # ponytail: cap a 8 worker, una variante lunga puo' tenere in RAM
         # l'intero buffer audio; alzare con jobs= se la memoria lo consente.
         workers = jobs or min(8, os.cpu_count() or 1, len(pending))
         if workers == 1:
-            for args in pending:
-                _render_one(*args)
+            for entry, args in pending:
+                entry.update(_render_one(*args))
         else:
             from concurrent.futures import ProcessPoolExecutor, as_completed
 
             with ProcessPoolExecutor(max_workers=workers) as pool:
-                futures = [pool.submit(_render_one, *args) for args in pending]
+                futures = {pool.submit(_render_one, *args): entry for entry, args in pending}
                 for fut in as_completed(futures):
-                    fut.result()
+                    futures[fut].update(fut.result())
     return manifest

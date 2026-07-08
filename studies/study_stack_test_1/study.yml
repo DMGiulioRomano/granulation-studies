@@ -1,0 +1,78 @@
+# TEST STACK 1 — X-strategy `linear` (default) + generatori Y + assi scalari.
+#
+# Copre: X-linear (default, tempi equispaziati n dalla Y); Y `values`; Y `ramp`;
+# accoppiamento ex-`combine: parallel` (due assi stessa X-linear + stesso n ->
+# breakpoint agli stessi tempi, valori appaiati per indice); asse scalare (valore
+# secco, non envelope costante); stream statico tutto-scalare (voce-drone/pedale);
+# stream misto scalare+envelope; interpolation per-asse (step/linear/cubic);
+# multi-stream collassato in un documento.
+#
+# Nessun rand qui: tutto deterministico, X sempre `linear`.
+#   make stack STUDY=study_stack_test_1
+
+study_id: study_stack_test_1
+title: "Test stack 1 — X lineare, generatori Y, scalari"
+seed: 1
+duration: 20
+samples_dir: samples
+
+base:
+  onset: 0
+  duration: 6
+  sample: corpus.wav
+  time_mode: normalized
+  grain:
+    envelope: hanning
+  volume: -6
+  pointer:
+    speed_ratio: 0
+    start: .3
+
+axes:
+  interpolation: linear
+  density:
+    path: density
+    baseline: 20
+    values: [10, 30, 50, 70, 90]   # 5 valori -> X-linear a t = 0,.25,.5,.75,1
+    interpolation: step
+  grain_duration:
+    path: grain.duration
+    ramp: {start: .001, stop: .01, step: .001}   # 10 valori via ramp
+
+stack: {}   # nessun asse elencato -> tutti `linear` (default)
+
+streams:
+  # Riferimento: base identica, entrambi gli assi come envelope.
+  base: {}
+
+  # Accoppiamento ex-parallel: density e grain_duration con lo STESSO n (10) e la
+  # stessa X-linear -> breakpoint agli stessi tempi, appaiati per indice.
+  parallel_coupling:
+    axes:
+      density:
+        ramp: {start: 10, stop: 100, step: 10}     # 10 valori
+      grain_duration:
+        ramp: {start: .001, stop: .01, step: .001}  # 10 valori
+
+  # Stream misto: density envelope (5 valori), grain_duration SCALARE (1 valore
+  # -> numero secco via deep_set, non envelope costante).
+  misto_scalare:
+    axes:
+      grain_duration:
+        values: [.004]     # singolo valore -> scalare
+
+  # Voce-drone / pedale: stream tutto-fisso, nessun asse animato. Entrambi gli
+  # assi scalari -> stream statico legittimo di prima classe.
+  drone_statico:
+    axes:
+      density:
+        values: [8]
+      grain_duration:
+        values: [.05]
+
+  # Interpolation cubica per un asse: la curva Y e' ortogonale alla X (resta
+  # linear) e al generatore.
+  curva_cubica:
+    axes:
+      density:
+        interpolation: cubic

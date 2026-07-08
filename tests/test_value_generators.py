@@ -1,6 +1,6 @@
 import pytest
 
-from granstudies.value_generators import ramp, rand, resolve
+from granstudies.value_generators import ramp, rand, rand_at, resolve
 
 
 def test_rand_deterministic_within_band():
@@ -39,6 +39,32 @@ def test_rand_rejects_bad_config():
         rand(n=0, min=0, max=1)
     with pytest.raises(ValueError):
         rand(n=3, min=1, max=0)   # min > max
+
+
+def test_rand_at_deterministic_at_given_fracs():
+    fracs = [0.0, 0.37, 0.81, 1.0]
+    a = rand_at(fracs, min=0.001, max=0.01, seed=1988)
+    b = rand_at(fracs, min=0.001, max=0.01, seed=1988)
+    assert a == b
+    assert len(a) == len(fracs)
+    assert all(0.001 <= v <= 0.01 for v in a)
+
+
+def test_rand_at_band_evaluated_at_real_times():
+    # Banda collassata (min==max mobili): il valore e' l'interpolazione al frac
+    # REALE del punto, non all'indice i/(n-1) — e' il coupling con la X-rand.
+    band = [[0, 0], [1, 10]]
+    assert rand_at([0.0, 0.25, 0.9], min=band, max=band, seed=0) == [0.0, 2.5, 9.0]
+
+
+def test_rand_at_rejects_inverted_band():
+    with pytest.raises(ValueError):
+        rand_at([0.0, 0.5], min=1, max=0)
+
+
+def test_rand_at_rejects_empty_fracs():
+    with pytest.raises(ValueError):
+        rand_at([], min=0, max=1)
 
 
 def test_resolve_explicit_values_passthrough():

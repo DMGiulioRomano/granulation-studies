@@ -1,0 +1,84 @@
+# TEST STACK 4 — combinazioni valide di generatore Y x strategy-X, per-stream.
+#
+# Copre le combinazioni legittime di n-ownership, ognuna in uno stream diverso
+# dentro lo stesso documento, piu' l'override per-stream che cambia l'INTERA
+# coppia (Y + X) di un asse via `_deep_merge`/`_replace_generators`:
+#   - X-linear + Y `values`            (n dalla Y, default del documento)
+#   - X-linear + Y `ramp`              (n dalla Y)
+#   - X-linear + Y `rand` CON `n`      (rand a n fisso, tempi equispaziati)
+#   - X-rand   + Y `rand` SENZA `n`    (rspline: la X possiede n)
+#   - stream tutto-scalare (drone)     (nessun asse animato)
+#
+# Le combinazioni illegali (X-rand + Y con n; X-linear + Y-rand senza n) NON
+# sono qui: falliscono al parse per invariante di n-ownership.
+#
+#   make stack STUDY=study_stack_test_4
+
+study_id: study_stack_test_4
+title: "Test stack 4 — matrice Y x X valide"
+seed: 4
+duration: 25
+samples_dir: samples
+
+base:
+  onset: 0
+  duration: 6
+  sample: corpus.wav
+  time_mode: normalized
+  grain:
+    envelope: hanning
+  volume: -6
+  pointer:
+    speed_ratio: 0
+    start: .3
+
+axes:
+  seed: 99
+  interpolation: cubic
+  density:
+    path: density
+    baseline: 20
+    values: [10, 20, 40, 80]     # X-linear + Y values (default doc)
+  grain_duration:
+    path: grain.duration
+    ramp: {start: .001, stop: .01, step: .001}   # X-linear + Y ramp
+
+stack: {}    # default: tutto linear
+
+streams:
+  # Combinazione di partenza: values + ramp, entrambe X-linear.
+  linear_values_ramp: {}
+
+  # density passa a Y-rand CON n fisso + X-linear (tempi equispaziati, valori
+  # casuali riproducibili dal seed-Y globale).
+  rand_con_n:
+    axes:
+      density:
+        rand:
+          n: 12
+          min: [[0, 8], [1, 2]]
+          max: [[0, 20], [1, 6]]
+
+  # density passa a rspline: override SIMULTANEO di axes (Y-rand senza n) e stack
+  # (X-rand). E' la coppia che _replace_generators deve sostituire su entrambi i
+  # blocchi.
+  rspline:
+    axes:
+      density:
+        rand:
+          min: [[0, 10], [1, 3]]
+          max: [[0, 20], [1, 6]]
+    stack:
+      density:
+        rand:
+          cps:
+            base:  [[0, 5], [1, 5]]
+            range: [[0, 1], [1, 1]]
+
+  # Drone tutto-scalare: coesiste con gli stream animati nello stesso documento.
+  drone:
+    axes:
+      density:
+        values: [6]
+      grain_duration:
+        values: [.06]

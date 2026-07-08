@@ -18,8 +18,6 @@ def _spec(mode):
                 "grain": {"envelope": "hanning"},
             },
             "axes": {
-                "plateau": 5,
-                "transition": 5,
                 "density": {"path": "density", "baseline": 20, "values": [5, 50, 400]},
                 "grain_duration": {
                     "path": "grain.duration",
@@ -27,7 +25,7 @@ def _spec(mode):
                     "values": [0.01, 0.05, 0.2],
                 },
             },
-            "sweep": {"mode": mode, "orders": [1, 2]},
+            "sweep": {"mode": mode, "orders": [1, 2], "plateau": 5, "transition": 5},
         }
     )
 
@@ -101,12 +99,10 @@ def _spec_mixed():
             "study_id": "s",
             "base": {"sample": "x.wav", "duration": 6, "time_mode": "normalized"},
             "axes": {
-                "plateau": 5,
-                "transition": 5,
                 "density": {"path": "density", "baseline": 20, "values": [5, 50, 400], "interpolation": "step"},
                 "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05, 0.2], "interpolation": "cubic"},
             },
-            "sweep": {"mode": "envelope", "orders": [2]},
+            "sweep": {"mode": "envelope", "orders": [2], "plateau": 5, "transition": 5},
         }
     )
 
@@ -145,7 +141,8 @@ def test_dump_preserves_mtime_when_unchanged(tmp_path):
 
 
 def _fake_engine_render(calls):
-    def fake(yaml_path, output_path, samples_dir, output_sr=48000):
+    def fake(yaml_path, output_path, samples_dir, output_sr=48000,
+             per_stream=False, use_cache=False, cache_dir=None):
         calls.append(yaml_path)
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
         with open(output_path, "w") as fh:
@@ -218,8 +215,6 @@ def _golden_spec(orders):
                 "time_mode": "normalized",
             },
             "axes": {
-                "plateau": 5,
-                "transition": 5,
                 "density": {"path": "density", "baseline": 20, "values": [5, 50, 400]},
                 "grain_duration": {
                     "path": "grain.duration",
@@ -227,7 +222,7 @@ def _golden_spec(orders):
                     "values": [0.01, 0.05, 0.2],
                 },
             },
-            "sweep": {"mode": "envelope", "orders": orders},
+            "sweep": {"mode": "envelope", "orders": orders, "plateau": 5, "transition": 5},
         }
     )
 
@@ -295,3 +290,72 @@ def test_golden_e2_synchronized_points_exact(tmp_path):
     grain_vals = [v for _, v in stream["grain"]["duration"]["points"]][0::2]
     assert dens_vals == [5, 5, 5, 50, 50, 50, 400, 400, 400]
     assert grain_vals == [0.01, 0.05, 0.2, 0.01, 0.05, 0.2, 0.01, 0.05, 0.2]
+
+
+# --- processo stack: scrittura documento + render ---------------------------------
+
+def _stack_specs():
+    from granstudies.study_spec import resolve_streams
+
+    return resolve_streams(
+        {
+            "study_id": "s",
+            "seed": 1,
+            "duration": 30,
+            "base": {"sample": "x.wav"},
+            "axes": {
+                "density": {"path": "density", "baseline": 20, "values": [5, 50, 400]},
+            },
+            "stack": {},
+            "streams": {"voce_a": {}, "voce_b": {}},
+        }
+    )
+
+
+def test_write_stack_single_document(tmp_path):
+    from granstudies.render import write_stack
+
+    written = write_stack(_stack_specs(), str(tmp_path))
+    assert written == [str(tmp_path / "stack" / "stack.yml")]
+    doc = _load(written[0])
+    assert len(doc["streams"]) == 2
+
+
+def test_render_picks_up_stack_document(tmp_path, monkeypatch):
+    from granstudies.render import write_stack
+
+    yaml_dir = str(tmp_path / "yaml")
+    write_stack(_stack_specs(), yaml_dir)
+    calls = []
+    monkeypatch.setattr(render_mod.engine_bridge, "render", _fake_engine_render(calls))
+    manifest = render_variants(
+        variant_dir=yaml_dir,
+        audio_dir=str(tmp_path / "audio"),
+        score_dir=None,
+        samples_dir="unused",
+        jobs=1,
+    )
+    assert len(manifest) == 1
+    # niente prefisso di stream: stack/stack.yml -> audio/stack/stack.aif
+    assert manifest[0]["audio"] == str(tmp_path / "audio" / "stack" / "stack.aif")
+    assert os.path.exists(manifest[0]["audio"])
+
+
+def test_render_stream_prefix_relative_to_mode_dir(tmp_path, monkeypatch):
+    # Nuovo layout: yaml/sweep/envelope/<stream>/<nome>.yml — il basename audio
+    # va prefissato col nome dello stream anche con la cartella sweep/ in mezzo.
+    variant_root = str(tmp_path / "yaml")
+    spec = _spec("envelope")
+    spec = __import__("dataclasses").replace(spec, stream_id="vox")
+    write_variants(spec, os.path.join(variant_root, "sweep"))
+    calls = []
+    monkeypatch.setattr(render_mod.engine_bridge, "render", _fake_engine_render(calls))
+    manifest = render_variants(
+        variant_dir=variant_root,
+        audio_dir=str(tmp_path / "audio"),
+        score_dir=None,
+        samples_dir="unused",
+        jobs=1,
+    )
+    audio = sorted(e["audio"] for e in manifest)
+    assert all(os.sep + os.path.join("sweep", "envelope", "vox", "vox_") in a for a in audio)

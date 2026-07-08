@@ -84,21 +84,12 @@ def test_stream_ramp_override_replaces_inherited_values():
     ]
 
 
-def test_combine_defaults_to_cartesian():
-    spec = parse_study_spec(_spec_dict())
-    assert spec.combine == "cartesian"
-
-
-def test_combine_parallel_is_read():
+def test_sweep_combine_removed_raises_with_migration_hint():
+    # combine: parallel non esiste piu': l'accoppiamento degli assi vive nel
+    # processo stack (stessa X, stesso n). Errore chiaro, non silenzio.
     d = _spec_dict()
     d["sweep"]["combine"] = "parallel"
-    assert parse_study_spec(d).combine == "parallel"
-
-
-def test_combine_rejects_unknown_value():
-    d = _spec_dict()
-    d["sweep"]["combine"] = "diagonale"
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="stack"):
         parse_study_spec(d)
 
 
@@ -191,23 +182,36 @@ def test_base_duration_absent_does_not_raise():
 
 # --- timing envelope + sweep.mode ----------------------------------------------
 
-def test_plateau_and_transition_are_read():
+def test_plateau_and_transition_read_from_sweep():
+    # Invariante: axes conosce solo Y; il timing (X) appartiene al processo sweep.
     spec = parse_study_spec(
         {
             "study_id": "s",
             "base": {"sample": "x.wav"},
             "axes": {
-                "plateau": 7,
-                "transition": 3,
                 "density": {"path": "density", "baseline": 20, "values": [5, 50]},
             },
-            "sweep": {"orders": [1]},
+            "sweep": {"orders": [1], "plateau": 3, "transition": 2},
         }
     )
-    assert spec.plateau == 7
-    assert spec.transition == 3
-    # plateau/transition non sono assi
-    assert [ax.name for ax in spec.axes] == ["density"]
+    assert spec.plateau == 3
+    assert spec.transition == 2
+
+
+def test_plateau_in_axes_raises_with_migration_hint():
+    # plateau/transition non vivono piu' in axes: errore chiaro, non un asse rotto.
+    with pytest.raises(ValueError, match="sweep"):
+        parse_study_spec(
+            {
+                "study_id": "s",
+                "base": {"sample": "x.wav"},
+                "axes": {
+                    "plateau": 7,
+                    "density": {"path": "density", "baseline": 20, "values": [5, 50]},
+                },
+                "sweep": {"orders": [1]},
+            }
+        )
 
 
 def test_sweep_mode_accepts_envelope_discrete_both():
@@ -233,3 +237,162 @@ def test_sweep_mode_defaults_to_discrete():
         }
     )
     assert spec.mode == "discrete"
+
+
+# --- blocco stack: (X per-asse) + modello seed -----------------------------------
+
+def _stack_dict():
+    return {
+        "study_id": "s",
+        "duration": 30,
+        "base": {"sample": "x.wav"},
+        "axes": {
+            "seed": 1988,
+            "density": {
+                "path": "density",
+                "baseline": 20,
+                "rand": {"min": [[0, 10], [1, 2]], "max": [[0, 20], [1, 5]]},
+                "interpolation": "cubic",
+            },
+            "grain_duration": {
+                "path": "grain.duration",
+                "ramp": {"start": 0.001, "stop": 0.002, "step": 0.0005},
+            },
+        },
+        "stack": {
+            "seed": 42,
+            "density": {"rand": {"cps": {"base": [[0, 3], [1, 10]], "range": 1}}},
+        },
+    }
+
+
+def test_stack_block_parsed_per_axis():
+    spec = parse_study_spec(_stack_dict())
+    assert spec.stack is not None
+    assert "density" in spec.stack
+    assert "seed" not in spec.stack            # chiave riservata, non un asse
+    assert spec.stack_seed == 42
+    assert spec.axes_seed == 1988
+
+
+def test_axes_seed_is_not_an_axis():
+    spec = parse_study_spec(_stack_dict())
+    assert [ax.name for ax in spec.axes] == ["density", "grain_duration"]
+
+
+def test_axis_carries_raw_generator_config():
+    spec = parse_study_spec(_stack_dict())
+    assert spec.axis("grain_duration").generator == {
+        "ramp": {"start": 0.001, "stop": 0.002, "step": 0.0005}
+    }
+    assert "rand" in spec.axis("density").generator
+
+
+def test_y_rand_without_n_deferred_when_x_rand():
+    # La X possiede n: i valori Y non si enumerano al parse (emergono in stack).
+    spec = parse_study_spec(_stack_dict())
+    assert spec.axis("density").values == []
+    assert spec.axis("density").defers_n() is True
+    assert spec.axis("grain_duration").defers_n() is False
+
+
+def test_y_rand_without_n_and_no_stack_raises():
+    d = _stack_dict()
+    del d["stack"]
+    with pytest.raises(ValueError):
+        parse_study_spec(d)
+
+
+def test_y_rand_without_n_and_x_linear_raises():
+    d = _stack_dict()
+    d["stack"]["density"] = {"linear": {}}
+    with pytest.raises(ValueError):
+        parse_study_spec(d)
+
+
+def test_x_rand_with_y_owning_n_raises():
+    d = _stack_dict()
+    d["axes"]["density"]["rand"]["n"] = 50    # Y con n + X-rand: conflitto
+    with pytest.raises(ValueError):
+        parse_study_spec(d)
+
+
+def test_stack_axis_unknown_raises():
+    d = _stack_dict()
+    d["stack"]["inesistente"] = {"linear": {}}
+    with pytest.raises(ValueError):
+        parse_study_spec(d)
+
+
+def test_stack_unknown_strategy_raises():
+    d = _stack_dict()
+    d["stack"]["density"] = {"accelerando": {}}
+    with pytest.raises(ValueError):
+        parse_study_spec(d)
+
+
+def test_stack_without_duration_raises():
+    d = _stack_dict()
+    del d["duration"]
+    with pytest.raises(ValueError):
+        parse_study_spec(d)
+
+
+def test_stack_seed_override_per_stream():
+    d = _stack_dict()
+    d["streams"] = {
+        "voce_a": {"base": {"pointer": {"start": 0.1}}},
+        "voce_b": {"stack": {"seed": 43}},
+    }
+    specs = {s.stream_id: s for s in resolve_streams(d)}
+    assert specs["voce_a"].stack_seed == 42    # eredita il globale
+    assert specs["voce_b"].stack_seed == 43    # override per-stream
+
+
+def test_seed_autoderivation_per_stream_stable_and_decorrelated():
+    d = _stack_dict()
+    del d["stack"]["seed"]
+    del d["axes"]["seed"]
+    d["streams"] = {"voce_a": {}, "voce_b": {}}
+    specs = {s.stream_id: s for s in resolve_streams(d)}
+    a, b = specs["voce_a"], specs["voce_b"]
+    # deterministici: due parse danno gli stessi seed
+    again = {s.stream_id: s for s in resolve_streams(_dict_no_seeds())}
+    assert a.resolved_y_seed() == again["voce_a"].resolved_y_seed()
+    assert a.resolved_x_seed() == again["voce_a"].resolved_x_seed()
+    # per-stream: stream diversi -> seed diversi (decorrelazione di default)
+    assert a.resolved_y_seed() != b.resolved_y_seed()
+    assert a.resolved_x_seed() != b.resolved_x_seed()
+    # Y e X decorrelati anche dentro lo stesso stream
+    assert a.resolved_y_seed() != a.resolved_x_seed()
+
+
+def _dict_no_seeds():
+    d = _stack_dict()
+    del d["stack"]["seed"]
+    del d["axes"]["seed"]
+    d["streams"] = {"voce_a": {}, "voce_b": {}}
+    return d
+
+
+def test_global_seeds_win_over_autoderivation():
+    spec = parse_study_spec(_stack_dict())
+    assert spec.resolved_y_seed() == 1988
+    assert spec.resolved_x_seed() == 42
+
+
+def test_stream_x_strategy_override_replaces_inherited():
+    # Uno stream che sceglie linear su un asse che nella base ha rand:
+    # la strategy dell'override rimpiazza quella ereditata (niente collisione).
+    d = _stack_dict()
+    d["axes"]["density"]["rand"]["n"] = 8      # Y possiede n, cosi' linear e' valido
+    d["stack"]["density"] = {"rand": {"cps": {"base": 5}}}
+    del d["axes"]["density"]["rand"]["n"]      # torna senza n per la base
+    d["streams"] = {
+        "solo_linear": {
+            "axes": {"density": {"rand": {"n": 8, "min": 0, "max": 10}}},
+            "stack": {"density": {"linear": {}}},
+        }
+    }
+    spec = [s for s in resolve_streams(d) if s.stream_id == "solo_linear"][0]
+    assert spec.stack["density"] == {"linear": {}}

@@ -4,7 +4,6 @@ from granstudies.study_spec import parse_study_spec
 from granstudies.envelope_sweep import (
     envelope_breakpoints,
     cartesian_combinations,
-    parallel_combinations,
     EnvelopeVariant,
     generate_envelope_variants,
 )
@@ -16,8 +15,6 @@ def _spec(orders, plateau=5, transition=5):
             "study_id": "s",
             "base": {"sample": "x.wav"},
             "axes": {
-                "plateau": plateau,
-                "transition": transition,
                 "density": {"path": "density", "baseline": 20, "values": [5, 50, 400]},
                 "grain_duration": {
                     "path": "grain.duration",
@@ -26,7 +23,12 @@ def _spec(orders, plateau=5, transition=5):
                 },
                 "pan": {"path": "pan", "baseline": 0.0, "values": [-1.0, 0.0, 1.0]},
             },
-            "sweep": {"mode": "envelope", "orders": orders},
+            "sweep": {
+                "mode": "envelope",
+                "orders": orders,
+                "plateau": plateau,
+                "transition": transition,
+            },
         }
     )
 
@@ -94,11 +96,10 @@ def test_axis_interpolation_per_axis_override():
         "study_id": "s",
         "base": {"sample": "x.wav"},
         "axes": {
-            "plateau": 5, "transition": 5,
             "density": {"path": "density", "baseline": 20, "values": [5, 50], "interpolation": "step"},
             "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05], "interpolation": "cubic"},
         },
-        "sweep": {"mode": "envelope", "orders": [1]},
+        "sweep": {"mode": "envelope", "orders": [1], "plateau": 5, "transition": 5},
     })
     assert spec.axis("density").interpolation == "step"
     assert spec.axis("grain_duration").interpolation == "cubic"
@@ -109,11 +110,11 @@ def test_axis_interpolation_inherits_study_default():
         "study_id": "s",
         "base": {"sample": "x.wav"},
         "axes": {
-            "plateau": 5, "transition": 5, "interpolation": "step",
+            "interpolation": "step",
             "density": {"path": "density", "baseline": 20, "values": [5, 50]},
             "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05], "interpolation": "cubic"},
         },
-        "sweep": {"mode": "envelope", "orders": [1]},
+        "sweep": {"mode": "envelope", "orders": [1], "plateau": 5, "transition": 5},
     })
     # density eredita il default-studio (step), grain fa override (cubic)
     assert spec.axis("density").interpolation == "step"
@@ -132,34 +133,6 @@ def test_cartesian_two_axes_lexicographic():
     assert combos[2] == {"density": 5, "grain_duration": 0.2}
     assert combos[3] == {"density": 50, "grain_duration": 0.01}
     assert combos[8] == {"density": 400, "grain_duration": 0.2}
-
-
-# --- parallel_combinations -----------------------------------------------------
-
-def test_parallel_two_axes_zips_not_product():
-    spec = _spec([2])
-    combos = parallel_combinations([spec.axis("density"), spec.axis("grain_duration")])
-    # zip: 3 plateau (non 9), gli assi si muovono insieme
-    assert combos == [
-        {"density": 5, "grain_duration": 0.01},
-        {"density": 50, "grain_duration": 0.05},
-        {"density": 400, "grain_duration": 0.2},
-    ]
-
-
-def test_parallel_rejects_unequal_lengths():
-    spec = parse_study_spec({
-        "study_id": "s",
-        "base": {"sample": "x.wav"},
-        "axes": {
-            "plateau": 5, "transition": 5,
-            "density": {"path": "density", "baseline": 20, "values": [5, 50, 400]},
-            "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05]},
-        },
-        "sweep": {"mode": "envelope", "orders": [2]},
-    })
-    with pytest.raises(ValueError):
-        parallel_combinations([spec.axis("density"), spec.axis("grain_duration")])
 
 
 # --- generate_envelope_variants ------------------------------------------------
@@ -216,14 +189,12 @@ def test_duration_o4_with_four_axes():
             "study_id": "s",
             "base": {"sample": "x.wav"},
             "axes": {
-                "plateau": 5,
-                "transition": 5,
                 "a": {"path": "density", "baseline": 20, "values": [5, 50, 400]},
                 "b": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05, 0.2]},
                 "c": {"path": "pan", "baseline": 0.0, "values": [-1.0, 0.0, 1.0]},
                 "d": {"path": "volume", "baseline": -6, "values": [-12, -6, 0]},
             },
-            "sweep": {"mode": "envelope", "orders": [4]},
+            "sweep": {"mode": "envelope", "orders": [4], "plateau": 5, "transition": 5},
         }
     )
     variants = generate_envelope_variants(spec)
@@ -234,50 +205,6 @@ def test_duration_o4_with_four_axes():
     assert v.duration(spec) == 805
 
 
-# --- combine: parallel (end-to-end) --------------------------------------------
-
-def _spec_parallel(orders):
-    return parse_study_spec({
-        "study_id": "s",
-        "base": {"sample": "x.wav"},
-        "axes": {
-            "plateau": 5, "transition": 5,
-            "density": {"path": "density", "baseline": 20, "values": [5, 50, 400]},
-            "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05, 0.2]},
-            "pan": {"path": "pan", "baseline": 0.0, "values": [-1.0, 0.0, 1.0]},
-        },
-        "sweep": {"mode": "envelope", "orders": orders, "combine": "parallel"},
-    })
-
-
-def test_parallel_o2_combinations_are_zipped():
-    spec = _spec_parallel([2])
-    v = next(x for x in generate_envelope_variants(spec) if x.name == "e2__density__grain_duration")
-    # zip -> 3 plateau (non 9), assi mossi insieme
-    assert v.combinations == [
-        {"density": 5, "grain_duration": 0.01},
-        {"density": 50, "grain_duration": 0.05},
-        {"density": 400, "grain_duration": 0.2},
-    ]
-    # durata riflette N=3, non N=9
-    assert v.duration(spec) == 3 * 5 + 2 * 5
-
-
-def test_parallel_respects_orderings():
-    spec = parse_study_spec({
-        "study_id": "s",
-        "base": {"sample": "x.wav"},
-        "axes": {
-            "plateau": 5, "transition": 5,
-            "density": {"path": "density", "baseline": 20, "values": [5, 50, 400]},
-            "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05, 0.2]},
-        },
-        "sweep": {"mode": "envelope", "orderings": [["density", "grain_duration"]], "combine": "parallel"},
-    })
-    v = generate_envelope_variants(spec)[0]
-    assert len(v.combinations) == 3
-
-
 # --- EnvelopeVariant.envelope_types --------------------------------------------
 
 def _spec_mixed(orders):
@@ -285,12 +212,11 @@ def _spec_mixed(orders):
         "study_id": "s",
         "base": {"sample": "x.wav"},
         "axes": {
-            "plateau": 5, "transition": 5,
             "density": {"path": "density", "baseline": 20, "values": [5, 50, 400], "interpolation": "step"},
             "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05, 0.2], "interpolation": "cubic"},
             "pan": {"path": "pan", "baseline": 0.0, "values": [-1.0, 0.0, 1.0]},
         },
-        "sweep": {"mode": "envelope", "orders": orders},
+        "sweep": {"mode": "envelope", "orders": orders, "plateau": 5, "transition": 5},
     })
 
 
@@ -377,12 +303,12 @@ def _spec_step(orders, transition=5):
         "study_id": "s",
         "base": {"sample": "x.wav"},
         "axes": {
-            "plateau": 5, "transition": transition, "interpolation": "step",
+            "interpolation": "step",
             "density": {"path": "density", "baseline": 20, "values": [5, 50, 400]},
             "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05, 0.2]},
             "pan": {"path": "pan", "baseline": 0.0, "values": [-1.0, 0.0, 1.0]},
         },
-        "sweep": {"mode": "envelope", "orders": orders},
+        "sweep": {"mode": "envelope", "orders": orders, "plateau": 5, "transition": transition},
     })
 
 
@@ -410,11 +336,10 @@ def _spec_both_step_per_axis(orders):
         "study_id": "s",
         "base": {"sample": "x.wav"},
         "axes": {
-            "plateau": 5, "transition": 4,
             "density": {"path": "density", "baseline": 20, "values": [5, 50, 400], "interpolation": "step"},
             "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05, 0.2], "interpolation": "step"},
         },
-        "sweep": {"mode": "envelope", "orders": orders},
+        "sweep": {"mode": "envelope", "orders": orders, "plateau": 5, "transition": 4},
     })
 
 
@@ -434,12 +359,12 @@ def _spec_orderings(orderings):
         "study_id": "s",
         "base": {"sample": "x.wav"},
         "axes": {
-            "plateau": 5, "transition": 5,
             "density": {"path": "density", "baseline": 20, "values": [5, 50, 400]},
             "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05, 0.2]},
             "pan": {"path": "pan", "baseline": 0.0, "values": [-1.0, 0.0, 1.0]},
         },
-        "sweep": {"mode": "envelope", "orders": [3], "orderings": orderings},
+        "sweep": {"mode": "envelope", "orders": [3], "orderings": orderings,
+                  "plateau": 5, "transition": 5},
     })
 
 
