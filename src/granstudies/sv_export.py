@@ -21,16 +21,19 @@ from typing import Any, List, Literal, Tuple
 # Plot style per tipo di interpolazione dell'envelope.
 # I valori sono gli interi dell'enum PlotStyle di TimeValueLayer (svgui),
 # serializzati come stringa nell'attributo plotStyle del layer.
-#   "3" = PlotLines        -> spezzata di segmenti retti tra i breakpoint
-#   "7" = PlotCubicHermite -> curva cubica monotona (Fritsch-Carlson)
-#   "8" = Stepped          -> sample-and-hold, salto netto al breakpoint successivo
-# (7 e 8 esistono solo nel fork DMGiulioRomano/svgui.)
+#   "3" = PlotLines         -> spezzata di segmenti retti tra i breakpoint
+#   "7" = PlotCubicHermite  -> curva cubica monotona (Fritsch-Carlson)
+#   "8" = Stepped           -> sample-and-hold, salto netto al breakpoint successivo
+#   "9" = PlotPerBreakpoint -> interpolazione mista, per segmento: il layer legge
+#                              il type dalla label di ogni <point> (vuota = linear)
+# (7, 8 e 9 esistono solo nel fork DMGiulioRomano/svgui.)
 _PLOT_STYLE_BY_TYPE = {
     "linear": "3",
     "cubic": "7",
     "step": "8",
 }
 _PLOT_STYLE_DEFAULT = "3"  # fallback prudente: segmenti retti
+_PLOT_STYLE_PER_BREAKPOINT = "9"
 
 _COLOURS = [
     ("#ff8800", "Orange"),
@@ -44,6 +47,27 @@ Layout = Literal["multi", "single"]
 
 
 _ENVELOPE_TYPES = {"linear", "cubic", "step"}
+
+
+def _split_point(point: List) -> Tuple[Any, Any, str]:
+    """Normalizza un breakpoint del motore: [t, v] o [t, v, type] -> (t, v, label).
+
+    Il motore (envelope.py) accetta punti a 3 elementi dove il type per-punto
+    governa il segmento che parte dal punto; qui il type finisce nella label
+    del <point>, il canale che TimeValueLayer::PlotPerBreakpoint legge. Punti
+    a 2 elementi -> label vuota.
+    """
+    if len(point) == 3:
+        return point[0], point[1], str(point[2])
+    t, v = point
+    return t, v, ""
+
+
+def _layer_plot_style(points: List, env_type: str) -> str:
+    """plotStyle del layer: misto se c'e' almeno un punto [t, v, type]."""
+    if any(len(p) == 3 for p in points):
+        return _PLOT_STYLE_PER_BREAKPOINT
+    return _PLOT_STYLE_BY_TYPE.get(env_type, _PLOT_STYLE_DEFAULT)
 
 
 def _find_envelopes(obj: Any, prefix: str = "") -> List[Tuple[str, List, str]]:
@@ -144,12 +168,13 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
             "notifyOnAdd": "true", "dataset": dataset_id,
         })
         ds = ET.SubElement(data, "dataset", {"id": dataset_id, "dimensions": "2"})
-        for t_norm, value in points:
+        for point in points:
+            t_norm, value, label = _split_point(point)
             frame = str(round(t_norm * duration_sec * sample_rate))
-            ET.SubElement(ds, "point", {"frame": frame, "value": str(value), "label": ""})
+            ET.SubElement(ds, "point", {"frame": frame, "value": str(value), "label": label})
 
         colour, colour_name = _COLOURS[i % len(_COLOURS)]
-        plot_style = _PLOT_STYLE_BY_TYPE.get(env_type, _PLOT_STYLE_DEFAULT)
+        plot_style = _layer_plot_style(points, env_type)
         ET.SubElement(data, "layer", {
             "id": layer_id, "type": "timevalues", "name": path, "model": model_id,
             "plotStyle": plot_style, "verticalScale": "0",
@@ -409,12 +434,13 @@ def _build_sv_xml_stems(stems: List[Tuple[str, str, int, float, List[Tuple[str, 
                 "notifyOnAdd": "true", "dataset": env_dataset_id,
             })
             ds = ET.SubElement(data, "dataset", {"id": env_dataset_id, "dimensions": "2"})
-            for t_norm, value in points:
+            for point in points:
+                t_norm, value, label = _split_point(point)
                 frame = str(round(t_norm * duration * sr))
-                ET.SubElement(ds, "point", {"frame": frame, "value": str(value), "label": ""})
+                ET.SubElement(ds, "point", {"frame": frame, "value": str(value), "label": label})
 
             colour, colour_name = _COLOURS[i % len(_COLOURS)]
-            plot_style = _PLOT_STYLE_BY_TYPE.get(env_type, _PLOT_STYLE_DEFAULT)
+            plot_style = _layer_plot_style(points, env_type)
             ET.SubElement(data, "layer", {
                 "id": env_layer_id, "type": "timevalues", "name": f"{stream_id}/{path}",
                 "model": env_model_id, "plotStyle": plot_style, "verticalScale": "0",

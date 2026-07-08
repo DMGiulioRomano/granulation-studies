@@ -65,6 +65,61 @@ def test_step_layer_uses_stepped_plot_style():
     assert tv[0].get("plotStyle") == "8"
 
 
+def test_per_breakpoint_envelope_uses_per_breakpoint_plot_style():
+    # SV (fork): enum PlotStyle -> PerBreakpoint = 9. Envelope con almeno un
+    # punto [t, v, type] (sintassi per-punto del motore): il layer va disegnato
+    # col nuovo stile misto, non con quello globale del type di envelope.
+    pts = [[0.0, 5, "step"], [0.4, 50, "cubic"], [1.0, 400]]
+    xml = _parse(_build_sv_xml("/x.wav", 1000, 10.0, [("density", pts, "linear")], "multi",
+                               markers=False))
+    tv = [l for l in xml.findall("./data/layer") if l.get("type") == "timevalues"]
+    assert len(tv) == 1
+    assert tv[0].get("plotStyle") == "9"
+
+
+def test_per_breakpoint_points_emit_type_as_label():
+    # Il type per-punto viaggia nella label del <point>: e' il canale che
+    # TimeValueLayer::PlotPerBreakpoint legge per scegliere l'interpolazione
+    # del segmento che parte dal punto. Punti senza type -> label vuota.
+    pts = [[0.0, 5, "step"], [0.4, 50, "cubic"], [1.0, 400]]
+    xml = _parse(_build_sv_xml("/x.wav", 1000, 10.0, [("density", pts, "linear")], "multi",
+                               markers=False))
+    ds = xml.findall("./data/dataset")
+    assert len(ds) == 1
+    points = ds[0].findall("point")
+    assert [p.get("label") for p in points] == ["step", "cubic", ""]
+    assert [p.get("value") for p in points] == ["5", "50", "400"]
+    assert [p.get("frame") for p in points] == ["0", "4000", "10000"]
+
+
+def test_uniform_envelope_keeps_global_plot_style():
+    # Senza punti a 3 elementi il comportamento resta quello di prima:
+    # plotStyle dal type dell'envelope, label vuote.
+    pts = [[0.0, 5], [1.0, 400]]
+    xml = _parse(_build_sv_xml("/x.wav", 1000, 10.0, [("density", pts, "cubic")], "multi",
+                               markers=False))
+    tv = [l for l in xml.findall("./data/layer") if l.get("type") == "timevalues"]
+    assert tv[0].get("plotStyle") == "7"
+    ds = xml.findall("./data/dataset")[0]
+    assert [p.get("label") for p in ds.findall("point")] == ["", ""]
+
+
+def test_stems_builder_handles_per_breakpoint_points():
+    from granstudies.sv_export import _build_sv_xml_stems
+    import os, tempfile
+
+    pts = [[0.0, 5, "step"], [1.0, 50]]
+    with tempfile.NamedTemporaryFile(suffix=".aif") as fh:
+        stems = [("base", fh.name, 1000, 10.0, [("density", pts, "linear")])]
+        xml = _parse(_build_sv_xml_stems(stems))
+
+    tv = [l for l in xml.findall("./data/layer") if l.get("type") == "timevalues"]
+    assert len(tv) == 1
+    assert tv[0].get("plotStyle") == "9"
+    ds = xml.findall("./data/dataset")[0]
+    assert [p.get("label") for p in ds.findall("point")] == ["step", ""]
+
+
 # --- marker layer nel .sv ------------------------------------------------------
 
 def _envelopes():
