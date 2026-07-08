@@ -160,3 +160,26 @@ def test_stack_envelopes_prefixes_stream_id_and_skips_scalars():
     envs = _stack_envelopes(doc)
     paths = [p for p, _pts, _t in envs]
     assert paths == ["base/density", "voce_b/density"]
+
+
+def test_multi_groups_envelopes_by_stream_prefix():
+    # Path con prefisso stream/ (export stack): gli assi di uno stream finiscono
+    # nello stesso pane; stream diversi in pane diversi.
+    envs = [
+        ("a/density", [[0.0, 5], [1.0, 50]], "step"),
+        ("a/grain.duration", [[0.0, 0.001], [1.0, 0.01]], "linear"),
+        ("b/density", [[0.0, 10], [1.0, 20]], "cubic"),
+    ]
+    xml = _parse(_build_sv_xml("/x.wav", 1000, 10.0, envs, "multi", markers=False))
+    panes = xml.findall("./display/view")
+    env_panes = panes[1:]  # il primo e' waveform
+    names = [[l.get("name") for l in p.findall("layer[@type='timevalues']")] for p in env_panes]
+    assert names == [["a/density", "a/grain.duration"], ["b/density"]]
+
+
+def test_multi_without_prefix_is_one_pane_per_envelope():
+    # Path sweep (senza '/'): comportamento invariato, un pane per envelope.
+    envs = [("density", [[0.0, 5]], "step"), ("grain.duration", [[0.0, 0.001]], "linear")]
+    xml = _parse(_build_sv_xml("/x.wav", 1000, 10.0, envs, "multi", markers=False))
+    env_panes = xml.findall("./display/view")[1:]
+    assert len(env_panes) == 2

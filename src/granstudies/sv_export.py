@@ -196,7 +196,19 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
     display = ET.SubElement(root, "display")
     ET.SubElement(display, "window", {"width": "1728", "height": "1057"})
 
-    n_panes = 1 + (1 if layout == "single" else len(envelopes))
+    # multi: un pane per *gruppo* di envelope. Il gruppo e' la parte del path
+    # prima di '/' (lo stream_id, presente solo negli export stack): cosi' gli
+    # assi di uno stesso stream stanno in un pane unico. Per lo sweep i path non
+    # hanno '/', quindi ogni envelope e' un gruppo a se' -> un pane per envelope,
+    # identico a prima.
+    from itertools import groupby
+
+    def _group_key(item: Tuple[str, str, str]) -> str:
+        return item[2].split("/", 1)[0]
+
+    multi_groups = [list(g) for _k, g in groupby(layer_ids, key=_group_key)]
+
+    n_panes = 1 + (1 if layout == "single" else len(multi_groups))
     pane_height = str(max(150, 912 // n_panes))
 
     def _pane(parent):
@@ -244,14 +256,15 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
                 "model": model_id, "visible": "true",
             })
         _marker_layer(env_pane)
-    else:  # multi
-        for layer_id, model_id, path in layer_ids:
+    else:  # multi: un pane per gruppo (per stream negli export stack)
+        for group in multi_groups:
             pane = _pane(display)
             _ruler_layer(pane)
-            ET.SubElement(pane, "layer", {
-                "id": layer_id, "type": "timevalues", "name": path,
-                "model": model_id, "visible": "true",
-            })
+            for layer_id, model_id, path in group:
+                ET.SubElement(pane, "layer", {
+                    "id": layer_id, "type": "timevalues", "name": path,
+                    "model": model_id, "visible": "true",
+                })
             _marker_layer(pane)
 
     ET.SubElement(root, "selections")
