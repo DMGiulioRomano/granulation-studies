@@ -185,3 +185,209 @@ def test_ramp_descending():
         0.005, 0.00475, 0.0045, 0.00425, 0.004,
         0.00375, 0.0035, 0.00325, 0.003,
     ]
+
+
+# --- generatori annidati: espansione nodo -> breakpoint (plan nested-generators) --
+
+from granstudies.value_generators import (  # noqa: E402
+    MAX_ENV_DEPTH,
+    expand_env,
+    expand_params,
+    is_generator_node,
+    stable_seed,
+)
+
+
+def test_is_generator_node_recognizes_markers_only():
+    assert is_generator_node({"values": [1, 2]})
+    assert is_generator_node({"ramp": {"start": 1, "stop": 2, "step": 1}})
+    assert is_generator_node({"n": 3, "base": 0, "range": 1})
+    # le forme statiche NON sono nodi
+    assert not is_generator_node(3.0)
+    assert not is_generator_node([1, 5])
+    assert not is_generator_node([[0, 1], [1, 5]])
+    assert not is_generator_node({"type": "step", "points": [[0, 1], [1, 5]]})
+
+
+def test_expand_env_passthrough_static_forms():
+    for spec in (3.0, [1, 5], [[0, 1], [1, 5]],
+                 {"type": "step", "points": [[0, 1], [1, 5]], "curve": 1}):
+        assert expand_env(spec, seed=0, path="base") == spec
+
+
+def test_expand_values_node_spreads_on_linear_grid():
+    assert expand_env({"values": [1, 2, 3]}, seed=0, path="base") == [
+        [0.0, 1], [0.5, 2], [1.0, 3],
+    ]
+
+
+def test_expand_ramp_node():
+    assert expand_env({"ramp": {"start": 1, "stop": 3, "step": 1}}, seed=0, path="base") == [
+        [0.0, 1], [0.5, 2], [1.0, 3],
+    ]
+
+
+def test_expand_band_node_matches_band_with_same_seed():
+    got = expand_env({"n": 3, "base": 0, "range": 10, "seed": 5}, seed=0, path="base")
+    want = band(3, 0, 10, seed=5)
+    assert got == [[0.0, want[0]], [0.5, want[1]], [1.0, want[2]]]
+
+
+def test_expand_node_with_type_step_returns_dict_form():
+    got = expand_env({"type": "step", "values": [1, 2]}, seed=0, path="base")
+    assert got == {"type": "step", "points": [[0.0, 1], [1.0, 2]]}
+
+
+def test_expand_node_with_curve_returns_dict_form():
+    got = expand_env({"curve": 2, "values": [0, 10]}, seed=0, path="base")
+    assert got == {"type": "linear", "points": [[0.0, 0], [1.0, 10]], "curve": 2}
+    assert _threshold_at(got, 0.5) == 2.5
+
+
+def test_expand_node_single_value_holds():
+    got = expand_env({"values": [7]}, seed=0, path="base")
+    assert got == [[0.0, 7]]
+    assert _threshold_at(got, 0.9) == 7
+
+
+def test_expand_band_node_without_n_raises():
+    with pytest.raises(ValueError, match="base"):
+        expand_env({"base": 0, "range": 1}, seed=0, path="base")
+
+
+def test_expand_node_two_markers_raises():
+    with pytest.raises(ValueError):
+        expand_env({"values": [1], "ramp": {"start": 1, "stop": 2, "step": 1}},
+                   seed=0, path="base")
+
+
+def test_expand_node_type_cubic_raises():
+    with pytest.raises(ValueError, match="cubic"):
+        expand_env({"type": "cubic", "values": [1, 2]}, seed=0, path="base")
+
+
+def test_expand_node_curve_with_step_raises_with_path():
+    with pytest.raises(ValueError, match="base"):
+        expand_env({"type": "step", "curve": 2, "values": [1, 2]}, seed=0, path="base")
+
+
+def test_expand_recursion_three_levels():
+    node = {
+        "n": 4,
+        "base": {"n": 3, "base": 0,
+                 "range": {"ramp": {"start": 1, "stop": 3, "step": 1}}},
+        "range": 1,
+    }
+    a = expand_env(node, seed=42, path="base")
+    b = expand_env(node, seed=42, path="base")
+    assert a == b
+    assert len(a) == 4
+
+
+def test_expand_depth_guard():
+    node = {"n": 2, "base": 0, "range": 1}
+    for _ in range(MAX_ENV_DEPTH):
+        node = {"n": 2, "base": node, "range": 1}
+    with pytest.raises(ValueError, match="profondit"):
+        expand_env(node, seed=0, path="base")
+
+
+# --- generatori annidati: derivazione del seed ------------------------------------
+
+def test_nested_seed_derived_from_parent_and_path():
+    got = expand_env({"n": 3, "base": 0, "range": 10}, seed=99, path="base")
+    want = band(3, 0, 10, seed=stable_seed("99:base"))
+    assert [v for _, v in got] == want
+
+
+def test_nested_base_and_range_decorrelated():
+    params = {"n": 5, "base": {"n": 3, "base": 0, "range": 10},
+              "range": {"n": 3, "base": 0, "range": 10}, "seed": 7}
+    out = expand_params(params, seed=7)
+    assert out["base"] != out["range"]
+
+
+def test_nested_explicit_seed_wins():
+    got = expand_env({"n": 3, "base": 0, "range": 10, "seed": 5}, seed=99, path="base")
+    want = band(3, 0, 10, seed=5)
+    assert [v for _, v in got] == want
+
+
+def test_changing_parent_seed_reseeds_subtree():
+    node = {"n": 3, "base": 0, "range": 10}
+    a = expand_env(node, seed=1, path="base")
+    b = expand_env(node, seed=2, path="base")
+    assert a != b
+
+
+def test_expand_params_walks_generic_dict():
+    params = {"n": 4, "base": {"values": [0, 10]}, "range": 0.5, "seed": 3}
+    out = expand_params(params, seed=3)
+    assert out["base"] == [[0.0, 0], [1.0, 10]]
+    assert out["range"] == 0.5
+    assert out["n"] == 4
+
+
+def test_constant_width_band_with_nested_base():
+    # base annidato + range scalare: la banda trasla a larghezza costante.
+    params = expand_params(
+        {"n": 50, "base": {"values": [0, 100]}, "range": 1, "seed": 1}, seed=1
+    )
+    values = band(**params)
+    for i, v in enumerate(values):
+        lo = 100 * i / 49
+        assert lo <= v <= lo + 1
+
+
+# --- ramp con step: Env (accelerando/ritardando) ----------------------------------
+
+def test_ramp_env_step_with_step_type_deterministic():
+    # step: 2 nella prima meta' del progresso, 1 nella seconda.
+    out = ramp(0, 10, {"type": "step", "points": [[0, 2], [0.5, 1]]})
+    assert out == [0, 2, 4, 6, 7, 8, 9, 10]
+
+
+def test_ramp_env_accelerando_steps_shrink():
+    out = ramp(5, 100, [10, 1])
+    diffs = [b - a for a, b in zip(out, out[1:])]
+    assert all(d > 0 for d in diffs)
+    assert diffs[0] > diffs[-1]
+    assert out[0] == 5 and out[-1] <= 100
+
+
+def test_ramp_env_descending():
+    out = ramp(10, 0, {"type": "step", "points": [[0, 2], [0.5, 1]]})
+    assert out == [10, 8, 6, 4, 3, 2, 1, 0]
+
+
+def test_ramp_scalar_branch_unchanged():
+    assert ramp(0.003, 0.005, 0.00025) == [
+        0.003, 0.00325, 0.0035, 0.00375, 0.004,
+        0.00425, 0.0045, 0.00475, 0.005,
+    ]
+
+
+def test_ramp_env_step_reaching_zero_raises():
+    with pytest.raises(ValueError):
+        ramp(0, 10, [1, 0])
+
+
+def test_ramp_env_runaway_points_raises():
+    with pytest.raises(ValueError, match="punti"):
+        ramp(0, 10, [[0, 1e-6], [1, 1e-6]])
+
+
+def test_ramp_start_equals_stop_single_point():
+    assert ramp(5, 5, [1, 2]) == [5]
+
+
+def test_ramp_env_step_nested_generator_via_expand():
+    params = expand_params(
+        {"start": 1, "stop": 10, "step": {"n": 3, "base": 1, "range": 2, "seed": 1}},
+        seed=1,
+    )
+    a = ramp(**params)
+    b = ramp(**params)
+    assert a == b
+    assert a[0] == 1 and a[-1] <= 10
+    assert all(y > x for x, y in zip(a, a[1:]))

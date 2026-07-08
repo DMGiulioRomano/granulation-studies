@@ -1,0 +1,90 @@
+# TEST STACK 5 — generatori annidati negli envelope di soglia.
+#
+# Documenta i punti d'innesto dell'annidamento (docs/plans/done/nested-generators.md):
+#   - Y banda con `base` annidato (pavimento generato) + `range` scalare
+#     (banda che trasla a larghezza costante, bordi correlati gratis)
+#   - Y banda con `range` annidato a `type: step` (plateau di banda:
+#     la varianza respira a scalini)
+#   - X-walk con `base` annidato (frequenza di generazione stocastica)
+#     e terzo livello di ricorsione dentro `range`
+#   - Y ramp con `step: Env` (accelerando dei valori)
+#
+# Il seed dei nodi senza `seed` proprio deriva dal padre (gerarchico):
+# rigenerare due volte produce lo stesso stack.yml.
+#
+#   make stack STUDY=study_stack_test_5
+
+study_id: study_stack_test_5
+title: "Test stack 5 — generatori annidati"
+seed: 5
+duration: 25
+samples_dir: samples
+
+base:
+  onset: 0
+  duration: 6
+  sample: corpus.wav
+  time_mode: normalized
+  grain:
+    envelope: hanning
+  volume: -6
+  pointer:
+    speed_ratio: 0
+    start: .3
+
+axes:
+  seed: 99
+  interpolation: linear
+  # Nota merge: gli assi qui NON dichiarano `n` (il deep-merge lo
+  # conserverebbe anche nello stream rspline, dove n appartiene alla X);
+  # ogni stream con X-linear lo aggiunge nel proprio override.
+  density:
+    path: density
+    baseline: 20
+    base:                       # pavimento generato: vaga tra 4 e 12 su 6 quote
+      n: 6
+      base: 4
+      range: 8
+    range: 6                    # larghezza costante: la banda trasla come un corpo solo
+  grain_duration:
+    path: grain.duration
+    baseline: .005
+    base: .002
+    range:                      # la varianza respira a plateau: .001 <-> .008
+      type: step
+      n: 4
+      base: .001
+      range: .007
+
+stack: {}
+
+streams:
+  # Bordi generati su X-linear (n dalla Y, dichiarato qui).
+  bordi_generati:
+    axes:
+      density: {n: 24}
+      grain_duration: {n: 24}
+
+  # density passa a rspline con camminata-X a frequenza stocastica annidata,
+  # terzo livello di ricorsione nel range della frequenza.
+  camminata_annidata:
+    axes:
+      density:
+        base: [[0, 10], [1, 3]]
+        range: 4
+      grain_duration: {n: 24}
+    stack:
+      density:
+        base: {n: 8, base: 2, range: 4}      # la base salta tra 2 e 6 Hz
+        range:
+          n: 5
+          base: 0.5
+          range:
+            ramp: {start: 1, stop: 3, step: 1}
+
+  # Accelerando dei valori: la griglia della rampa si infittisce verso lo stop.
+  rampa_accelerando:
+    axes:
+      density: {n: 24}
+      grain_duration:
+        ramp: {start: .002, stop: .01, step: [.002, .0005]}

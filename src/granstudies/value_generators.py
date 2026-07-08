@@ -30,19 +30,57 @@ def stable_seed(key: str) -> int:
     return zlib.crc32(key.encode("utf-8"))
 
 
-def ramp(start: float, stop: float, step: float) -> List[float]:
-    """Rampa aritmetica da ``start`` a ``stop`` a passo ``step`` (``> 0``).
+# Tetto anti-runaway per la rampa a passo Env: un passo che collassa verso lo
+# zero genererebbe una griglia enorme. Stessa filosofia di MAX_POINTS in
+# x_strategies (errore di configurazione, non caso d'uso).
+MAX_RAMP_POINTS = 10_000
+
+
+def ramp(start: float, stop: float, step: Threshold) -> List[float]:
+    """Rampa aritmetica da ``start`` a ``stop`` a passo ``step``.
 
     Direzione dedotta da ``start``/``stop`` (discendente se ``start > stop``).
-    Conteggio intero anti-drift: il numero di gradini si ricava con
-    ``floor(round(distanza/step))`` cosi' un ``stop`` che cade sulla griglia e'
-    incluso senza deriva float, e uno che non ci cade non viene mai oltrepassato.
+
+    ``step`` scalare (``> 0``): griglia a passo costante, conteggio intero
+    anti-drift — il numero di gradini si ricava con ``floor(round(distanza/step))``
+    cosi' un ``stop`` che cade sulla griglia e' incluso senza deriva float, e uno
+    che non ci cade non viene mai oltrepassato.
+
+    ``step`` Env (le forme di ``_threshold_at``): passo mobile — accelerando
+    (``[10, 1]``: i passi si stringono) o ritardando. ``step`` e' funzione del
+    *progresso in valore* ``|v - start| / |stop - start|`` (l'indice non e' noto
+    a priori); ``n`` emerge dall'integrazione. Un passo non positivo in
+    qualunque punto e' errore (loop infinito); tetto ``MAX_RAMP_POINTS``.
     """
-    if step <= 0:
-        raise ValueError(f"ramp: step deve essere > 0 (ricevuto {step})")
-    n = math.floor(round(abs(stop - start) / step, 9))
+    if isinstance(step, (int, float)):
+        if step <= 0:
+            raise ValueError(f"ramp: step deve essere > 0 (ricevuto {step})")
+        n = math.floor(round(abs(stop - start) / step, 9))
+        sign = 1.0 if stop >= start else -1.0
+        return [round(start + sign * step * i, 9) for i in range(n + 1)]
+    span = abs(stop - start)
+    if span == 0:
+        return [round(start, 9)]
     sign = 1.0 if stop >= start else -1.0
-    return [round(start + sign * step * i, 9) for i in range(n + 1)]
+    out: List[float] = [round(start, 9)]
+    v = float(start)
+    while True:
+        frac = abs(v - start) / span
+        s = _threshold_at(step, frac)
+        if s <= 0:
+            raise ValueError(
+                f"ramp: step non positivo ({s}) al progresso {frac:.3f} — "
+                "l'Env di step deve restare > 0."
+            )
+        v += sign * s
+        if abs(v - start) > span + 1e-9:
+            return out
+        out.append(round(v, 9))
+        if len(out) > MAX_RAMP_POINTS:
+            raise ValueError(
+                f"ramp: oltre {MAX_RAMP_POINTS} punti — l'Env di step e' "
+                "troppo piccolo per la distanza start/stop."
+            )
 
 
 def _interp_breakpoints(
@@ -211,3 +249,103 @@ def resolve(cfg: Dict[str, Any]) -> List[float]:
             "(omesso solo con la X-walk nel blocco 'stack:')."
         )
     return band(**params)
+
+
+# --- generatori annidati: un nodo-generatore dentro un Env si compila in ---------
+# --- breakpoint (docs/plans/nested-generators.md) ---------------------------------
+
+# Guardia di profondita' della ricorsione: oltre 3 livelli le config sono gia'
+# illeggibili, 8 e' puro margine anti-degenerazione (alias YAML ricorsivi).
+MAX_ENV_DEPTH = 8
+
+# Chiavi ammesse accanto al marcatore in un nodo: la curva del mini-asse.
+_NODE_SHAPE_KEYS = frozenset({"type", "curve"})
+
+
+def is_generator_node(spec: Any) -> bool:
+    """True se ``spec`` e' un nodo-generatore annidabile in un ``Env``.
+
+    Il nodo parla la stessa grammatica piatta dell'asse: dict con almeno un
+    marcatore tra ``Y_GENERATOR_KEYS`` (``values`` | ``ramp`` | ``base``). Le
+    forme statiche di un ``Env`` non collidono: ``{type, points, curve}`` non
+    contiene marcatori, le liste restano liste.
+    """
+    return isinstance(spec, dict) and any(k in Y_GENERATOR_KEYS for k in spec)
+
+
+def expand_env(spec: Threshold, *, seed: int, path: str, depth: int = 0) -> Threshold:
+    """Compila un nodo-generatore in una forma statica di ``Env`` (breakpoint).
+
+    I valori del nodo si stendono su tempi equispaziati ``t_i = i/(n-1)`` (X
+    implicita lineare, come la X-linear degli assi). Con ``type``/``curve`` nel
+    nodo la resa e' la forma dict ``{type, points, curve}``; senza, la lista
+    ``[[t, v], ...]``. Le forme statiche passano invariate. Ricorsivo: gli
+    ``Env`` dentro il nodo (``base``/``range``/``step``) accettano a loro volta
+    nodi, fino a ``MAX_ENV_DEPTH``.
+
+    ``seed`` e' il seed effettivo del generatore padre; una banda annidata senza
+    ``seed`` proprio deriva ``stable_seed(f"{seed}:{path}")`` (``path`` e' il
+    percorso locale dal padre, es. ``base`` o ``range.step``): ``base`` e
+    ``range`` si decorrelano da soli, un seed esplicito congela il sottoalbero.
+    """
+    if not is_generator_node(spec):
+        return spec
+    if depth >= MAX_ENV_DEPTH:
+        raise ValueError(
+            f"{path}: profondita' di annidamento oltre {MAX_ENV_DEPTH} — "
+            "config degenere (alias YAML ricorsivo?)."
+        )
+    node = dict(spec)
+    kind = node.pop("type", None)
+    curve = node.pop("curve", None)
+    if kind not in (None, "linear", "step"):
+        raise ValueError(
+            f"{path}: type '{kind}' non ammesso in un Env (linear | step); "
+            "per la piega non lineare del segmento usa 'curve'."
+        )
+    key, params = y_generator(node)
+    if key == "values":
+        values = list(params)
+    elif key == "ramp":
+        params = expand_params(params, seed=seed, path=path, depth=depth + 1)
+        values = ramp(**params)
+    else:  # banda annidata (chiave canonica 'band')
+        if "n" not in params:
+            raise ValueError(
+                f"{path}: banda annidata senza 'n' — dentro un Env non c'e' "
+                "coupling X/Y, il nodo deve produrre da solo la sua lista."
+            )
+        eff_seed = params.get("seed", stable_seed(f"{seed}:{path}"))
+        params = expand_params(params, seed=eff_seed, path="", depth=depth + 1)
+        params["seed"] = eff_seed
+        values = band(**params)
+    n = len(values)
+    points = [[round(i / (n - 1), 9) if n > 1 else 0.0, v] for i, v in enumerate(values)]
+    if kind is None and curve is None:
+        return points
+    out: Dict[str, Any] = {"type": kind or "linear", "points": points}
+    if curve is not None:
+        out["curve"] = curve
+    try:
+        _threshold_at(out, 0.0)  # valida subito curve/type (errore col path)
+    except ValueError as exc:
+        raise ValueError(f"{path}: {exc}") from exc
+    return out
+
+
+def expand_params(
+    params: Dict[str, Any], *, seed: int, path: str = "", depth: int = 0
+) -> Dict[str, Any]:
+    """Espande i nodi-generatore nei parametri di un generatore (walk generico).
+
+    Cammina il dict senza schema per-strategia: ogni valore che e' un nodo
+    (``base``/``range`` di banda e camminata, ``step`` di ramp, e ogni parametro
+    Env futuro) si compila in breakpoint; il resto passa invariato. Da chiamare
+    alle seam, col seed effettivo gia' risolto (il ``path`` accumulato entra
+    nella derivazione del seed dei nodi figli).
+    """
+    out: Dict[str, Any] = {}
+    for k, v in params.items():
+        sub = f"{path}.{k}" if path else k
+        out[k] = expand_env(v, seed=seed, path=sub, depth=depth)
+    return out

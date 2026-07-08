@@ -123,6 +123,16 @@ ramp: {start: 5, stop: 100, step: 5}   # 5, 10, 15, ..., 100
   (discendente se `start > stop`).
 - Uno `stop` che cade sulla griglia è incluso; uno che non ci cade non viene
   mai oltrepassato (conteggio intero anti-drift float).
+- `step` è un **`Env`** (le stesse forme di `base`/`range`, generatori annidati
+  compresi): con un `step` mobile la rampa accelera o ritarda. È letto sul
+  **progresso in valore** `|v − start| / |stop − start|`, non sull'indice: il
+  numero di gradini emerge dall'integrazione. Un `step` che tocca `0` è errore;
+  tetto anti-runaway sui punti generati. Il caso scalare resta identico.
+
+```yaml
+ramp: {start: 5, stop: 100, step: [10, 1]}   # accelerando: i passi si stringono
+ramp: {start: 5, stop: 100, step: [1, 10]}   # ritardando: i passi si allargano
+```
 
 ### `base` — banda, seeded (piatta sull'asse)
 
@@ -136,8 +146,10 @@ rigenera-e-confronta).
 > loro: la chiave di banda `base` qui descritta (pavimento della banda, marca il
 > generatore); il blocco engine `base:` di uno stream (override di parametri a
 > riposo, es. `base: {volume: 0}` per mutarlo); e l'eventuale stream *chiamato*
-> `base` in `streams:` (solo un id). I livelli sono distinti nello YAML, ma
-> leggendo un file conviene tenerli separati in testa.
+> `base` in `streams:` (solo un id). Con i generatori annidati se ne aggiunge
+> un quarto: il `base` **dentro** un bordo di banda (`base: {n: 6, base: 2, ...}`,
+> il pavimento del pavimento — vedi «Generatori annidati» sotto). I livelli sono
+> distinti nello YAML, ma leggendo un file conviene tenerli separati in testa.
 
 ```yaml
 density:
@@ -164,6 +176,7 @@ due accetta queste forme:
 | `[a, b]` | rampa lineare `a → b` lungo la sequenza (esattamente due scalari) |
 | `[[t, v], ...]` | breakpoint temporizzati, `t` in `[0, 1]`, interpolati **linear** (hold fuori dai bordi) |
 | `{type, points, curve}` | breakpoint con `type` esplicito (`linear`/`step`) ed eventuale `curve` (vedi sotto) |
+| nodo generatore (`{values}` \| `{ramp}` \| `{n, base, range, seed}`, più `type`/`curve` opzionali) | breakpoint **generati** invece che scritti a mano (vedi «Generatori annidati») |
 
 Esempio con banda mobile (si apre dopo il 60% della sequenza):
 
@@ -205,6 +218,65 @@ base: {points: [[0, 10], [1, 90]], curve: 2}   # sale lento, accelera in coda
   alla rampa lineare dichiararlo esplicitamente (`curve: 1`); per rimpiazzare
   l'envelope in blocco usare una forma lista (`[a, b]` o `[[t, v], ...]`), che
   come tutte le liste rimpiazza invece di fondersi.
+
+### Generatori annidati — un bordo di banda generato
+
+I `points` di un bordo (`base`/`range` di banda Y, `base`/`range` della
+camminata-X, `step` di `ramp`) si possono **generare** invece di scriverli a
+mano: al posto della forma statica si mette un **nodo**, un dict nella stessa
+grammatica piatta dell'asse — `values`, `ramp`, oppure la banda
+(`n`/`base`/`range`/`seed`), più le opzionali `type` (`linear`/`step`) e
+`curve`. Il nodo si compila in breakpoint su tempi equispaziati (X implicita
+lineare) e da lì in poi si comporta esattamente come dei `points` scritti a
+mano. Ricorsivo: i `base`/`range` del nodo accettano a loro volta nodi
+(guardia di profondità: 8).
+
+```yaml
+density:
+  path: density
+  n: 40
+  base:                      # il pavimento vaga: 6 quote pescate tra 2 e 8
+    n: 6
+    base: 2
+    range: 6
+  range:                     # la larghezza salta a plateau tra 4 e 14
+    type: step
+    n: 6
+    base: 4
+    range: 10
+```
+
+E nella camminata-X (frequenza di generazione essa stessa stocastica):
+
+```yaml
+stack:
+  density:
+    base: {n: 8, base: 2, range: 4}     # la base salta tra 2 e 6 Hz
+    range: 0.5
+```
+
+Regole:
+
+- **`n` obbligatorio** nella banda annidata (dentro un `Env` non c'è coupling
+  X/Y: il nodo deve produrre da solo la sua lista). `ramp` e `values` lo
+  posseggono per costruzione.
+- **Seed gerarchico.** Un nodo-banda senza `seed` deriva un seed stabile dal
+  seed effettivo del generatore padre e dal percorso (`base`, `range`,
+  `base.range`, ...): `base` e `range` si decorrelano da soli, cambiare il seed
+  esterno rigenera l'intero sottoalbero coerentemente, un `seed` esplicito nel
+  nodo congela solo quel sottoalbero.
+- **Bordi correlati gratis**: banda che trasla a larghezza costante = `base`
+  annidato + `range` scalare (nessun seed da coordinare).
+- **`type`/`curve` nel nodo** valgono come nella forma `{type, points, curve}`:
+  `type: step` fa saltare il bordo tra le quote generate (plateau di banda),
+  `curve` piega i segmenti. Solo `linear`/`step` (niente `cubic` nelle bande).
+- Il nodo è un dict: negli override di stream **si fonde** come ogni dict
+  (ridefinire `base` interno non azzera `type`/`curve` ereditati); per
+  rimpiazzare in blocco usare una forma lista.
+- Niente arriva all'engine: l'espansione è tutta in granstudies, nello YAML
+  engine finisce il solito envelope dell'asse.
+
+Design completo: `docs/plans/done/nested-generators.md`.
 
 ## Il blocco `stack:`
 

@@ -17,7 +17,7 @@ from typing import Any, Dict, List
 
 from . import bounds as bounds_mod
 from .study_spec import StudySpec
-from .value_generators import band, band_at, ramp
+from .value_generators import band, band_at, expand_params, ramp
 from .x_strategies import resolve_x, walk, x_owns_n
 from .yaml_builder import build_multi_document, build_stream
 
@@ -73,11 +73,15 @@ def axis_envelope(
                 + (" con 'n'" if y_key == "band" and "n" in y_params else "")
                 + ")."
             )
+        # Seam stack dei generatori annidati: espansione dopo l'iniezione del
+        # seed effettivo, sia sulla X (banda di frequenza) sia sulla Y.
         x_params = dict(x_cfg)
         x_params.setdefault("seed", x_seed)
+        x_params = expand_params(x_params, seed=x_params["seed"])
         times = walk(duration=duration, **x_params)
         y_kwargs = dict(y_params)
         y_kwargs.setdefault("seed", y_seed)
+        y_kwargs = expand_params(y_kwargs, seed=y_kwargs["seed"])
         values = band_at(times, **y_kwargs)
         return [[t, v] for t, v in zip(times, values)]
 
@@ -89,11 +93,11 @@ def axis_envelope(
     if y_key == "values":
         values = list(y_params)
     elif y_key == "ramp":
-        values = ramp(**y_params)
+        values = ramp(**expand_params(y_params, seed=y_seed))
     else:  # band con n
         y_kwargs = dict(y_params)
         y_kwargs.setdefault("seed", y_seed)
-        values = band(**y_kwargs)
+        values = band(**expand_params(y_kwargs, seed=y_kwargs["seed"]))
     times = resolve_x(x_cfg, n=len(values))
     return [[t, v] for t, v in zip(times, values)]
 
