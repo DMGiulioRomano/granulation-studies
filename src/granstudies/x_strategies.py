@@ -57,8 +57,8 @@ def walk(
     ``base``/``range`` sono inviluppi mobili nelle stesse forme della banda di Y
     (scalare | ``[a, b]`` | ``[[t, v], ...]`` | ``{type, points, curve}``),
     valutati via ``_threshold_at`` (modulo condiviso X/Y). ``range`` assente (0)
-    = banda collassata: la camminata segue ``base`` deterministicamente (nessun
-    seed consumato per la frequenza). Deterministico via ``seed``. Guardie:
+    = banda collassata: la camminata segue ``base`` deterministicamente (il
+    ``seed`` non influisce sui tempi). Deterministico via ``seed``. Guardie:
     frequenza non positiva -> errore (passo infinito, nessun punto); piu' di
     ``MAX_POINTS`` punti -> errore.
     """

@@ -132,6 +132,13 @@ dict dell'asse (accanto a `path`/`baseline`/`interpolation`), non più sotto un
 wrapper. Deterministico: stesso `seed` → stessa sequenza (serve al ciclo
 rigenera-e-confronta).
 
+> **Tre `base` diversi.** La parola compare in tre punti che non c'entrano tra
+> loro: la chiave di banda `base` qui descritta (pavimento della banda, marca il
+> generatore); il blocco engine `base:` di uno stream (override di parametri a
+> riposo, es. `base: {volume: 0}` per mutarlo); e l'eventuale stream *chiamato*
+> `base` in `streams:` (solo un id). I livelli sono distinti nello YAML, ma
+> leggendo un file conviene tenerli separati in testa.
+
 ```yaml
 density:
   path: density
@@ -191,6 +198,13 @@ base: {points: [[0, 10], [1, 90]], curve: 2}   # sale lento, accelera in coda
   il `[0, 1]` su cui l'`Env` è letto misura cose diverse: in Y è la posizione del
   punto sull'asse dello stream, in X è il tempo reale normalizzato della
   camminata. La piega è la stessa, il dominio no.
+- **`curve` e override di stream.** La forma dict di un `Env` segue la regola
+  generale del merge («i dict si fondono»): uno stream che sovrascrive
+  `base: {points: [...]}` su una base che aveva `base: {points: [...], curve: 2}`
+  **eredita** `curve: 2` — ridefinire i punti non azzera la piega. Per tornare
+  alla rampa lineare dichiararlo esplicitamente (`curve: 1`); per rimpiazzare
+  l'envelope in blocco usare una forma lista (`[a, b]` o `[[t, v], ...]`), che
+  come tutte le liste rimpiazza invece di fondersi.
 
 ## Il blocco `stack:`
 
@@ -215,8 +229,8 @@ Con la camminata la frequenza si pesca a ogni punto nella banda
 `[base(t), base(t)+range(t)]` (Hz sulla durata reale; `base`/`range` accettano
 le stesse forme della banda di Y) e il punto successivo cade a `t + 1/f`. La Y
 dev'essere una **banda senza** `n`, campionata ai tempi reali dei breakpoint.
-`range` assente = camminata **deterministica** (segue `base`, nessun seed
-consumato). Le due direzioni sbagliate (camminata-X con Y che enumera; banda Y
+`range` assente = camminata **deterministica** (segue `base`, il seed non
+influisce sui tempi). Le due direzioni sbagliate (camminata-X con Y che enumera; banda Y
 senza `n` con X lineare) sono errori di parse (*n-ownership*).
 
 > **Due equispaziati diversi.** «`base` costante = tempi equispaziati» vale per la
