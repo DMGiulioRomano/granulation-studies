@@ -22,7 +22,7 @@ def test_ramp_with_explicit_x_linear():
 
 def test_rand_with_n_and_x_linear():
     env = axis_envelope(
-        {"rand": {"n": 4, "min": 0, "max": 10, "seed": 1}}, None, duration=30.0
+        {"rand": {"n": 4, "base": 0, "range": 10, "seed": 1}}, None, duration=30.0
     )
     assert len(env) == 4
     assert [t for t, _ in env] == [0.0, pytest.approx(1 / 3), pytest.approx(2 / 3), 1.0]
@@ -36,7 +36,7 @@ def test_single_value_is_single_point():
 # --- caso X-rand (rspline): la X possiede n, la Y segue --------------------------
 
 def test_rspline_end_to_end_counts_match_and_deterministic():
-    y = {"rand": {"min": 0, "max": 10}}
+    y = {"rand": {"base": 0, "range": 10}}
     x = {"rand": {"cps": {"base": 5, "range": 0}}}
     a = axis_envelope(y, x, duration=10.0, y_seed=1, x_seed=2)
     b = axis_envelope(y, x, duration=10.0, y_seed=1, x_seed=2)
@@ -51,7 +51,7 @@ def test_rspline_y_sampled_at_real_times():
     # Banda Y collassata e mobile: il valore DEVE essere l'interpolazione al
     # tempo reale del punto (coupling), non all'indice.
     band = [[0, 0], [1, 10]]
-    y = {"rand": {"min": band, "max": band}}
+    y = {"rand": {"base": band}}
     x = {"rand": {"cps": {"base": 5, "range": 0}}}
     env = axis_envelope(y, x, duration=10.0)
     for t, v in env:
@@ -59,7 +59,7 @@ def test_rspline_y_sampled_at_real_times():
 
 
 def test_seed_in_axis_config_wins_over_global():
-    y = {"rand": {"min": 0, "max": 10, "seed": 7}}
+    y = {"rand": {"base": 0, "range": 10, "seed": 7}}
     x = {"rand": {"cps": {"base": 5, "range": 1}, "seed": 9}}
     a = axis_envelope(y, x, duration=10.0, y_seed=1, x_seed=1)
     b = axis_envelope(y, x, duration=10.0, y_seed=2, x_seed=2)
@@ -67,7 +67,7 @@ def test_seed_in_axis_config_wins_over_global():
 
 
 def test_global_seeds_apply_when_axis_has_none():
-    y = {"rand": {"min": 0, "max": 10}}
+    y = {"rand": {"base": 0, "range": 10}}
     x = {"rand": {"cps": {"base": 5, "range": 1}}}
     a = axis_envelope(y, x, duration=10.0, y_seed=1, x_seed=1)
     b = axis_envelope(y, x, duration=10.0, y_seed=2, x_seed=2)
@@ -84,7 +84,7 @@ def test_x_rand_with_y_values_raises():
 def test_x_rand_with_y_rand_with_n_raises():
     with pytest.raises(ValueError):
         axis_envelope(
-            {"rand": {"n": 5, "min": 0, "max": 1}},
+            {"rand": {"n": 5, "base": 0, "range": 1}},
             {"rand": {"cps": {"base": 5}}},
             duration=10.0,
         )
@@ -92,12 +92,12 @@ def test_x_rand_with_y_rand_with_n_raises():
 
 def test_x_linear_with_y_rand_without_n_raises():
     with pytest.raises(ValueError):
-        axis_envelope({"rand": {"min": 0, "max": 1}}, {"linear": {}}, duration=10.0)
+        axis_envelope({"rand": {"base": 0, "range": 1}}, {"linear": {}}, duration=10.0)
 
 
 def test_x_default_with_y_rand_without_n_raises():
     with pytest.raises(ValueError):
-        axis_envelope({"rand": {"min": 0, "max": 1}}, None, duration=10.0)
+        axis_envelope({"rand": {"base": 0, "range": 1}}, None, duration=10.0)
 
 
 # --- generate_stack_document: N stream collassati in un documento ----------------
@@ -174,7 +174,7 @@ def test_document_deterministic_with_rspline_axis():
     data["axes"]["density"] = {
         "path": "density",
         "baseline": 20,
-        "rand": {"min": 5, "max": 50},
+        "rand": {"base": 5, "range": 45},
         "interpolation": "cubic",
     }
     data["stack"]["density"] = {"rand": {"cps": {"base": 3, "range": 1}}}
@@ -198,7 +198,7 @@ def test_document_emerging_values_clamped_to_engine_bounds():
     data = _study_data()
     data["axes"]["grain_duration"] = {
         "path": "grain.duration",
-        "rand": {"min": 0.0001, "max": 0.0002},   # engine min: 0.001
+        "rand": {"base": 0.0001, "range": 0.0001},   # engine min: 0.001
     }
     data["stack"]["grain_duration"] = {"rand": {"cps": {"base": 2, "range": 0}}}
     doc = generate_stack_document(_specs(data))

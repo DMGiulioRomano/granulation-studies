@@ -16,6 +16,10 @@ from typing import Any, Callable, Dict, List, Sequence, Union
 
 Threshold = Union[float, Sequence[float], Dict[str, Any]]
 
+# I generatori rand hanno un parametro YAML che si chiama ``range``: alias del
+# builtin per l'uso interno.
+_range = range
+
 
 def stable_seed(key: str) -> int:
     """Seed deterministico da una chiave testuale (es. l'id di uno stream).
@@ -60,7 +64,7 @@ def _interp_breakpoints(pts: Sequence[Sequence[float]], frac: float, kind: str =
 
 
 def _threshold_at(spec: Threshold, frac: float) -> float:
-    """Soglia (min o max) al punto ``frac`` in ``[0, 1]`` della sequenza.
+    """Soglia (base o range) al punto ``frac`` in ``[0, 1]`` della sequenza.
 
     E' un envelope di secondo ordine (una banda che genera valori). Forme:
     scalare -> costante; ``[a, b]`` (due scalari) -> lineare ``a -> b``;
@@ -77,32 +81,41 @@ def _threshold_at(spec: Threshold, frac: float) -> float:
     return a + (b - a) * frac
 
 
-def rand(n: int, min: Threshold, max: Threshold, seed: int = 0) -> List[float]:
-    """``n`` valori casuali entro una banda ``[min, max]`` eventualmente mobile.
+def _band_at(base: Threshold, spread: Threshold, frac: float, where: str) -> tuple:
+    """Banda ``[lo, hi]`` al punto ``frac``: ``lo = base(frac)``,
+    ``hi = lo + range(frac)``. Stessa semantica della ``cps`` di X-rand."""
+    lo = _threshold_at(base, frac)
+    hi = lo + _threshold_at(spread, frac)
+    if hi < lo:
+        raise ValueError(f"{where}: range negativo a frac={frac} (banda [{lo}, {hi}])")
+    return lo, hi
 
-    ``min``/``max`` scalari = banda fissa; ``[a, b]`` = banda che scorre/si
+
+def rand(n: int, base: Threshold, range: Threshold = 0.0, seed: int = 0) -> List[float]:
+    """``n`` valori casuali entro una banda ``[base, base + range]`` mobile.
+
+    ``base``/``range`` scalari = banda fissa; ``[a, b]`` = banda che scorre/si
     allarga linearmente lungo la sequenza. Il valore al passo ``i`` e' estratto
-    uniformemente nella banda a quel punto. Deterministico via ``seed`` (stesso
-    seed -> stessa sequenza), requisito del ciclo rigenera-e-confronta.
+    uniformemente nella banda a quel punto; ``range`` omesso (0) = banda
+    collassata, la sequenza segue ``base`` deterministicamente. Deterministico
+    via ``seed`` (stesso seed -> stessa sequenza), requisito del ciclo
+    rigenera-e-confronta.
     """
     if n < 1:
         raise ValueError(f"rand: n deve essere >= 1 (ricevuto {n})")
     rng = random.Random(seed)
     out: List[float] = []
-    for i in range(n):
+    for i in _range(n):
         frac = i / (n - 1) if n > 1 else 0.0
-        lo = _threshold_at(min, frac)
-        hi = _threshold_at(max, frac)
-        if lo > hi:
-            raise ValueError(f"rand: min ({lo}) > max ({hi}) al passo {i}")
+        lo, hi = _band_at(base, range, frac, "rand")
         out.append(round(rng.uniform(lo, hi), 9))
     return out
 
 
 def rand_at(
-    fracs: Sequence[float], min: Threshold, max: Threshold, seed: int = 0
+    fracs: Sequence[float], base: Threshold, range: Threshold = 0.0, seed: int = 0
 ) -> List[float]:
-    """Un valore casuale nella banda ``[min, max]`` per ciascun ``frac`` dato.
+    """Un valore casuale nella banda ``[base, base + range]`` per ogni ``frac``.
 
     Variante di ``rand`` per il coupling con la X-rand (stack): quando la X
     possiede ``n``, la banda va campionata al tempo *reale* ``t_i`` di ogni
@@ -114,10 +127,7 @@ def rand_at(
     rng = random.Random(seed)
     out: List[float] = []
     for frac in fracs:
-        lo = _threshold_at(min, frac)
-        hi = _threshold_at(max, frac)
-        if lo > hi:
-            raise ValueError(f"rand_at: min ({lo}) > max ({hi}) a frac={frac}")
+        lo, hi = _band_at(base, range, frac, "rand_at")
         out.append(round(rng.uniform(lo, hi), 9))
     return out
 
