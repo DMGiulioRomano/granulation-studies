@@ -17,6 +17,7 @@ from . import bounds as bounds_mod
 from .value_generators import (
     Y_GENERATOR_KEYS,
     band,
+    expand_params,
     ramp,
     stable_seed,
     y_generator,
@@ -337,14 +338,18 @@ def parse_study_spec(data: Dict[str, Any], study_id: str | None = None) -> Study
                     f"generatore Y '{gen_key}' enumera i valori — usa la banda "
                     "senza 'n' (o togli la camminata-X)."
                 )
+            # Seam sweep/Y dei generatori annidati: i nodi dentro gli Env
+            # (base/range della banda, step del ramp) si compilano in
+            # breakpoint qui, col seed effettivo gia' risolto.
             if gen_key == "values":
                 values = list(gen_params)
             elif gen_key == "ramp":
-                values = ramp(**gen_params)
+                params = expand_params(gen_params, seed=default_y_seed)
+                values = ramp(**params)
             else:  # band con n: la Y possiede il conteggio
                 params = dict(gen_params)
                 params.setdefault("seed", default_y_seed)
-                values = band(**params)
+                values = band(**expand_params(params, seed=params["seed"]))
         axes.append(
             Axis(
                 name=name,

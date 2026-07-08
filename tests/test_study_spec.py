@@ -411,11 +411,11 @@ def test_nested_base_resolved_at_parse():
         "base": {"sample": "x.wav"},
         "axes": {
             "a": {"path": "density", "baseline": 20, "n": 4,
-                  "base": {"values": [0, 9]}, "range": 0},
+                  "base": {"values": [1, 10]}, "range": 0},
         },
     }
     spec = parse_study_spec(d)
-    assert spec.axis("a").values == pytest.approx([0.0, 3.0, 6.0, 9.0])
+    assert spec.axis("a").values == pytest.approx([1.0, 4.0, 7.0, 10.0])
 
 
 def test_nested_double_resolution_parse_equals_assembly():
