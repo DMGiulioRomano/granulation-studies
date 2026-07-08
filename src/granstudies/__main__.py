@@ -291,15 +291,46 @@ def cmd_compose(study: str, seed: int | None, steps: int | None, start: str | No
     return 0
 
 
+def _cmd_sv_stack(g: str, layout: str, total: list) -> int:
+    """Emette il .sv del documento stack (yaml/stack/stack.yml + audio/stack/stack.aif)."""
+    from .sv_export import stack_to_sv
+
+    variant = os.path.join(g, "yaml", "stack", "stack.yml")
+    audio = os.path.join(g, "audio", "stack", "stack.aif")
+    if not os.path.exists(variant):
+        print("[sv] nessun documento stack: esegui prima 'stack'.", file=sys.stderr)
+        return 0
+    if not os.path.exists(audio):
+        print("[sv] audio stack mancante: esegui prima 'render'.", file=sys.stderr)
+        return 0
+    suffix = f"_{layout}" if layout == "single" else ""
+    out = os.path.join(g, "sv", "stack", "stack" + suffix + ".sv")
+    stack_to_sv(variant, audio, out, layout=layout)
+    total.append(out)
+    print(f"[sv] {out}")
+    return 1
+
+
 def cmd_sv(study: str, layout: str, markers: bool = True, stream: str | None = None,
            markers_scope: str = "all") -> int:
     from .sv_export import variant_to_sv
 
+    data = _load_data(study)
+    g = gen_dir(study)
+    total: list = []
+
+    # Processo stack: un solo .sv per il documento multi-stream, contro il suo
+    # audio sommato. Attivo per presenza del blocco (come cmd_stack); i flag
+    # marker/scope restano sul solo ramo sweep (i marker sono plateau-di-sweep).
+    if "stack" in data and stream is None:
+        _cmd_sv_stack(g, layout, total)
+        if "sweep" not in data:
+            print(f"[sv] {len(total)} sessioni totali")
+            return 0
+
     specs = _load_specs(study, stream)
     if not specs:
         return 1
-    g = gen_dir(study)
-    total: list = []
     for spec in specs:
         sub = spec.stream_id or ""
         variant_dir = os.path.join(g, "yaml", "sweep", "envelope", sub) if sub else os.path.join(g, "yaml", "sweep", "envelope")

@@ -106,7 +106,7 @@ aderito in un documento solo. Stesso materiale, due assemblaggi.
       yaml/    sweep/{discrete,envelope}/[stream]/   stack/stack.yml
       audio/   sweep/{discrete,envelope}/[stream]/   stack/stack.aif
       score/   sweep/{discrete,envelope}/...
-      sv/      sweep/envelope/[stream]/              (stack: se/quando serve)
+      sv/      sweep/envelope/[stream]/              stack/stack.sv
     ```
 
     - `yaml/sweep/` = identico a oggi (`discrete`/`envelope`/`stream`), solo
@@ -204,6 +204,24 @@ aderito in un documento solo. Stesso materiale, due assemblaggi.
       20×20=400). Ordine: (1) stack funzionante, (2) migrare i due stream a stack,
       (3) cancellare `parallel_combinations` + campo `combine` + validazione + ramo in
       `combinations_for`. Fino ad allora parallel resta funzionante.
+
+15. **Export SV anche per stack (Q1 riaperta post-implementazione).** Il layout
+    (decisione 10) prevedeva `sv/stack/` solo "se/quando serve": serve. `cmd_sv`
+    produce ora **un solo** `sv/stack/stack.sv` per il documento multi-stream,
+    contro l'unico `audio/stack/stack.aif` (gli stream sono sommati in un audio).
+    - **Envelope da tutti gli stream, non solo il primo.** `variant_to_sv` legge
+      `streams[0]` (un file sweep = uno stream); per lo stack si raccolgono gli
+      envelope di *ogni* stream, con path **prefissato dallo stream_id**
+      (`base/density`, `parallel_coupling/grain.duration`) per distinguerli nei
+      pannelli. Gli assi scalari non producono layer (non sono envelope).
+    - **Niente marker di plateau.** I marker (`_plateau_starts`) sono un concetto
+      di sweep (confini di stato sulla griglia plateau/transition sincronizzata);
+      in stack ogni asse ha la sua X indipendente e non c'e' griglia comune, quindi
+      l'export stack li **omette** (`markers=False`). I flag `--no-markers`/
+      `--markers-scope` restano sul solo ramo sweep.
+    - **Layout `multi`/`single` invariati:** `multi` = un pannello per envelope
+      (stream×asse), `single` = tutti sotto la waveform. Riuso di `_build_sv_xml`
+      as-is; l'unico lavoro nuovo e' la raccolta multi-stream degli envelope.
 
 ## 4. Decisioni da confermare
 

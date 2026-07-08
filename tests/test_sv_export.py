@@ -142,3 +142,21 @@ def test_markers_disabled():
     assert [l for l in xml.findall("./data/layer") if l.get("type") == "timeinstants"] == []
     for pane in xml.findall("./display/view"):
         assert pane.findall("layer[@type='timeinstants']") == []
+
+
+# --- stack: envelope multi-stream ---------------------------------------------
+
+def test_stack_envelopes_prefixes_stream_id_and_skips_scalars():
+    from granstudies.sv_export import _stack_envelopes
+    doc = {"streams": [
+        {"stream_id": "base",
+         "density": {"type": "step", "points": [[0.0, 5], [1.0, 50]]},
+         "grain": {"duration": 0.004}},          # scalare -> nessun envelope
+        {"stream_id": "voce_b",
+         "density": {"type": "cubic", "points": [[0.0, 10], [1.0, 20]]}},
+        {"stream_id": "drone",
+         "density": 8, "grain": {"duration": 0.05}},  # tutto scalare -> niente
+    ]}
+    envs = _stack_envelopes(doc)
+    paths = [p for p, _pts, _t in envs]
+    assert paths == ["base/density", "voce_b/density"]

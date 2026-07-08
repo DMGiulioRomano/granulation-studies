@@ -289,3 +289,46 @@ def variant_to_sv(variant_yaml_path: str, audio_path: str, out_path: str,
     with open(out_path, "wb") as fh:
         fh.write(compressed)
     return out_path
+
+
+def _stack_envelopes(doc: Any) -> List[Tuple[str, List, str]]:
+    """Envelope di *tutti* gli stream del documento stack, con path prefissato.
+
+    A differenza del singolo file sweep (un solo stream), il documento stack
+    collassa N stream sommati in un audio: per non confonderli nei pannelli, il
+    path di ogni envelope e' prefissato dallo stream_id (``base/density``). Gli
+    assi scalari non producono envelope, quindi restano fuori.
+    """
+    out: List[Tuple[str, List, str]] = []
+    for stream in doc.get("streams", []):
+        sid = stream.get("stream_id", "stream")
+        for path, points, env_type in _find_envelopes(stream):
+            out.append((f"{sid}/{path}", points, env_type))
+    return out
+
+
+def stack_to_sv(stack_yaml_path: str, audio_path: str, out_path: str,
+                layout: Layout = "multi") -> str:
+    """Scrive un .sv per il documento multi-stream ``stack.yml`` contro il suo audio.
+
+    Un solo file per lo stack (gli stream sono sommati in un audio): gli envelope
+    di tutti gli stream finiscono nei pannelli, path prefissato per stream. Niente
+    marker di plateau: sono un concetto di sweep (griglia plateau/transition
+    sincronizzata), assente in stack dove ogni asse ha la sua X.
+    """
+    import yaml
+
+    with open(stack_yaml_path, "r", encoding="utf-8") as fh:
+        doc = yaml.safe_load(fh)
+
+    duration = float(doc.get("duration", 1.0))
+    envelopes = _stack_envelopes(doc)
+
+    sr = _sample_rate(audio_path)
+    compressed = _build_sv_xml(os.path.abspath(audio_path), sr, duration,
+                               envelopes, layout, markers=False)
+
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    with open(out_path, "wb") as fh:
+        fh.write(compressed)
+    return out_path
