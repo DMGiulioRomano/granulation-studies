@@ -35,14 +35,14 @@ axes:
     path: density
     baseline: 20
     rand:
-      min: [[0, 80], [.5, 20], [1,18]]
-      max: [[0, 200], [.5, 60], [1,30]]
+      base: [[0, 80], [.5, 20], [1,18]]
+      range: [[0, 120], [.5, 40], [1,12]]
     interpolation: step
   grain_duration:
     path: grain.duration
     rand:
-      min: [[0, .080], [.5, .020], [1,.018]]
-      max: [[0, .200], [.5, .060], [1,.030]]
+      base: [[0, .080], [.5, .020], [1,.018]]
+      range: [[0, .120], [.5, .040], [1,.012]]
     interpolation: step
 
 stack:

@@ -4,67 +4,75 @@ from granstudies.value_generators import ramp, rand, rand_at, resolve
 
 
 def test_rand_deterministic_within_band():
-    a = rand(n=8, min=0.001, max=0.01, seed=1988)
-    b = rand(n=8, min=0.001, max=0.01, seed=1988)
+    a = rand(n=8, base=0.001, range=0.009, seed=1988)
+    b = rand(n=8, base=0.001, range=0.009, seed=1988)
     assert a == b                       # stesso seed -> stessa sequenza
     assert len(a) == 8
     assert all(0.001 <= v <= 0.01 for v in a)
 
 
 def test_rand_different_seed_differs():
-    assert rand(n=8, min=0, max=1, seed=1) != rand(n=8, min=0, max=1, seed=2)
+    assert rand(n=8, base=0, range=1, seed=1) != rand(n=8, base=0, range=1, seed=2)
 
 
 def test_rand_time_varying_band_interpolates():
-    # Banda collassata (min==max mobili): il valore e' forzato all'interpolazione.
-    assert rand(n=3, min=[0.0, 1.0], max=[0.0, 1.0], seed=0) == [0.0, 0.5, 1.0]
+    # Banda collassata (range omesso, base mobile): valore forzato all'interpolazione.
+    assert rand(n=3, base=[0.0, 1.0], seed=0) == [0.0, 0.5, 1.0]
 
 
 def test_rand_band_breakpoints_control_when_it_changes():
-    # min/max come [[t, v], ...]: tieni 0 fino a t=0.5, poi sali a 10.
-    # Banda collassata (min==max) -> valore forzato all'interpolazione.
+    # base come [[t, v], ...]: tieni 0 fino a t=0.5, poi sali a 10.
+    # Banda collassata (range omesso) -> valore forzato all'interpolazione.
     band = [[0, 0], [0.5, 0], [1, 10]]
-    assert rand(n=3, min=band, max=band, seed=0) == [0.0, 0.0, 10.0]
+    assert rand(n=3, base=band, seed=0) == [0.0, 0.0, 10.0]
 
 
 def test_rand_band_step_interpolation_holds_then_jumps():
     # type: step tiene il valore sinistro e salta al breakpoint.
     # points [[0,0],[1,10]], n=3 (frac 0/0.5/1): step -> [0,0,10] (linear -> [0,5,10]).
     band = {"type": "step", "points": [[0, 0], [1, 10]]}
-    assert rand(n=3, min=band, max=band, seed=0) == [0.0, 0.0, 10.0]
+    assert rand(n=3, base=band, seed=0) == [0.0, 0.0, 10.0]
+
+
+def test_rand_moving_range_widens_band():
+    # range mobile [0 -> 1] su base fissa: al primo passo la banda e' collassata
+    # (valore == base), all'ultimo e' [5, 6].
+    out = rand(n=3, base=5, range=[0.0, 1.0], seed=0)
+    assert out[0] == 5.0
+    assert all(5.0 <= v <= 6.0 for v in out)
 
 
 def test_rand_rejects_bad_config():
     with pytest.raises(ValueError):
-        rand(n=0, min=0, max=1)
+        rand(n=0, base=0, range=1)
     with pytest.raises(ValueError):
-        rand(n=3, min=1, max=0)   # min > max
+        rand(n=3, base=1, range=-1)   # range negativo
 
 
 def test_rand_at_deterministic_at_given_fracs():
     fracs = [0.0, 0.37, 0.81, 1.0]
-    a = rand_at(fracs, min=0.001, max=0.01, seed=1988)
-    b = rand_at(fracs, min=0.001, max=0.01, seed=1988)
+    a = rand_at(fracs, base=0.001, range=0.009, seed=1988)
+    b = rand_at(fracs, base=0.001, range=0.009, seed=1988)
     assert a == b
     assert len(a) == len(fracs)
     assert all(0.001 <= v <= 0.01 for v in a)
 
 
 def test_rand_at_band_evaluated_at_real_times():
-    # Banda collassata (min==max mobili): il valore e' l'interpolazione al frac
-    # REALE del punto, non all'indice i/(n-1) — e' il coupling con la X-rand.
+    # Banda collassata (range omesso, base mobile): il valore e' l'interpolazione
+    # al frac REALE del punto, non all'indice i/(n-1) — coupling con la X-rand.
     band = [[0, 0], [1, 10]]
-    assert rand_at([0.0, 0.25, 0.9], min=band, max=band, seed=0) == [0.0, 2.5, 9.0]
+    assert rand_at([0.0, 0.25, 0.9], base=band, seed=0) == [0.0, 2.5, 9.0]
 
 
-def test_rand_at_rejects_inverted_band():
+def test_rand_at_rejects_negative_range():
     with pytest.raises(ValueError):
-        rand_at([0.0, 0.5], min=1, max=0)
+        rand_at([0.0, 0.5], base=1, range=-1)
 
 
 def test_rand_at_rejects_empty_fracs():
     with pytest.raises(ValueError):
-        rand_at([], min=0, max=1)
+        rand_at([], base=0, range=1)
 
 
 def test_resolve_explicit_values_passthrough():

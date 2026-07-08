@@ -124,15 +124,17 @@ ramp: {start: 5, stop: 100, step: 5}   # 5, 10, 15, ..., 100
 
 ### `rand` — banda casuale, seeded
 
-`n` valori estratti uniformemente dentro una banda `[min, max]` che può essere
-fissa o mobile lungo la sequenza. Deterministico: stesso `seed` → stessa
-sequenza (serve al ciclo rigenera-e-confronta).
+`n` valori estratti uniformemente dentro una banda `[base, base + range]` che
+può essere fissa o mobile lungo la sequenza — stessa semantica della `cps` di
+X-rand. Deterministico: stesso `seed` → stessa sequenza (serve al ciclo
+rigenera-e-confronta).
 
 ```yaml
 rand:
   n: 50                        # quanti valori (>= 1); OMESSO se la X è `rand` (vedi stack)
-  min: .001                    # estremo inferiore della banda (vedi forme sotto)
-  max: .01                     # estremo superiore
+  base: .001                   # estremo inferiore della banda (vedi forme sotto)
+  range: .009                  # ampiezza della banda; opzionale (default 0 = banda
+                               # collassata: la sequenza segue `base` deterministicamente)
   seed: 1988                   # opzionale (default: `axes.seed`, poi auto per-stream)
 ```
 
@@ -141,8 +143,9 @@ strategy-X `rand` del processo stack i tempi — e quindi `n` — emergono dalla
 frequenza, e la Y `rand` va dichiarata **senza** `n` (viene campionata ai tempi
 reali dei breakpoint). Fuori da quel caso `n` è obbligatorio.
 
-`min` e `max` sono un **envelope di 2° ordine** (una banda che genera valori);
-ognuno dei due accetta queste forme:
+`base` e `range` sono un **envelope di 2° ordine** (una banda che genera
+valori); un `range` negativo in un punto della sequenza è errore. Ognuno dei
+due accetta queste forme:
 
 | Forma | Significato |
 |-------|-------------|
@@ -156,8 +159,8 @@ Esempio con banda mobile (si apre dopo il 60% della sequenza):
 ```yaml
 rand:
   n: 50
-  min: [[0, 10], [.6, 2], [1, .1]]
-  max: [[0, 20], [.6, 5], [1, 3]]
+  base: [[0, 10], [.6, 2], [1, .1]]
+  range: [[0, 10], [.6, 3], [1, 2.9]]
   seed: 1988
 ```
 

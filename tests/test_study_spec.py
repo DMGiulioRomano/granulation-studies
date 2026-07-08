@@ -251,7 +251,7 @@ def _stack_dict():
             "density": {
                 "path": "density",
                 "baseline": 20,
-                "rand": {"min": [[0, 10], [1, 2]], "max": [[0, 20], [1, 5]]},
+                "rand": {"base": [[0, 10], [1, 2]], "range": [[0, 10], [1, 3]]},
                 "interpolation": "cubic",
             },
             "grain_duration": {
@@ -390,7 +390,7 @@ def test_stream_x_strategy_override_replaces_inherited():
     del d["axes"]["density"]["rand"]["n"]      # torna senza n per la base
     d["streams"] = {
         "solo_linear": {
-            "axes": {"density": {"rand": {"n": 8, "min": 0, "max": 10}}},
+            "axes": {"density": {"rand": {"n": 8, "base": 0, "range": 10}}},
             "stack": {"density": {"linear": {}}},
         }
     }
