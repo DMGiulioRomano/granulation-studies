@@ -201,3 +201,50 @@ def test_document_emerging_values_clamped_to_engine_bounds():
     doc = generate_stack_document(_specs(data))
     pts = doc["streams"][0]["grain"]["duration"]["points"]
     assert all(v == 0.001 for _, v in pts)                # clampati al bound
+
+
+# --- generatori annidati (plan nested-generators) ---------------------------------
+
+def test_nested_base_in_y_band_follows_generated_floor():
+    # range 0: la banda collassa e insegue il pavimento generato [0 -> 10].
+    y = {"band": {"n": 4, "base": {"values": [0, 10]}, "range": 0}}
+    env = axis_envelope(y, None, duration=10.0)
+    assert [v for _, v in env] == [
+        pytest.approx(0.0), pytest.approx(10 / 3),
+        pytest.approx(20 / 3), pytest.approx(10.0),
+    ]
+
+
+def test_nested_base_with_type_step_makes_plateaus():
+    y = {"band": {"n": 4, "base": {"type": "step", "values": [0, 10]}, "range": 0}}
+    env = axis_envelope(y, None, duration=10.0)
+    assert [v for _, v in env] == [0.0, 0.0, 0.0, 10.0]
+
+
+def test_nested_in_x_walk_base_deterministic():
+    y = {"band": {"base": 0, "range": 10}}
+    x = {"base": {"values": [5, 5]}, "range": 0}
+    a = axis_envelope(y, x, duration=10.0, y_seed=1, x_seed=2)
+    b = axis_envelope(y, x, duration=10.0, y_seed=1, x_seed=2)
+    assert a == b
+    assert len(a) == 50  # frequenza costante 5 Hz x 10 s
+
+
+def test_nested_third_level_in_x_walk():
+    y = {"band": {"base": 0, "range": 10}}
+    x = {
+        "base": {"n": 8, "base": 2, "range": 4},
+        "range": {"n": 5, "base": 0.5,
+                  "range": {"ramp": {"start": 1, "stop": 4, "step": 1}}},
+    }
+    a = axis_envelope(y, x, duration=10.0, y_seed=1, x_seed=2)
+    b = axis_envelope(y, x, duration=10.0, y_seed=1, x_seed=2)
+    assert a == b
+    times = [t for t, _ in a]
+    assert times == sorted(times)
+
+
+def test_nested_y_ramp_with_env_step_in_stack():
+    y = {"ramp": {"start": 0, "stop": 10, "step": {"type": "step", "points": [[0, 2], [0.5, 1]]}}}
+    env = axis_envelope(y, None, duration=10.0)
+    assert [v for _, v in env] == [0, 2, 4, 6, 7, 8, 9, 10]

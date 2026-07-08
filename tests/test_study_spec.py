@@ -401,3 +401,72 @@ def test_stream_x_override_null_returns_to_linear():
     assert "density" not in (spec.stack or {})        # entry annullata -> linear
     assert spec.axis("density").defers_n() is False    # la Y possiede n
     assert len(spec.axis("density").values) == 8
+
+
+# --- generatori annidati (plan nested-generators) ---------------------------------
+
+def test_nested_base_resolved_at_parse():
+    d = {
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {
+            "a": {"path": "density", "baseline": 20, "n": 4,
+                  "base": {"values": [0, 9]}, "range": 0},
+        },
+    }
+    spec = parse_study_spec(d)
+    assert spec.axis("a").values == pytest.approx([0.0, 3.0, 6.0, 9.0])
+
+
+def test_nested_double_resolution_parse_equals_assembly():
+    # Stesso seed -> il parse (sweep) e l'assemblaggio (stack) non divergono.
+    from granstudies.stack import axis_envelope
+
+    d = {
+        "study_id": "s",
+        "duration": 10,
+        "base": {"sample": "x.wav"},
+        "axes": {
+            "a": {"path": "density", "baseline": 20, "n": 4,
+                  "base": {"n": 3, "base": 0, "range": 9}, "range": 1},
+        },
+        "stack": {},
+    }
+    spec = parse_study_spec(d)
+    env = axis_envelope(
+        spec.axis("a").generator, None, 10.0,
+        y_seed=spec.resolved_y_seed(), x_seed=spec.resolved_x_seed(),
+    )
+    assert [v for _, v in env] == spec.axis("a").values
+
+
+def test_stack_config_accepts_nested_node_in_base():
+    d = {
+        "study_id": "s",
+        "duration": 10,
+        "base": {"sample": "x.wav"},
+        "axes": {
+            "a": {"path": "density", "baseline": 20,
+                  "base": 0, "range": 9},
+        },
+        "stack": {"a": {"base": {"values": [2, 8]}, "range": 0.5}},
+    }
+    spec = parse_study_spec(d)
+    assert spec.stack["a"]["base"] == {"values": [2, 8]}
+
+
+def test_stream_override_merges_nested_env_dict():
+    # La forma-nodo e' un dict: il merge di stream fonde le chiavi (type resta).
+    data = {
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {
+            "a": {"path": "density", "baseline": 20, "n": 4,
+                  "base": {"type": "step", "values": [0, 9]}, "range": 0},
+        },
+        "sweep": {"mode": "envelope", "orders": [1]},
+        "streams": {"prova": {"axes": {"a": {"base": {"values": [1, 8]}}}}},
+    }
+    spec = [s for s in resolve_streams(data) if s.stream_id == "prova"][0]
+    # type: step ereditato dal merge -> plateau: [1, 1, 1, 8]
+    assert spec.axis("a").values == pytest.approx([1.0, 1.0, 1.0, 8.0])
