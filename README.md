@@ -12,8 +12,8 @@ quegli stati — il tutto producendo YAML che l'engine compila in audio.
 ## Pipeline
 
 ```
-study.yml ──sweep──▶ varianti/*.yml ──render──▶ audio + partitura
-                                          │
+study.yml ──sweep──▶ yaml/sweep/*.yml ──render──▶ audio + partitura
+          ──stack──▶ yaml/stack/stack.yml ──┘  │
                               (ascolto + tag manuali)
                                           ▼
                                      results.yml ──┐
@@ -31,6 +31,7 @@ Vedi `docs/methodology.md` per il modello concettuale completo e i formati file.
 make setup                              # venv + submodule + dipendenze
 # metti un file audio in samples/ (es. corpus.wav, vedi samples/README.md)
 make sweep   STUDY=study01_grain_density
+make stack   STUDY=study01_grain_density
 make render  STUDY=study01_grain_density
 make describe STUDY=study01_grain_density
 # cura generated/study01_grain_density/results.yml (kept/tags), poi compila states.yml

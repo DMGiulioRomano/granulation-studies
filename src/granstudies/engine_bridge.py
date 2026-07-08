@@ -63,22 +63,45 @@ def render(
     output_path: str,
     samples_dir: str,
     output_sr: int = 48000,
+    per_stream: bool = False,
+    use_cache: bool = False,
+    cache_dir: Optional[str] = None,
 ) -> List[str]:
-    """Renderizza un YAML in audio con il renderer NumPy (MIX).
+    """Renderizza un YAML in audio con il renderer NumPy (MIX di default).
 
-    Returns: lista dei path audio generati.
+    ``per_stream``: STEMS mode (un file per stream, engine ``--per-stream``)
+    invece del MIX unico di default. ``use_cache`` attiva il caching
+    incrementale per-stream dell'engine (``StreamCacheManager``): solo gli
+    stream con fingerprint cambiato vengono ri-renderizzati. Ha effetto solo
+    in combinazione con ``per_stream`` (e' l'unico caso con build
+    incrementale per stream, vedi engine ``pge/cli.py``).
+
+    Il GC degli stem orfani resta disattivato (``run_cache_gc=False``) come
+    nel bridge pre-API: questo modulo non cancella file gia' generati.
+
+    Returns: lista dei path audio generati (1 elemento in MIX mode, N in
+    STEMS mode).
     """
-    _ensure_engine_on_path()
-    _silence_loggers(os.path.join(REPO_ROOT, "generated", ".logs"))
+    gen = load_generator(yaml_path, samples_dir=samples_dir)
     from pge import api
 
+    cache_manifest_path = None
+    if use_cache:
+        yaml_basename = os.path.splitext(os.path.basename(str(yaml_path)))[0]
+        cdir = cache_dir or "cache"
+        os.makedirs(cdir, exist_ok=True)
+        cache_manifest_path = os.path.join(cdir, f"{yaml_basename}.json")
+
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-    result = api.render_file(
-        str(yaml_path),
+    result = api.render(
+        gen,
         str(output_path),
         renderer="numpy",
-        samples_dir=samples_dir,
+        per_stream=per_stream,
+        run_cache_gc=False,
         output_sr=output_sr,
+        samples_dir=samples_dir,
+        cache_manifest_path=cache_manifest_path,
     )
     return result.audio_paths
 

@@ -11,9 +11,20 @@ from __future__ import annotations
 
 import math
 import random
+import zlib
 from typing import Any, Callable, Dict, List, Sequence, Union
 
 Threshold = Union[float, Sequence[float], Dict[str, Any]]
+
+
+def stable_seed(key: str) -> int:
+    """Seed deterministico da una chiave testuale (es. l'id di uno stream).
+
+    ``hash()`` di Python e' salato per processo (PYTHONHASHSEED): inutilizzabile
+    per il ciclo rigenera-e-confronta. CRC32 e' stabile tra run e macchine, e
+    resta stabile al riordino/rinomina degli altri stream.
+    """
+    return zlib.crc32(key.encode("utf-8"))
 
 
 def ramp(start: float, stop: float, step: float) -> List[float]:
@@ -84,6 +95,29 @@ def rand(n: int, min: Threshold, max: Threshold, seed: int = 0) -> List[float]:
         hi = _threshold_at(max, frac)
         if lo > hi:
             raise ValueError(f"rand: min ({lo}) > max ({hi}) al passo {i}")
+        out.append(round(rng.uniform(lo, hi), 9))
+    return out
+
+
+def rand_at(
+    fracs: Sequence[float], min: Threshold, max: Threshold, seed: int = 0
+) -> List[float]:
+    """Un valore casuale nella banda ``[min, max]`` per ciascun ``frac`` dato.
+
+    Variante di ``rand`` per il coupling con la X-rand (stack): quando la X
+    possiede ``n``, la banda va campionata al tempo *reale* ``t_i`` di ogni
+    breakpoint, non all'indice ``i/(n-1)``. La Y non possiede ``n``: pesca un
+    valore per ogni punto che la X ha creato. Deterministico via ``seed``.
+    """
+    if not fracs:
+        raise ValueError("rand_at: serve almeno un frac (lista vuota).")
+    rng = random.Random(seed)
+    out: List[float] = []
+    for frac in fracs:
+        lo = _threshold_at(min, frac)
+        hi = _threshold_at(max, frac)
+        if lo > hi:
+            raise ValueError(f"rand_at: min ({lo}) > max ({hi}) a frac={frac}")
         out.append(round(rng.uniform(lo, hi), 9))
     return out
 

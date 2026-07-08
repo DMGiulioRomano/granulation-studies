@@ -8,10 +8,10 @@ testo versionabili.
 ## La pipeline a stadi
 
 ```
-study.yml ──sweep──▶ varianti/discrete/*.yml ──render──▶ audio + partitura
-                     varianti/envelope/*.yml ──┘    │
-                                                    ▼
-                                              descriptors (results.yml)
+study.yml ──sweep──▶ yaml/sweep/{discrete,envelope}/*.yml ──render──▶ audio + partitura
+          ──stack──▶ yaml/stack/stack.yml ─────────────────┘    │
+                                                                ▼
+                                                          descriptors (results.yml)
                                                     │
                                         (ascolto + tag manuali)
                                                     ▼
@@ -40,10 +40,10 @@ Sintassi e forme di banda: vedi `study-yml-reference.md`.
 `sweep` supporta tre modalita', scelte via `sweep.mode` in `study.yml`:
 
 - `discrete` (default) — un file YAML statico per combinazione, scritti in
-  `varianti/discrete/`;
+  `yaml/sweep/discrete/`;
 - `envelope` — un file per combinazione di assi, in cui i parametri attraversano
   tutti i valori in sequenza tramite breakpoint temporali sincronizzati, scritti
-  in `varianti/envelope/`;
+  in `yaml/sweep/envelope/`;
 - `both` — entrambe le sotto-cartelle.
 
 In tutte le modalita' gli assi vengono mossi a **ordini crescenti**:
@@ -59,24 +59,46 @@ confrontabili. Il numero di varianti per N assi con v valori ciascuno e'
 `1 + Σ_k C(N,k)·v^k` (la baseline piu' le combinazioni).
 
 **Modalita' `envelope`**: un file per combinazione di *k* assi, in cui quei *k*
-assi attraversano i loro valori in ordine lessicografico. Con
-`sweep.combine: cartesian` (default) si prende il **prodotto cartesiano** dei
-valori; con `sweep.combine: parallel` gli assi si muovono **insieme** (zip: il
-plateau *i* usa l'*i*-esimo valore di ogni asse, richiede assi di ugual
-lunghezza). Ogni valore occupa un *plateau* (ascolto stabile) e il passaggio al successivo
+assi attraversano il **prodotto cartesiano** dei loro valori in ordine
+lessicografico (per muovere piu' assi *insieme*, accoppiati, si usa il processo
+`stack`, non lo sweep). Ogni valore occupa un *plateau* (ascolto stabile) e il passaggio al successivo
 avviene tramite una *transition* lineare. I tempi sono normalizzati in `[0, 1]`
 (`time_mode: normalized`); la durata reale dello stream e' `N·plateau + (N-1)·transition`.
 I parametri `plateau` e `transition` (in secondi, default 5.0) si impostano
-sotto `axes:` in `study.yml` come chiavi riservate.
+sotto `sweep:` in `study.yml`: il timing appartiene al processo sweep, mentre
+`axes:` dichiara solo i valori (Y) e la curva (`interpolation`).
 
 I valori fuori dai bounds dell'engine vengono *clampati* in entrambe le modalita'.
+
+### 2b. Stack (multi-stream verticale)
+
+`stack` e' il processo **gemello e indipendente** dello sweep, attivo per
+presenza del blocco `stack:` in `study.yml` (se ci sono entrambi i blocchi,
+partono entrambi i processi). Dove sweep *esplode* gli stream in N file, stack
+li *collassa* in **un** documento engine multi-stream
+(`yaml/stack/stack.yml`): uno stream sommato per ogni entry di `streams:`; per
+escluderne uno dall'ascolto lo si muta col suo `base.volume`.
+
+L'invariante che separa i due processi: **`axes` conosce solo Y** (valori,
+curva d'interpolazione, seed-Y); **il processo possiede X e durata**. Sweep
+possiede X via `plateau`/`transition` e *deriva* la durata; stack possiede X
+via le **strategy-X** (`linear` equispaziata di default, `rand` alla rspline:
+tempi generati da una banda di frequenza, `n` emergente) e *legge* la durata
+condivisa dal `duration:` top-level, normalizzandoci sopra.
+
+In stack gli assi **non si combinano**: ogni asse di ogni stream diventa un
+envelope indipendente sulla stessa durata. Due assi con la stessa strategy-X e
+lo stesso `n` restano *accoppiati* (breakpoint agli stessi tempi, valori
+appaiati per indice): e' cosi' che si riproduce l'ex `combine: parallel` dello
+sweep, rimosso. Sintassi del blocco `stack:` e modello dei seed: vedi
+`study-yml-reference.md`.
 
 ### 3. Render
 
 `render` compila ogni variante in audio (renderer NumPy) e in una partitura PDF.
-L'audio finisce in `generated/<id>/audio/discrete/` o `audio/envelope/` a seconda
-della modalita'; le partiture in `score/discrete/` o `score/envelope/`.
-Con `mode: both` entrambe le sotto-cartelle sono popolate.
+Il render discende `generated/<id>/yaml/` ricorsivamente (sia `sweep/` sia
+`stack/`) e rispecchia i sotto-path sotto `audio/` e `score/`: l'audio finisce
+in `audio/sweep/{discrete,envelope}/` e `audio/stack/`.
 
 ### 4. Descrittori + curation (`generated/<id>/results.yml`)
 

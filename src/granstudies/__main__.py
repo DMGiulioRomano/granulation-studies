@@ -1,6 +1,7 @@
 """CLI di granstudies: orchestrazione della pipeline a stadi.
 
-    granstudies sweep    STUDY      genera le varianti YAML
+    granstudies sweep    STUDY      genera le varianti YAML (processo sweep)
+    granstudies stack    STUDY      genera il documento multi-stream (processo stack)
     granstudies render   STUDY      renderizza audio + partitura
     granstudies describe STUDY      calcola descrittori, aggiorna results.yml
     granstudies matrix   STUDY      costruisce kinship.json
@@ -45,12 +46,16 @@ def _load_spec(study: str):
     return load_study_spec(os.path.join(study_dir(study), "study.yml"))
 
 
+def _load_data(study: str) -> Dict[str, Any]:
+    path = os.path.join(study_dir(study), "study.yml")
+    with open(path, "r", encoding="utf-8") as fh:
+        return yaml.safe_load(fh)
+
+
 def _load_specs(study: str, stream: str | None = None) -> list:
     from .study_spec import resolve_streams
 
-    path = os.path.join(study_dir(study), "study.yml")
-    with open(path, "r", encoding="utf-8") as fh:
-        data = yaml.safe_load(fh)
+    data = _load_data(study)
     sid = data.get("study_id") or study
     specs = resolve_streams(data, sid)
     if stream:
@@ -65,10 +70,15 @@ def _load_specs(study: str, stream: str | None = None) -> list:
 def cmd_sweep(study: str, stream: str | None = None) -> int:
     from .render import write_variants
 
+    # Attivazione per presenza: parte solo il processo il cui blocco e'
+    # definito nel documento (nessun selettore mode a scegliere tra i due).
+    if "sweep" not in _load_data(study):
+        print(f"[sweep] nessun blocco 'sweep:' in {study}/study.yml — niente da fare.")
+        return 0
     specs = _load_specs(study, stream)
     if not specs:
         return 1
-    out = os.path.join(gen_dir(study), "variants")
+    out = os.path.join(gen_dir(study), "yaml", "sweep")
     # Snapshot degli mtime pre-sweep: _dump non tocca i file a contenuto
     # identico, quindi "mtime cambiato o file nuovo" = variante da rirenderizzare
     # (stesso segnale usato dal render incrementale).
@@ -135,16 +145,38 @@ def _warn_orphans(variants_dir: str, written: set[str], scoped: bool) -> None:
         )
 
 
+def cmd_stack(study: str) -> int:
+    from .render import write_stack
+
+    if "stack" not in _load_data(study):
+        print(f"[stack] nessun blocco 'stack:' in {study}/study.yml — niente da fare.")
+        return 0
+    specs = _load_specs(study)
+    if not specs:
+        return 1
+    out = os.path.join(gen_dir(study), "yaml")
+    target = os.path.join(out, "stack", "stack.yml")
+    before = os.path.getmtime(target) if os.path.exists(target) else None
+    written = write_stack(specs, out)
+    changed = before != os.path.getmtime(written[0])
+    stato = "aggiornato" if changed else "invariato"
+    print(f"[stack] documento multi-stream ({len(specs)} stream, {stato}) -> {written[0]}")
+    return 0
+
+
 def cmd_render(
-    study: str, no_score: bool, force: bool = False, jobs: int | None = None
+    study: str, no_score: bool, force: bool = False, jobs: int | None = None,
+    stem: bool = False, cache: bool = False, cache_dir: str | None = None,
 ) -> int:
     from .render import render_variants
 
     spec = _load_spec(study)
     g = gen_dir(study)
-    variant_dir = os.path.join(g, "variants")
+    # Il render e' generico: discende yaml/ ricorsivamente (sweep/ e stack/) e
+    # rispecchia i sotto-path sotto audio/ e score/.
+    variant_dir = os.path.join(g, "yaml")
     if not os.path.isdir(variant_dir):
-        print(f"[render] nessuna variante: esegui prima 'sweep {study}'.", file=sys.stderr)
+        print(f"[render] nessuno YAML: esegui prima 'sweep {study}' o 'stack {study}'.", file=sys.stderr)
         return 1
     t0 = time.perf_counter()
     manifest = render_variants(
@@ -154,6 +186,9 @@ def cmd_render(
         samples_dir=samples_dir(spec.samples_dir),
         force=force,
         jobs=jobs,
+        per_stream=stem,
+        use_cache=cache,
+        cache_dir=cache_dir or os.path.join(g, "cache"),
     )
     elapsed = time.perf_counter() - t0
     tempo = f"{elapsed:.1f}s" if elapsed < 60 else f"{int(elapsed // 60)}m{elapsed % 60:04.1f}s"
@@ -169,10 +204,12 @@ def cmd_describe(study: str) -> int:
 
     spec = _load_spec(study)
     g = gen_dir(study)
-    # La curation lavora solo sulle varianti discrete: l'audio sta in
-    # ``audio/discrete/`` (layout di ``write_variants``); fallback flat per
-    # backward compat con output precedenti.
-    audio_dir = os.path.join(g, "audio", "discrete")
+    # La curation lavora solo sulle varianti discrete dello sweep: l'audio sta
+    # in ``audio/sweep/discrete/``; fallback sui layout precedenti
+    # (``audio/discrete/``, flat) per output non ancora rigenerati.
+    audio_dir = os.path.join(g, "audio", "sweep", "discrete")
+    if not os.path.isdir(audio_dir):
+        audio_dir = os.path.join(g, "audio", "discrete")
     if not os.path.isdir(audio_dir):
         audio_dir = os.path.join(g, "audio")
     if not os.path.isdir(audio_dir):
@@ -258,20 +295,58 @@ def cmd_compose(study: str, seed: int | None, steps: int | None, start: str | No
     return 0
 
 
+def _cmd_sv_stack(study: str, g: str, layout: str, total: list) -> int:
+    """Emette i .sv del documento stack: uno contro il mix, uno contro gli stem."""
+    from .sv_export import stack_to_sv, stack_stems_to_sv
+
+    variant = os.path.join(g, "yaml", "stack", "stack.yml")
+    audio_dir = os.path.join(g, "audio", "stack")
+    audio = os.path.join(audio_dir, "stack.aif")
+    if not os.path.exists(variant):
+        print("[sv] nessun documento stack: esegui prima 'stack'.", file=sys.stderr)
+        return 0
+    if not os.path.exists(audio):
+        print("[sv] audio stack mancante: esegui prima 'render'.", file=sys.stderr)
+        return 0
+    suffix = f"_{layout}" if layout == "single" else ""
+    out = os.path.join(g, "sv", "stack", f"{study}_stack" + suffix + ".sv")
+    stack_to_sv(variant, audio, out, layout=layout)
+    total.append(out)
+    print(f"[sv] {out}")
+
+    # Un pane per stem (audio separato per stream): richiede 'render --stem'.
+    stems_out = os.path.join(g, "sv", "stack", f"{study}_stack_stems.sv")
+    if stack_stems_to_sv(variant, audio_dir, stems_out):
+        total.append(stems_out)
+        print(f"[sv] {stems_out}")
+    return 1
+
+
 def cmd_sv(study: str, layout: str, markers: bool = True, stream: str | None = None,
            markers_scope: str = "all") -> int:
     from .sv_export import variant_to_sv
 
+    data = _load_data(study)
+    g = gen_dir(study)
+    total: list = []
+
+    # Processo stack: un solo .sv per il documento multi-stream, contro il suo
+    # audio sommato. Attivo per presenza del blocco (come cmd_stack); i flag
+    # marker/scope restano sul solo ramo sweep (i marker sono plateau-di-sweep).
+    if "stack" in data and stream is None:
+        _cmd_sv_stack(study, g, layout, total)
+        if "sweep" not in data:
+            print(f"[sv] {len(total)} sessioni totali")
+            return 0
+
     specs = _load_specs(study, stream)
     if not specs:
         return 1
-    g = gen_dir(study)
-    total: list = []
     for spec in specs:
         sub = spec.stream_id or ""
-        variant_dir = os.path.join(g, "variants", "envelope", sub) if sub else os.path.join(g, "variants", "envelope")
-        audio_dir = os.path.join(g, "audio", "envelope", sub) if sub else os.path.join(g, "audio", "envelope")
-        sv_dir = os.path.join(g, "sv", "envelope", sub) if sub else os.path.join(g, "sv", "envelope")
+        variant_dir = os.path.join(g, "yaml", "sweep", "envelope", sub) if sub else os.path.join(g, "yaml", "sweep", "envelope")
+        audio_dir = os.path.join(g, "audio", "sweep", "envelope", sub) if sub else os.path.join(g, "audio", "sweep", "envelope")
+        sv_dir = os.path.join(g, "sv", "sweep", "envelope", sub) if sub else os.path.join(g, "sv", "sweep", "envelope")
 
         if not os.path.isdir(variant_dir):
             print(f"[sv] [{sub or 'default'}] nessuna variante envelope: esegui prima 'sweep {study}'.", file=sys.stderr)
@@ -284,8 +359,9 @@ def cmd_sv(study: str, layout: str, markers: bool = True, stream: str | None = N
             if not fname.endswith(".yml"):
                 continue
             variant_name = fname[:-4]
-            # Il basename include il nome dello stream per distinguere i file in SV.
-            basename = f"{sub}_{variant_name}" if sub else variant_name
+            # Il basename include lo studio (per distinguerlo aprendo piu' .sv
+            # in Sonic Visualiser) e lo stream (per distinguere i file in SV).
+            basename = f"{study}_{sub}_{variant_name}" if sub else f"{study}_{variant_name}"
             audio = os.path.join(audio_dir, basename + ".aif")
             if not os.path.exists(audio):
                 print(f"[sv] {basename}: audio mancante, salto.", file=sys.stderr)
@@ -325,11 +401,24 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("study")
     sp.add_argument("--stream", default=None, help="genera solo questa stream (default: tutte)")
 
+    stp = sub.add_parser("stack", help="genera il documento multi-stream (stack)")
+    stp.add_argument("study")
+
     rp = sub.add_parser("render", help="renderizza audio + partitura")
     rp.add_argument("study")
     rp.add_argument("--no-score", action="store_true", help="salta i PDF di partitura")
     rp.add_argument("--force", action="store_true",
                     help="rirenderizza anche le varianti gia' aggiornate")
+    rp.add_argument("--stem", "--per-stream", dest="stem", action="store_true", default=True,
+                    help="STEMS mode oltre al mix: un file audio anche per stream (default: attivo)")
+    rp.add_argument("--no-stem", "--no-per-stream", dest="stem", action="store_false",
+                    help="disattiva la pass STEMS, genera solo il mix")
+    rp.add_argument("--cache", action="store_true", default=True,
+                    help="caching incrementale per-stream dell'engine (default: attivo, con --stem)")
+    rp.add_argument("--no-cache", dest="cache", action="store_false",
+                    help="disattiva il caching incrementale per gli stem")
+    rp.add_argument("--cache-dir", default=None,
+                    help="directory manifest cache (default: <study>/generated/cache)")
     rp.add_argument("--jobs", type=int, default=None,
                     help="numero di render in parallelo (default: min(8, cpu))")
 
@@ -366,8 +455,11 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "sweep":
         return cmd_sweep(args.study, args.stream)
+    if args.command == "stack":
+        return cmd_stack(args.study)
     if args.command == "render":
-        return cmd_render(args.study, args.no_score, args.force, args.jobs)
+        return cmd_render(args.study, args.no_score, args.force, args.jobs,
+                          args.stem, args.cache, args.cache_dir)
     if args.command == "describe":
         return cmd_describe(args.study)
     if args.command == "matrix":

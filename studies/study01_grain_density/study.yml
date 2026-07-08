@@ -7,6 +7,10 @@
 study_id: study01_grain_density
 title: "Studio 01 — densità e grana"
 seed: 1988
+# Durata condivisa (secondi) del documento stack: il processo stack normalizza
+# i tempi dei suoi envelope su questa. Usata anche dalle varianti discrete se
+# base.duration manca.
+duration: 30
 # Cartella del corpus (relativa alla root del repo). Default: samples/
 samples_dir: samples
 
@@ -27,10 +31,8 @@ base:
     start: .3
 # Gli assi: path YAML e valori di test. `baseline` (valore a riposo quando l'asse
 # non è mosso) è opzionale: se omesso si risolve dal default engine via `path`.
-# `plateau`/`transition` (secondi) governano il timing degli envelope.
+# axes conosce solo Y (valori + interpolation); il timing vive in `sweep:`.
 axes:
-  plateau: 5
-  transition: 2.5
   interpolation: step
   density:
     path: density
@@ -46,6 +48,9 @@ axes:
 sweep:
   # envelope | discrete | both. 1=OAT, 2=coppie, 3=terzine, 4=fattoriale completo.
   mode: envelope
+  # `plateau`/`transition` (secondi) governano il timing degli envelope.
+  plateau: 5
+  transition: 2.5
   #orders: [1, 2, 3]
   # Permutazioni esplicite (funziona per e2, e3, qualsiasi ordine): ciascuna
   # sceglie quale asse è "lento" (outer loop) e quale "veloce" (inner loop).
@@ -59,6 +64,15 @@ sweep:
   #  - [density, grain_duration, distribution]      # distribution veloce
   #  - [distribution, density, grain_duration]      # grain_duration veloce
   #  - [grain_duration, distribution, density]      # density veloce
+
+# Processo stack (attivo per presenza del blocco): colla verticale. Tutti gli
+# stream qui sotto vengono collassati in UN documento multi-stream
+# (generated/<study>/yaml/stack/stack.yml); per escluderne uno dall'ascolto lo
+# si muta col suo `base.volume`. Le chiavi (tranne `seed`, seed-X globale) sono
+# nomi d'asse -> strategy-X; un asse assente usa `linear` (tempi equispaziati,
+# n dai valori Y). Ogni asse diventa un envelope indipendente sulla durata
+# condivisa: niente prodotto cartesiano.
+stack: {}
 
 # Varianti di ascolto: ogni stream è un override parziale del documento sopra.
 # I campi omessi restano dalla base. Le liste rimpiazzano (non si concatenano).
@@ -89,8 +103,10 @@ streams:
       interpolation: step
 
   # Copia di lettura_avanzata ma NON cartesiana: density e grain_duration si
-  # muovono INSIEME (zip). Serve stessa lunghezza sui due assi -> qui 20 valori
-  # ciascuno via ramp. Un solo ordering (con parallel l'ordine non conta).
+  # muovono INSIEME. Migrata da sweep (ex combine: parallel) a stack: con la
+  # stessa strategy-X (linear) e lo stesso n (20 valori via ramp) i breakpoint
+  # cadono agli stessi tempi, valori appaiati per indice. Fuori dallo sweep
+  # (orders/orderings vuoti): vive solo nel documento stack.
   lettura_avanzata_parallel:
     base:
       pointer:
@@ -102,18 +118,17 @@ streams:
       grain_duration:
         ramp: {start: .001, stop: .0105, step: .0005} # 20 valori: .001,.0015,...,.0105
     sweep:
-      combine: parallel
-      orderings:
-        - [density, grain_duration]
-  # Misto: density a scalini (step) mentre grain_duration scorre morbido (cubic),
-  # sulla stessa griglia a plateau (durata piena, non collassata). Confronto
-  # diretto con lettura_avanzata / _b (tutto-step) a parità di pointer.start.
+      orders: []
+      orderings: []
+  # Due bande rand che si muovono insieme, morbide (cubic). Migrata da sweep
+  # (ex combine: parallel) a stack: stesso n (50) e stessa X linear -> stessi
+  # tempi, valori appaiati. Confronto con lettura_avanzata / _b a parità di
+  # pointer.start. Fuori dallo sweep: vive solo nel documento stack.
   lettura_avanzata_c:
     base:
       pointer:
-        start: 0.3    
+        start: 0.3
     axes:
-      plateau: 1
       density:
         interpolation: cubic
         rand:
@@ -131,7 +146,8 @@ streams:
           max: [[0, .002], [.6, .005], [1, .1]]
           seed: 1988
     sweep:
-      combine: parallel
+      orders: []
+      orderings: []
 
   lettura_avanzata_2:
     base:
@@ -145,7 +161,7 @@ streams:
     axes:
       density:
         values: [100, 150, 200, 300]
-      plateau: 5 
-      transition: 8
     sweep:
-      orders: [1, 2]          
+      orders: [1, 2]
+      plateau: 5
+      transition: 8
