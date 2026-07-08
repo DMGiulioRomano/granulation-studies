@@ -46,10 +46,20 @@ def ramp(start: float, stop: float, step: float) -> List[float]:
     return [round(start + sign * step * i, 9) for i in range(n + 1)]
 
 
-def _interp_breakpoints(pts: Sequence[Sequence[float]], frac: float, kind: str = "linear") -> float:
+def _interp_breakpoints(
+    pts: Sequence[Sequence[float]], frac: float, kind: str = "linear", curve: float = 1.0
+) -> float:
     """Soglia su ``[[t, v], ...]`` (t in ``[0, 1]``) al punto ``frac``, con hold
     fuori dai bordi. ``kind``: ``linear`` (rampa tra i punti) o ``step`` (tieni
-    il valore sinistro, salta al breakpoint)."""
+    il valore sinistro, salta al breakpoint).
+
+    ``curve`` piega la frazione locale del segmento prima di interpolare
+    (``u' = u^k``): ``1`` = lineare (default), ``> 1`` parte lento e accelera in
+    coda, ``< 1`` parte ripido e si appiattisce. Agisce solo sulla rampa
+    (``kind == linear``): con ``step`` non c'e' rampa da piegare. Un ``curve``
+    non positivo e' un errore di configurazione (potenza degenere)."""
+    if curve <= 0:
+        raise ValueError(f"curve deve essere > 0 (ricevuto {curve}).")
     pts = sorted(pts, key=lambda p: p[0])
     if frac <= pts[0][0]:
         return pts[0][1]
@@ -59,7 +69,12 @@ def _interp_breakpoints(pts: Sequence[Sequence[float]], frac: float, kind: str =
         if t0 <= frac <= t1:
             if kind == "step":
                 return v0
-            return v0 if t1 == t0 else v0 + (v1 - v0) * (frac - t0) / (t1 - t0)
+            if t1 == t0:
+                return v0
+            u = (frac - t0) / (t1 - t0)
+            if curve != 1.0:
+                u = u ** curve
+            return v0 + (v1 - v0) * u
     return pts[-1][1]  # irraggiungibile: frac e' tra primo e ultimo t
 
 
@@ -68,11 +83,20 @@ def _threshold_at(spec: Threshold, frac: float) -> float:
 
     E' un envelope di secondo ordine (una banda che genera valori). Forme:
     scalare -> costante; ``[a, b]`` (due scalari) -> lineare ``a -> b``;
-    ``[[t, v], ...]`` -> breakpoint temporizzati (linear); ``{type, points}`` ->
-    breakpoint con ``type`` d'interpolazione esplicito (``linear`` | ``step``).
+    ``[[t, v], ...]`` -> breakpoint temporizzati (linear); ``{type, points, curve}``
+    -> breakpoint con ``type`` d'interpolazione esplicito (``linear`` | ``step``)
+    ed eventuale ``curve`` (piega non lineare ``u^k`` del segmento). ``curve`` con
+    ``type: step`` e' un errore: step non ha rampa da piegare.
     """
     if isinstance(spec, dict):
-        return _interp_breakpoints(spec["points"], frac, spec.get("type", "linear"))
+        kind = spec.get("type", "linear")
+        curve = spec.get("curve", 1.0)
+        if kind == "step" and curve != 1.0:
+            raise ValueError(
+                "curve non ha effetto con 'type: step' (nessuna rampa da piegare): "
+                "usa 'type: linear' o togli 'curve'."
+            )
+        return _interp_breakpoints(spec["points"], frac, kind, curve)
     if not isinstance(spec, (list, tuple)):
         return spec
     if all(isinstance(p, (list, tuple)) for p in spec):

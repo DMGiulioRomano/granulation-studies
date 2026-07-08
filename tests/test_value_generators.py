@@ -1,6 +1,61 @@
 import pytest
 
-from granstudies.value_generators import ramp, rand, rand_at, resolve
+from granstudies.value_generators import (
+    _interp_breakpoints,
+    _threshold_at,
+    ramp,
+    rand,
+    rand_at,
+    resolve,
+)
+
+
+# --- curve: piega non lineare u^k del segmento (S1) ------------------------------
+
+def test_curve_quadratic_on_known_segment():
+    # u=0.5 su [[0,0],[1,10]]: lineare -> 5, curve 2 -> u^2=0.25 -> 2.5.
+    assert _interp_breakpoints([[0, 0], [1, 10]], 0.5, curve=2) == 2.5
+
+
+def test_curve_one_equals_linear():
+    pts = [[0, 0], [1, 10]]
+    for frac in (0.0, 0.25, 0.5, 0.75, 1.0):
+        assert _interp_breakpoints(pts, frac, curve=1) == _interp_breakpoints(pts, frac)
+
+
+def test_curve_convex_opposite_below_one():
+    # curve 0.5: u^0.5 > u -> sale piu' ripido all'inizio (valore > lineare).
+    assert _interp_breakpoints([[0, 0], [1, 10]], 0.25, curve=0.5) == pytest.approx(5.0)
+
+
+def test_curve_holds_at_borders_unchanged():
+    # Fuori dai bordi la curve e' irrilevante: hold sul valore d'estremo.
+    pts = [[0, 5], [1, 10]]
+    assert _interp_breakpoints(pts, -0.1, curve=2) == 5
+    assert _interp_breakpoints(pts, 1.5, curve=2) == 10
+
+
+def test_curve_in_threshold_dict_form():
+    spec = {"points": [[0, 0], [1, 10]], "curve": 2}
+    assert _threshold_at(spec, 0.5) == 2.5
+
+
+def test_curve_rejects_non_positive():
+    with pytest.raises(ValueError):
+        _interp_breakpoints([[0, 0], [1, 10]], 0.5, curve=0)
+    with pytest.raises(ValueError):
+        _interp_breakpoints([[0, 0], [1, 10]], 0.5, curve=-1)
+
+
+def test_curve_with_step_type_raises():
+    # type: step non ha rampa da piegare: curve != 1 e' un errore di config.
+    with pytest.raises(ValueError):
+        _threshold_at({"type": "step", "points": [[0, 0], [1, 10]], "curve": 2}, 0.5)
+
+
+def test_curve_one_with_step_type_ok():
+    # curve 1 (default esplicito) e' un no-op: convive con step.
+    assert _threshold_at({"type": "step", "points": [[0, 0], [1, 10]], "curve": 1}, 0.5) == 0
 
 
 def test_rand_deterministic_within_band():
