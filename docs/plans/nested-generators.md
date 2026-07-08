@@ -90,9 +90,15 @@ Env ::= scalare                            # banda a livello costante
       | {type?: linear|step, GEN}          # NUOVO: bordo generato
 
 GEN ::= values: [v, ...]                   # stesi su t_i = i/(n-1)
-      | ramp:   {start, stop, step}
+      | ramp:   {start, stop, step: Env}   # step mobile: accelerando/ritardando (§4.1)
       | rand:   {n, base: Env, range?: Env, seed?}   # base/range ricorsivi
 ```
+
+`GEN` non è una lista chiusa: è **l'intero registry** (`values` + tutto ciò che
+sta in `GENERATORS`). L'espansione è registry-driven — il predicato di nodo e
+il walk generico sui parametri non conoscono le singole strategie — quindi ogni
+generatore futuro aggiunto al registry diventa annidabile gratis, e ogni suo
+parametro di tipo `Env` accetta a sua volta generatori.
 
 La forma dict si generalizza: `{type, points}` e `{type, <generatore>}` sono
 lo stesso nodo — `points` dà i breakpoint letterali, la chiave-generatore li
@@ -115,6 +121,42 @@ Regole:
   annidato stesso — profondità arbitraria. Guardia di profondità esplicita
   (proposta: 8) nella filosofia di `MAX_POINTS`: meglio un errore chiaro che
   una config degenere (gli alias YAML ricorsivi esistono).
+
+### 4.1 `ramp` con `step: Env` — accelerando e ritardando
+
+Verificato sul codice: il `ramp` di oggi è **solo aritmetico**
+(`ramp(start, stop, step)`, `step` scalare costante `> 0`). Accelerando e
+ritardando non esistono ancora; questa estensione li introduce promuovendo
+`step` da scalare a `Env` — la stessa mossa di `base`/`range`, quindi anche
+`step` accetta le quattro forme statiche *e i generatori annidati*.
+
+Semantica: `step` è una funzione del **progresso in valore**,
+`frac = |v − start| / |stop − start|` (non dell'indice: il conteggio dei passi
+non è noto a priori). Si itera `v += sign · step(frac(v))` finché si raggiunge
+`stop`; `n` **emerge** dall'integrazione, come i tempi della X-rand.
+
+```yaml
+ramp: {start: 5, stop: 100, step: 5}          # oggi: passo costante
+ramp: {start: 5, stop: 100, step: [10, 1]}    # accelerando: i passi si stringono
+ramp: {start: 5, stop: 100, step: [1, 10]}    # ritardando: i passi si allargano
+ramp:
+  start: 5
+  stop: 100
+  step:
+    rand: {n: 4, base: 1, range: 6}           # rampa a passo stocastico (ricorsione)
+```
+
+Guardie: `step(frac) <= 0` in qualunque punto → errore (passo nullo = loop
+infinito, come la frequenza non positiva di X-rand); tetto punti alla
+`MAX_POINTS`. `ramp` resta deterministico e continua a possedere `n`; il caso
+scalare resta identico al comportamento attuale (retrocompatibile, conteggio
+anti-drift incluso).
+
+Nota di disambiguazione, importante per non confondersi con lo stack: questo è
+l'accelerando **dei valori** (la griglia di Y si infittisce). L'accelerando
+**nel tempo** (breakpoint che si addensano sulla timeline) è dominio della
+strategy-X: una futura X-`ramp` accanto a `linear`/`rand` in `X_STRATEGIES` —
+coerente col registry, ma fuori da questa iterazione (v. Questioni aperte).
 
 ## 5. Esempi
 
@@ -166,9 +208,10 @@ stream in una regione stocastica, poi si salta a un'altra.
 
 Casi degeneri, da documentare per onestà:
 
-- `ramp` annidato con interpolazione linear ≡ `[start, stop]`: non aggiunge
-  nulla. Il suo valore è con `type: step` (banda a scalini) o come `range` di
-  un `rand` annidato.
+- `ramp` annidato **a passo costante** con interpolazione linear ≡
+  `[start, stop]`: non aggiunge nulla. Aggiunge con `type: step` (banda a
+  scalini) o con `step: Env` (§4.1): l'accelerando curva la rampa, e annidata
+  in un bordo dà una banda che deriva con morfologia non lineare.
 - `values` annidato ≡ `[[t, v], ...]` con tempi equispaziati: solo comodità.
 - la banda che si muove a larghezza costante non richiede trucchi: `base`
   annidato + `range` scalare. Con il vecchio vocabolario `min`/`max` sarebbe
@@ -212,7 +255,9 @@ Tutto in granstudies, tre file toccati più i test:
      breakpoint (o `{type, points}` se il nodo ha `type`), ricorsivo;
    - `expand_params(params, *, seed, path) -> dict`: cammina i parametri di un
      generatore e espande ogni valore che è un nodo (walk generico sui dict,
-     così `cps.base` si trova senza schema per-generatore).
+     così `cps.base` si trova senza schema per-generatore);
+   - `ramp` riscritto per `step: Env` (§4.1): iterazione a passo mobile con
+     guardie, ramo scalare identico all'attuale.
 2. **`study_spec.py`** — seam sweep/Y: `expand_params` su `resolved_cfg` subito
    dopo l'iniezione del seed di default, prima di `resolve_values`.
 3. **`stack.py`** — seam stack: `expand_params` su `y_kwargs` (entrambi i rami)
@@ -257,6 +302,9 @@ un generatore avrà un parametro dict che può confondersi, si passa allo schema
   decorrelati di default; seed esplicito nel nodo vince; cambiare il seed
   esterno cambia il sottoalbero; banda a larghezza costante con `base` annidato
   e `range` scalare.
+- ramp accelerando: `step: [a, b]` produce passi monotoni attesi; ramo scalare
+  invariato bit-a-bit (regressione anti-drift); `step` che tocca 0 → errore;
+  tetto punti; generatore annidato dentro `step`.
 - errori: `rand` annidato senza `n`; due chiavi-generatore; profondità oltre
   guardia; `range` negativo con path nel messaggio.
 - integrazione stack: study di prova con nested in `cps.base` → `stack.yml`
@@ -267,9 +315,11 @@ un generatore avrà un parametro dict che può confondersi, si passa allo schema
 
 ## 11. Questioni aperte
 
-1. **Strategy-X per il mini-asse** (tempi non equispaziati dentro la banda):
-   v2, la grammatica ha spazio. Serve davvero, o l'annidamento di `rand` copre
-   già l'irregolarità che cerchi?
+1. **Accelerando nel tempo**: una strategy-X `ramp` in `X_STRATEGIES` (tempi
+   che si addensano/diradano sulla timeline dello stack) e, in seconda battuta,
+   una strategy-X per il mini-asse (tempi non equispaziati dentro la banda).
+   La grammatica ha spazio per entrambe; v2. L'accelerando dei valori (§4.1)
+   copre già parte del bisogno?
 2. **Nome della chiave di curva nel nodo**: `type` (coerente con
    `{type, points}`) o `interpolation` (coerente con gli assi)? Proposta:
    `type`, perché il nodo vive nel mondo `Env`. E `type: cubic` dentro una
