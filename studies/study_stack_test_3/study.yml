@@ -34,29 +34,23 @@ axes:
   density:
     path: density
     baseline: 20
-    rand:
-      base: [[0, 80], [.5, 20], [1,18]]
-      range: [[0, 12], [.5, 10], [1,3]]
+    base: [[0, 80], [.5, 20], [1,18]]
+    range: [[0, 12], [.5, 10], [1,3]]
     interpolation: step
   grain_duration:
     path: grain.duration
-    rand:
-      base: [[0, .080], [.5, .020], [1,.018]]
-      #range: [[0, .120], [.5, .040], [1,.012]]
+    base: [[0, .080], [.5, .020], [1,.018]]
+    #range: [[0, .120], [.5, .040], [1,.012]]
     interpolation: step
 
 stack:
   # nessun `seed:` globale -> seed-X auto-derivato per-stream da hash(id:x)
   density:
-    rand:
-      cps:
-        base:  [[.60, .3], [1, 3]]
-        range: [[.60, .1], [1, 1]]
+    base:  [[.60, .3], [1, 3]]
+    range: [[.60, .1], [1, 1]]
   grain_duration:
-    rand:
-      cps:
-        base:  [[.60, .3], [1, 3]]
-        range: [[.60, .2], [1, 2]]
+    base:  [[.60, .3], [1, 3]]
+    range: [[.60, .2], [1, 2]]
 
 streams:
   # Tre stream con config IDENTICA: solo l'id cambia -> auto-seed li decorrela.
@@ -64,14 +58,13 @@ streams:
     base: {pointer: {start: 0.2}}
     axes:
       density:
-        rand:
-          base: [[0, 120],  [.5,1800]]
-          range: [[0, 12], [.5,300]]
-    stack: {seed: 3, density: {rand: {cps: {base: [[.60, .15], [1, 3]]}}}}
+        base: [[0, 120],  [.5,800]]
+        range: [[0, 12], [.5,300]]
+    stack: {seed: 3, density: {base: [[.60, .15], [1, 3]]}}
     
   voce_b:
     base: {pointer: {start: 0.4}}
-    stack: {seed: 6, density: {rand: {cps: {base: [[.60, .4], [1, 3]]}}}}
+    stack: {seed: 6, density: {base: [[.60, .4], [1, 3]]}}
   voce_c:
     base: {seed: 256, pointer: {start: 0.1}}
 
