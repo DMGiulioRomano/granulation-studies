@@ -42,14 +42,16 @@ axes:                             # * almeno un asse
     path: density                # * path YAML nell'engine
     baseline: 20                 # valore a riposo; obbligatorio se l'engine non ha default
     values: [5, 10, 20, 50]      # * i valori di test. UNA sola chiave-generatore per asse
-                                 # tra {values, ramp, rand} (vedi "Generatori" sotto).
+                                 # tra {values, ramp, base} (vedi "Generatori" sotto).
                                  # values = lista esplicita (rimpiazza, non concatena).
     interpolation: step          # opzionale: override per-asse (default = quello di studio)
 
   grain_duration:
     path: grain.duration         # path annidato con notazione punto
     # baseline omesso → risolto dal default engine
-    values: [0.001, 0.01, 0.05]
+    n: 40                        # banda piatta: base/range/n/seed accanto a path
+    base: [[0, .001], [1, .05]]  # la banda [base, base+range] genera i valori
+    range: .002
     interpolation: cubic         # es. density a scalini + grain morbido nello stesso file
 
 # Configurazione dello sweep (il processo possiede X: timing e durata derivata).
@@ -69,13 +71,11 @@ sweep:
 # UN documento multi-stream. Vedi la sezione "Il blocco stack" sotto.
 stack:
   seed: 42                       # seed-X globale (chiave riservata; opzionale)
-  density:                       # nome d'asse -> config della strategy-X
-    rand:                        # X-rand (rspline): i tempi emergono dalla frequenza
-      cps:
-        base:  [[0, 3], [1, 10]] # frequenza di generazione (Hz sulla durata reale)
-        range: [[0, 1], [1, 1]]  # banda = [base(t), base(t)+range(t)]
-      seed: 7                    # seed-X per-asse (vince sul globale)
-  # grain_duration assente -> strategy-X di default `linear` (n dai valori Y)
+  nome_asse:                     # un asse con camminata-X: la X possiede n, la
+    base:  [[0, 3], [1, 10]]     #   sua Y dev'essere una banda senza n. base/range
+    range: [[0, 1], [1, 1]]      #   = frequenza di generazione (Hz, durata reale)
+    seed: 7                      # seed-X per-asse (vince sul globale)
+  # asse assente dal blocco -> linear (n dai valori Y). Dettagli: sezione "stack".
 
 # Stream: varianti di ascolto con override parziali sul documento sopra.
 # Regole del merge: i dict si fondono ricorsivamente, le liste rimpiazzano.
@@ -101,9 +101,11 @@ streams:
 ## Generatori di valori d'asse
 
 I valori di test di un asse si danno con **esattamente una** chiave-generatore
-tra `values`, `ramp`, `rand` (mutuamente esclusive: zero o più di una è errore).
-In una stream, la chiave-generatore dell'override rimpiazza quella ereditata
-sullo stesso asse (non si sommano).
+tra `values`, `ramp`, `base` (mutuamente esclusive: zero o più di una è errore).
+Il generatore si riconosce dalla **forma**, non più da un wrapper con nome: la
+presenza di `base` marca la banda. In una stream, il generatore dell'override
+rimpiazza quello ereditato sullo stesso asse (non si sommano); passare a
+`values`/`ramp` toglie anche le chiavi della banda ereditate.
 
 ### `values` — lista esplicita
 
@@ -122,16 +124,18 @@ ramp: {start: 5, stop: 100, step: 5}   # 5, 10, 15, ..., 100
 - Uno `stop` che cade sulla griglia è incluso; uno che non ci cade non viene
   mai oltrepassato (conteggio intero anti-drift float).
 
-### `rand` — banda casuale, seeded
+### `base` — banda, seeded (piatta sull'asse)
 
 `n` valori estratti uniformemente dentro una banda `[base, base + range]` che
-può essere fissa o mobile lungo la sequenza — stessa semantica della `cps` di
-X-rand. Deterministico: stesso `seed` → stessa sequenza (serve al ciclo
+può essere fissa o mobile lungo la sequenza. Le chiavi stanno **piatte** nel
+dict dell'asse (accanto a `path`/`baseline`/`interpolation`), non più sotto un
+wrapper. Deterministico: stesso `seed` → stessa sequenza (serve al ciclo
 rigenera-e-confronta).
 
 ```yaml
-rand:
-  n: 50                        # quanti valori (>= 1); OMESSO se la X è `rand` (vedi stack)
+density:
+  path: density
+  n: 50                        # quanti valori (>= 1); OMESSO se la X è una camminata (vedi stack)
   base: .001                   # estremo inferiore della banda (vedi forme sotto)
   range: .009                  # ampiezza della banda; opzionale (default 0 = banda
                                # collassata: la sequenza segue `base` deterministicamente)
@@ -139,9 +143,9 @@ rand:
 ```
 
 `n` appartiene a chi possiede il conteggio dei punti (*n-ownership*): con la
-strategy-X `rand` del processo stack i tempi — e quindi `n` — emergono dalla
-frequenza, e la Y `rand` va dichiarata **senza** `n` (viene campionata ai tempi
-reali dei breakpoint). Fuori da quel caso `n` è obbligatorio.
+camminata-X del processo stack i tempi — e quindi `n` — emergono dalla frequenza,
+e la banda Y va dichiarata **senza** `n` (viene campionata ai tempi reali dei
+breakpoint). Fuori da quel caso `n` è obbligatorio.
 
 `base` e `range` sono un **envelope di 2° ordine** (una banda che genera
 valori); un `range` negativo in un punto della sequenza è errore. Ognuno dei
@@ -150,23 +154,43 @@ due accetta queste forme:
 | Forma | Significato |
 |-------|-------------|
 | scalare `.003` | banda a livello costante |
-| `[a, b]` | rampa lineare `a → b` lungo la sequenza |
+| `[a, b]` | rampa lineare `a → b` lungo la sequenza (esattamente due scalari) |
 | `[[t, v], ...]` | breakpoint temporizzati, `t` in `[0, 1]`, interpolati **linear** (hold fuori dai bordi) |
-| `{type, points}` | breakpoint con `type` esplicito: `linear` (rampa) o `step` (tieni-e-salta) |
+| `{type, points, curve}` | breakpoint con `type` esplicito (`linear`/`step`) ed eventuale `curve` (vedi sotto) |
 
 Esempio con banda mobile (si apre dopo il 60% della sequenza):
 
 ```yaml
-rand:
+density:
   n: 50
   base: [[0, 10], [.6, 2], [1, .1]]
   range: [[0, 10], [.6, 3], [1, 2.9]]
   seed: 1988
 ```
 
-> Nel processo `stack` più assi generati con lo stesso `n` e la stessa
-> strategy-X si muovono insieme (breakpoint agli stessi tempi): si sentono più
-> modulazioni contemporaneamente, senza il prodotto cartesiano.
+> Nel processo `stack` più assi generati con lo stesso `n` e la stessa strategy-X
+> si muovono insieme (breakpoint agli stessi tempi): si sentono più modulazioni
+> contemporaneamente, senza il prodotto cartesiano.
+
+### `curve` — piega non lineare del segmento
+
+`curve` vive nella **forma dict** di un `Env` (`base`/`range`) e piega la frazione
+locale del segmento prima di interpolare (`u' = u^k`), cioè cambia *come* la banda
+si muove tra i suoi breakpoint — non è l'`interpolation` dell'asse (che è come
+l'engine unisce i breakpoint *già* generati).
+
+```yaml
+base: {points: [[0, 10], [1, 90]], curve: 2}   # sale lento, accelera in coda
+```
+
+- `curve: 1` = lineare (default); `> 1` parte lento e accelera; `< 1` parte ripido
+  e si appiattisce. Deve essere `> 0`.
+- Piega **ogni segmento** indipendentemente (la `u` locale di ciascun tratto).
+- Con `type: step` non c'è rampa da piegare: `curve` diverso da 1 è un errore.
+- Disponibile ovunque compaia un `Env` — `base`/`range` di X **e** di Y. Nota che
+  il `[0, 1]` su cui l'`Env` è letto misura cose diverse: in Y è la posizione del
+  punto sull'asse dello stream, in X è il tempo reale normalizzato della
+  camminata. La piega è la stessa, il dominio no.
 
 ## Il blocco `stack:`
 
@@ -175,23 +199,34 @@ stream di `streams:` in un solo documento engine (`yaml/stack/stack.yml`),
 sommati. Parte solo se il blocco `stack:` è presente (anche vuoto: `stack: {}`);
 richiede `duration:` top-level (la durata condivisa su cui normalizza i tempi).
 Per escludere uno stream dall'ascolto lo si muta con il suo `base.volume`
-(meccanismo engine); il blocco `stack:` è solo config della strategy-X, non un
+(meccanismo engine); il blocco `stack:` è solo config della camminata-X, non un
 gate di partecipazione.
 
 Schema piatto: `seed` è l'unica chiave riservata (seed-X globale); ogni altra
-chiave è un **nome d'asse** → config della strategy-X.
+chiave è un **nome d'asse**. Non c'è più un nome-strategy: la strategy-X si
+riconosce dalla **presenza** dell'asse nel blocco.
 
-| Strategy-X | Config | Chi possiede `n` |
-|------------|--------|-------------------|
-| `linear` (default, asse assente dal blocco) | `{}` — nessun parametro | la **Y** (`values`/`ramp`/`rand` con `n`); tempi equispaziati `t_i = i/(n-1)` |
-| `rand` (alla `rspline`) | `{cps: {base: <env>, range: <env>}, seed?: int}` | la **X**: `n` emerge dalla frequenza integrata sulla durata |
+| Strategy-X | Come si dichiara | Chi possiede `n` |
+|------------|------------------|-------------------|
+| `linear` | asse **assente** dal blocco | la **Y** (`values`/`ramp`/banda con `n`); tempi equispaziati `t_i = i/(n-1)`, estremo `t=1` incluso |
+| camminata (`walk`, alla `rspline`) | asse **presente** con `{base: <env>, range?: <env>, seed?: int}` | la **X**: `n` emerge dalla frequenza integrata sulla durata |
 
-Con la X-rand la frequenza si pesca a ogni punto nella banda
+Con la camminata la frequenza si pesca a ogni punto nella banda
 `[base(t), base(t)+range(t)]` (Hz sulla durata reale; `base`/`range` accettano
-le stesse forme della banda di Y-rand) e il punto successivo cade a `t + 1/f`.
-La Y dev'essere `rand` **senza** `n`, campionata ai tempi reali dei breakpoint.
-Le due direzioni sbagliate (X-rand con Y che enumera; Y-rand senza `n` con X
-lineare) sono errori di parse (*n-ownership*).
+le stesse forme della banda di Y) e il punto successivo cade a `t + 1/f`. La Y
+dev'essere una **banda senza** `n`, campionata ai tempi reali dei breakpoint.
+`range` assente = camminata **deterministica** (segue `base`, nessun seed
+consumato). Le due direzioni sbagliate (camminata-X con Y che enumera; banda Y
+senza `n` con X lineare) sono errori di parse (*n-ownership*).
+
+> **Due equispaziati diversi.** «`base` costante = tempi equispaziati» vale per la
+> **camminata** ed è un equispaziato *per frequenza*: `n` emerge da `durata × f` e
+> l'ultimo punto non cade mai su `t = 1`. È cosa diversa dall'equispaziato della
+> **X-linear** (assenza dal blocco): lì `n` viene dalla Y, `t_i = i/(n-1)` ed
+> `t = 1` è incluso. Convivono — uno è la camminata, l'altro il default implicito.
+
+Per riportare un asse a `linear` in una stream (annullando una camminata
+ereditata) si **annulla l'entry**: `stack: {asse: null}`.
 
 In stack gli assi **non si combinano** (niente prodotto cartesiano): ogni asse
 diventa un envelope indipendente. Due assi con la stessa strategy-X e lo stesso
@@ -201,8 +236,8 @@ per-asse (`linear`/`cubic`/`step`) vale anche qui.
 
 **Seed, precedenza (il più specifico vince):**
 
-- Y: `rand.seed` per-asse → `axes.seed` globale → auto-derivato per-stream;
-- X: `stack.<asse>.rand.seed` → `stack.seed` globale → auto-derivato per-stream.
+- Y: `seed` della banda (per-asse) → `axes.seed` globale → auto-derivato per-stream;
+- X: `stack.<asse>.seed` → `stack.seed` globale → auto-derivato per-stream.
 
 L'auto-derivazione è un hash stabile (CRC32) dell'id dello stream, con salt
 distinti per Y e X: senza seed globali gli stream impilati si **decorrelano da
