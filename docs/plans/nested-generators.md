@@ -9,11 +9,15 @@ prima di implementare. Lingua: italiano, no emoji.
 
 ## 1. Intento
 
-Oggi i parametri-banda di `rand` (`min`/`max` nella Y, `cps.base`/`cps.range`
+Oggi i parametri-banda di `rand` (`base`/`range` nella Y, `cps.base`/`cps.range`
 nella X-rand dello stack) accettano quattro forme statiche: scalare, `[a, b]`,
 `[[t, v], ...]`, `{type, points}`. La richiesta: poter scrivere **un generatore
-dentro quei parametri**, ricorsivamente — un `rand` dentro il `min` di un
-`rand`, un `ramp` dentro il `base` di una X-rand, a profondità arbitraria.
+dentro quei parametri**, ricorsivamente — un `rand` dentro il `base` di un
+`rand`, un `ramp` dentro il `range` di una X-rand, a profondità arbitraria.
+
+Dopo il PR #9 (`feat(rand)!`) Y-rand e X-rand condividono la stessa semantica
+di banda `[base(t), base(t) + range(t)]` (`_band_at`): il design qui sotto vale
+verbatim per entrambe, senza casi speciali.
 
 Vincolo di confine: **l'engine non si tocca**. I generatori annidati si
 risolvono interamente in granstudies; l'engine continua a ricevere envelope
@@ -50,9 +54,9 @@ curva scelta con `type` (`linear`/`step`, come nella forma `{type, points}`).
 
 Tre conseguenze che rendono il design piccolo:
 
-1. **Le firme dei generatori non cambiano.** `rand(n, min, max, seed)` accetta
-   già breakpoint in `min`/`max`; idem `cps.base`/`range` in X-rand. Il
-   generatore annidato è zucchero che si desugara nella grammatica di oggi.
+1. **Le firme dei generatori non cambiano.** `rand(n, base, range, seed)`
+   accetta già breakpoint in `base`/`range`; idem `cps.base`/`range` in X-rand.
+   Il generatore annidato è zucchero che si desugara nella grammatica di oggi.
 2. **La ricorsione vive in un punto solo**: una funzione di espansione in
    `value_generators.py`, chiamata alle tre seam prima di invocare il
    generatore. `_threshold_at`, `rand`, `rand_at`, `x_rand` restano puri e
@@ -87,7 +91,7 @@ Env ::= scalare                            # banda a livello costante
 
 GEN ::= values: [v, ...]                   # stesi su t_i = i/(n-1)
       | ramp:   {start, stop, step}
-      | rand:   {n, min: Env, max: Env, seed?}    # min/max ricorsivi
+      | rand:   {n, base: Env, range?: Env, seed?}   # base/range ricorsivi
 ```
 
 La forma dict si generalizza: `{type, points}` e `{type, <generatore>}` sono
@@ -107,7 +111,7 @@ Regole:
   mini-asse una sua strategy-X (tempi non equispaziati dentro la banda) è
   l'estensione naturale v2 — la forma a dict ha spazio per una chiave in più —
   ma resta fuori da questa iterazione.
-- **Ricorsione ovunque c'è un `Env`**: quindi in `min`/`max` del `rand`
+- **Ricorsione ovunque c'è un `Env`**: quindi in `base`/`range` del `rand`
   annidato stesso — profondità arbitraria. Guardia di profondità esplicita
   (proposta: 8) nella filosofia di `MAX_POINTS`: meglio un errore chiaro che
   una config degenere (gli alias YAML ricorsivi esistono).
@@ -122,11 +126,11 @@ axes:
     path: density
     rand:
       n: 40
-      min:
-        rand: {n: 6, min: 2, max: 8}       # bordo inferiore: random walk a 6 punti
-      max:
+      base:
+        rand: {n: 6, base: 2, range: 6}    # il pavimento della banda: random walk a 6 punti
+      range:
         type: step
-        rand: {n: 6, min: 10, max: 20}     # bordo superiore: salti netti
+        rand: {n: 6, base: 4, range: 10}   # la larghezza: salti netti tra 4 e 14
 ```
 
 X-rand dello stack con frequenza di generazione essa stessa stocastica — il
@@ -138,12 +142,12 @@ stack:
     rand:
       cps:
         base:
-          rand: {n: 8, min: 2, max: 6}     # la base salta tra 2 e 6 Hz
+          rand: {n: 8, base: 2, range: 4}  # la base salta tra 2 e 6 Hz
         range:
           rand:
             n: 5
-            min: 0.5
-            max:
+            base: 0.5
+            range:
               ramp: {start: 1, stop: 4, step: 1}   # terzo livello
 ```
 
@@ -151,26 +155,30 @@ stack:
 
 Musicalmente l'annidamento è **controllo della varianza a più scale
 temporali**: il `rand` esterno dà la fluttuazione punto-per-punto, il `rand`
-nel bordo dà la deriva della tessitura a media scala, un livello ancora sotto
-disegna la macro-forma. È l'idea rspline-di-rspline; col vocabolario del
-progetto: un bordo `type: step` costruisce **plateau di banda** con salti — si
-può far sedere lo stream in una regione stocastica, poi saltare a un'altra.
+annidato dà la deriva a media scala, un livello ancora sotto disegna la
+macro-forma. La scomposizione `base`/`range` del PR #9 rende le due leve
+ortogonali anche qui: annidare in `base` muove il **centro** della tessitura
+(la banda trasla come un corpo solo, larghezza intatta), annidare in `range`
+ne fa **respirare la varianza** (il centro sta fermo, la dispersione si apre e
+si chiude). È l'idea rspline-di-rspline; col vocabolario del progetto: un
+`range` con `type: step` costruisce **plateau di banda** — si fa sedere lo
+stream in una regione stocastica, poi si salta a un'altra.
 
 Casi degeneri, da documentare per onestà:
 
 - `ramp` annidato con interpolazione linear ≡ `[start, stop]`: non aggiunge
-  nulla. Il suo valore è con `type: step` (banda a scalini) o come `max` di un
-  `rand` annidato.
+  nulla. Il suo valore è con `type: step` (banda a scalini) o come `range` di
+  un `rand` annidato.
 - `values` annidato ≡ `[[t, v], ...]` con tempi equispaziati: solo comodità.
-- bordi correlati: due `rand` annidati con lo **stesso seed esplicito** e lo
-  stesso `n` pescano la stessa sequenza uniforme — banda di larghezza
-  controllata che si muove come un corpo solo. Trucco legittimo, va scritto
-  nella reference.
+- la banda che si muove a larghezza costante non richiede trucchi: `base`
+  annidato + `range` scalare. Con il vecchio vocabolario `min`/`max` sarebbe
+  servito correlare due generatori con lo stesso seed; la scomposizione del
+  PR #9 lo dà per costruzione, e l'annidamento la eredita.
 
 ## 7. Seed: derivazione gerarchica
 
 Requisiti: deterministico tra run e macchine (ciclo rigenera-e-confronta),
-decorrelato tra `min` e `max` e tra profondità, esplicito che vince ovunque.
+decorrelato tra `base` e `range` e tra profondità, esplicito che vince ovunque.
 Stessa filosofia della catena esistente (il più specifico vince; auto-derivazione
 CRC32 con salt).
 
@@ -180,13 +188,13 @@ CRC32 con salt).
 seed_figlio = stable_seed(f"{seed_effettivo_del_padre}:{path_locale}")
 ```
 
-dove `path_locale` è `min`, `max`, `cps.base`, `cps.range` (e si concatena
-scendendo: `min.max`, ...). Proprietà:
+dove `path_locale` è `base`, `range`, `cps.base`, `cps.range` (e si concatena
+scendendo: `base.range`, ...). Proprietà:
 
 - cambiare il seed esterno **riseeda l'intero sottoalbero**: l'oggetto si
   rigenera coerente;
 - fissare un seed a un nodo **congela solo quel sottoalbero**;
-- `min` e `max` si decorrelano da soli (path diversi);
+- `base` e `range` si decorrelano da soli (path diversi);
 - il padre ha sempre un seed effettivo definito, perché l'espansione avviene
   alla seam dove la catena per-asse → globale → auto per-stream è già risolta.
 
@@ -222,7 +230,7 @@ espansioni non possono divergere.
 ### Walk generico vs schema esplicito
 
 Un'alternativa più rigida: dichiarare per ogni generatore quali parametri sono
-di tipo `Env` (`ENVELOPE_PARAMS = {"rand": {"min", "max"}, ...}`) ed espandere
+di tipo `Env` (`ENVELOPE_PARAMS = {"rand": {"base", "range"}, ...}`) ed espandere
 solo quelli. Più contratto, più boilerplate, e ogni generatore futuro deve
 registrarsi due volte. Col predicato stretto del §4 il walk generico non ha
 falsi positivi sul vocabolario attuale. *(proposta: walk generico; se un giorno
@@ -231,8 +239,8 @@ un generatore avrà un parametro dict che può confondersi, si passa allo schema
 ## 9. Validazione ed errori
 
 - **path negli errori**: l'espansione porta con sé il path di config
-  (`axes.density.rand.min.rand`) e ne decora i `ValueError`; il runtime
-  `min > max al passo i` di oggi resta l'ultima rete.
+  (`axes.density.rand.base.rand`) e ne decora i `ValueError`; il runtime
+  `range negativo a frac=...` di `_band_at` resta l'ultima rete.
 - `rand` annidato senza `n` → errore al parse (§4).
 - due chiavi-generatore in un nodo → errore standard (riuso del messaggio di
   `resolve`).
@@ -245,11 +253,12 @@ un generatore avrà un parametro dict che può confondersi, si passa allo schema
 
 - unit espansione: `values`/`ramp`/`rand` annidati → breakpoint attesi; nodo
   con `type: step`; profondità 3; passthrough delle forme statiche esistenti.
-- seed: stessa config → stessi breakpoint tra due run; `min`/`max` decorrelati
-  di default; seed esplicito nel nodo vince; cambiare il seed esterno cambia il
-  sottoalbero; bordi correlati con seed uguale.
+- seed: stessa config → stessi breakpoint tra due run; `base`/`range`
+  decorrelati di default; seed esplicito nel nodo vince; cambiare il seed
+  esterno cambia il sottoalbero; banda a larghezza costante con `base` annidato
+  e `range` scalare.
 - errori: `rand` annidato senza `n`; due chiavi-generatore; profondità oltre
-  guardia; `min > max` con path nel messaggio.
+  guardia; `range` negativo con path nel messaggio.
 - integrazione stack: study di prova con nested in `cps.base` → `stack.yml`
   identico tra due generazioni; le combinazioni di n-ownership esistenti non
   cambiano output (regressione con i 4 study `study_stack_test_*`).
