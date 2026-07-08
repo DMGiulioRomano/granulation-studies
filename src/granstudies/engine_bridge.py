@@ -82,13 +82,24 @@ def render(
     output_path: str,
     samples_dir: str,
     output_sr: int = 48000,
+    per_stream: bool = False,
+    use_cache: bool = False,
+    cache_dir: Optional[str] = None,
 ) -> List[str]:
     """Renderizza un YAML in audio con il renderer NumPy.
 
     Replica la costruzione del renderer NumPy di ``main._build_renderer`` ma con
     la directory dei sample configurabile (``samples/`` invece di ``refs/``).
 
-    Returns: lista dei path audio generati.
+    ``per_stream``: STEMS mode (un file per stream, engine/src/main.py
+    ``--per-stream``) invece del MIX unico di default. ``use_cache`` attiva il
+    caching incrementale per-stream dell'engine (``StreamCacheManager``): solo
+    gli stream con fingerprint cambiato vengono ri-renderizzati. Ha effetto
+    solo in combinazione con ``per_stream`` (e' l'unico caso con build
+    incrementale per stream, vedi engine ``main.py``).
+
+    Returns: lista dei path audio generati (1 elemento in MIX mode, N in
+    STEMS mode).
     """
     _ensure_engine_on_path()
     gen = load_generator(yaml_path, samples_dir=samples_dir)
@@ -98,7 +109,7 @@ def render(
     from rendering.numpy_window_registry import NumpyWindowRegistry
     from rendering.audio_format import DEFAULT_FORMAT
     from rendering.rendering_engine import RenderingEngine
-    from rendering.render_mode import MixRenderMode
+    from rendering.render_mode import StemsRenderMode, MixRenderMode
     from rendering.naming_strategy import DefaultNamingStrategy
 
     base_path = samples_dir if samples_dir.endswith(os.sep) else samples_dir + os.sep
@@ -109,13 +120,23 @@ def render(
         if ftype == "sample":
             sample_reg.load(name)
 
+    cache_manager = None
+    if use_cache:
+        from rendering.stream_cache_manager import StreamCacheManager
+
+        yaml_basename = os.path.splitext(os.path.basename(yaml_path))[0]
+        cdir = cache_dir or "cache"
+        os.makedirs(cdir, exist_ok=True)
+        cache_path = os.path.join(cdir, f"{yaml_basename}.json")
+        cache_manager = StreamCacheManager(cache_path=cache_path)
+
     renderer = RendererFactory.create(
         "numpy",
         sample_registry=sample_reg,
         window_registry=window_reg,
         table_map=table_map,
         output_sr=output_sr,
-        cache_manager=None,
+        cache_manager=cache_manager,
         stream_data_map=gen.stream_data_map,
         audio_format=DEFAULT_FORMAT,
     )
@@ -123,9 +144,8 @@ def render(
         renderer, naming_strategy=DefaultNamingStrategy(ext=DEFAULT_FORMAT.extension)
     )
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-    return engine.render(
-        streams=gen.streams, output_path=output_path, mode=MixRenderMode()
-    )
+    mode = StemsRenderMode() if per_stream else MixRenderMode()
+    return engine.render(streams=gen.streams, output_path=output_path, mode=mode)
 
 
 def score_pdf(

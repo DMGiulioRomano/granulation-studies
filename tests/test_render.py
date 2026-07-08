@@ -141,7 +141,8 @@ def test_dump_preserves_mtime_when_unchanged(tmp_path):
 
 
 def _fake_engine_render(calls):
-    def fake(yaml_path, output_path, samples_dir, output_sr=48000):
+    def fake(yaml_path, output_path, samples_dir, output_sr=48000,
+             per_stream=False, use_cache=False, cache_dir=None):
         calls.append(yaml_path)
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
         with open(output_path, "w") as fh:

@@ -165,7 +165,8 @@ def cmd_stack(study: str) -> int:
 
 
 def cmd_render(
-    study: str, no_score: bool, force: bool = False, jobs: int | None = None
+    study: str, no_score: bool, force: bool = False, jobs: int | None = None,
+    stem: bool = False, cache: bool = False, cache_dir: str | None = None,
 ) -> int:
     from .render import render_variants
 
@@ -185,6 +186,9 @@ def cmd_render(
         samples_dir=samples_dir(spec.samples_dir),
         force=force,
         jobs=jobs,
+        per_stream=stem,
+        use_cache=cache,
+        cache_dir=cache_dir or os.path.join(g, "cache"),
     )
     elapsed = time.perf_counter() - t0
     tempo = f"{elapsed:.1f}s" if elapsed < 60 else f"{int(elapsed // 60)}m{elapsed % 60:04.1f}s"
@@ -291,12 +295,13 @@ def cmd_compose(study: str, seed: int | None, steps: int | None, start: str | No
     return 0
 
 
-def _cmd_sv_stack(g: str, layout: str, total: list) -> int:
-    """Emette il .sv del documento stack (yaml/stack/stack.yml + audio/stack/stack.aif)."""
-    from .sv_export import stack_to_sv
+def _cmd_sv_stack(study: str, g: str, layout: str, total: list) -> int:
+    """Emette i .sv del documento stack: uno contro il mix, uno contro gli stem."""
+    from .sv_export import stack_to_sv, stack_stems_to_sv
 
     variant = os.path.join(g, "yaml", "stack", "stack.yml")
-    audio = os.path.join(g, "audio", "stack", "stack.aif")
+    audio_dir = os.path.join(g, "audio", "stack")
+    audio = os.path.join(audio_dir, "stack.aif")
     if not os.path.exists(variant):
         print("[sv] nessun documento stack: esegui prima 'stack'.", file=sys.stderr)
         return 0
@@ -304,10 +309,16 @@ def _cmd_sv_stack(g: str, layout: str, total: list) -> int:
         print("[sv] audio stack mancante: esegui prima 'render'.", file=sys.stderr)
         return 0
     suffix = f"_{layout}" if layout == "single" else ""
-    out = os.path.join(g, "sv", "stack", "stack" + suffix + ".sv")
+    out = os.path.join(g, "sv", "stack", f"{study}_stack" + suffix + ".sv")
     stack_to_sv(variant, audio, out, layout=layout)
     total.append(out)
     print(f"[sv] {out}")
+
+    # Un pane per stem (audio separato per stream): richiede 'render --stem'.
+    stems_out = os.path.join(g, "sv", "stack", f"{study}_stack_stems.sv")
+    if stack_stems_to_sv(variant, audio_dir, stems_out):
+        total.append(stems_out)
+        print(f"[sv] {stems_out}")
     return 1
 
 
@@ -323,7 +334,7 @@ def cmd_sv(study: str, layout: str, markers: bool = True, stream: str | None = N
     # audio sommato. Attivo per presenza del blocco (come cmd_stack); i flag
     # marker/scope restano sul solo ramo sweep (i marker sono plateau-di-sweep).
     if "stack" in data and stream is None:
-        _cmd_sv_stack(g, layout, total)
+        _cmd_sv_stack(study, g, layout, total)
         if "sweep" not in data:
             print(f"[sv] {len(total)} sessioni totali")
             return 0
@@ -348,8 +359,9 @@ def cmd_sv(study: str, layout: str, markers: bool = True, stream: str | None = N
             if not fname.endswith(".yml"):
                 continue
             variant_name = fname[:-4]
-            # Il basename include il nome dello stream per distinguere i file in SV.
-            basename = f"{sub}_{variant_name}" if sub else variant_name
+            # Il basename include lo studio (per distinguerlo aprendo piu' .sv
+            # in Sonic Visualiser) e lo stream (per distinguere i file in SV).
+            basename = f"{study}_{sub}_{variant_name}" if sub else f"{study}_{variant_name}"
             audio = os.path.join(audio_dir, basename + ".aif")
             if not os.path.exists(audio):
                 print(f"[sv] {basename}: audio mancante, salto.", file=sys.stderr)
@@ -397,6 +409,16 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--no-score", action="store_true", help="salta i PDF di partitura")
     rp.add_argument("--force", action="store_true",
                     help="rirenderizza anche le varianti gia' aggiornate")
+    rp.add_argument("--stem", "--per-stream", dest="stem", action="store_true", default=True,
+                    help="STEMS mode oltre al mix: un file audio anche per stream (default: attivo)")
+    rp.add_argument("--no-stem", "--no-per-stream", dest="stem", action="store_false",
+                    help="disattiva la pass STEMS, genera solo il mix")
+    rp.add_argument("--cache", action="store_true", default=True,
+                    help="caching incrementale per-stream dell'engine (default: attivo, con --stem)")
+    rp.add_argument("--no-cache", dest="cache", action="store_false",
+                    help="disattiva il caching incrementale per gli stem")
+    rp.add_argument("--cache-dir", default=None,
+                    help="directory manifest cache (default: <study>/generated/cache)")
     rp.add_argument("--jobs", type=int, default=None,
                     help="numero di render in parallelo (default: min(8, cpu))")
 
@@ -436,7 +458,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "stack":
         return cmd_stack(args.study)
     if args.command == "render":
-        return cmd_render(args.study, args.no_score, args.force, args.jobs)
+        return cmd_render(args.study, args.no_score, args.force, args.jobs,
+                          args.stem, args.cache, args.cache_dir)
     if args.command == "describe":
         return cmd_describe(args.study)
     if args.command == "matrix":
