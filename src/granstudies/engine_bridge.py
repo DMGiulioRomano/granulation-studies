@@ -1,10 +1,13 @@
 """Ponte verso PythonGranularEngine (incluso come submodule in ``engine/``).
 
-L'engine non e' un pacchetto installabile: si usa inserendo ``engine/src`` in
-``sys.path`` (stesso pattern di ``engine/src/main.py``). Questo modulo isola
-quella dipendenza e offre due operazioni di alto livello — ``render`` (YAML ->
-audio NumPy) e ``score_pdf`` (YAML -> partitura) — piu' l'accesso ai bounds dei
-parametri, single source of truth condivisa con l'engine.
+Dall'introduzione dell'API programmatica ``pge.api`` (refactor library/CLI
+dell'engine, Fasi 1-4) questo modulo e' un wrapper sottile: niente piu'
+replica di ``main._build_renderer`` ne' monkey-patch di ``PATHSAMPLES`` —
+la directory dei sample viaggia come parametro ``samples_dir`` dell'API.
+
+Resta ``_ensure_engine_on_path`` perche' il submodule non e' installato nel
+venv: si usa inserendo ``engine/src`` in ``sys.path`` (in alternativa si
+potrebbe fare ``pip install -e engine/``; decisione rimandata).
 """
 from __future__ import annotations
 
@@ -29,34 +32,17 @@ def _ensure_engine_on_path() -> None:
 
 
 def _silence_loggers(log_dir: str) -> None:
-    """Disattiva il logging su console dell'engine, file su ``log_dir``."""
-    from shared.logger import configure_clip_logger, configure_engine_logger
+    """Disattiva il logging su console dell'engine, file su ``log_dir``.
+
+    I ``configure_*`` sono API pubblica dell'engine: vanno chiamati prima
+    di ``load_generator`` (la libreria non configura mai i logger da se').
+    """
+    from pge import configure_clip_logger, configure_engine_logger
 
     configure_clip_logger(
         enabled=False, console_enabled=False, file_enabled=False
     )
     configure_engine_logger(yaml_name="granstudies", log_dir=log_dir)
-
-
-def _patch_sample_path(samples_dir: str) -> str:
-    """Reindirizza il lookup dei sample dell'engine verso ``samples_dir``.
-
-    L'engine risolve i sample tramite la costante di modulo ``PATHSAMPLES``
-    (``./refs/``), letta a runtime sia in ``shared.utils`` che in
-    ``rendering.score_visualizer``. La riscriviamo per puntare al corpus dello
-    studio senza modificare il submodule. Ritorna il path con separatore finale.
-    """
-    base = samples_dir if samples_dir.endswith(os.sep) else samples_dir + os.sep
-    import shared.utils as _utils
-
-    _utils.PATHSAMPLES = base
-    try:
-        import rendering.score_visualizer as _sv
-
-        _sv.PATHSAMPLES = base
-    except Exception:
-        pass
-    return base
 
 
 def load_generator(
@@ -67,14 +53,9 @@ def load_generator(
     """Carica un Generator dell'engine con streams gia' materializzati."""
     _ensure_engine_on_path()
     _silence_loggers(log_dir or os.path.join(REPO_ROOT, "generated", ".logs"))
-    if samples_dir:
-        _patch_sample_path(samples_dir)
-    from engine.generator import Generator
+    from pge import api
 
-    gen = Generator(str(yaml_path))
-    gen.load_yaml()
-    gen.create_elements()
-    return gen
+    return api.load_generator(str(yaml_path), samples_dir=samples_dir)
 
 
 def render(
@@ -83,49 +64,23 @@ def render(
     samples_dir: str,
     output_sr: int = 48000,
 ) -> List[str]:
-    """Renderizza un YAML in audio con il renderer NumPy.
-
-    Replica la costruzione del renderer NumPy di ``main._build_renderer`` ma con
-    la directory dei sample configurabile (``samples/`` invece di ``refs/``).
+    """Renderizza un YAML in audio con il renderer NumPy (MIX).
 
     Returns: lista dei path audio generati.
     """
     _ensure_engine_on_path()
-    gen = load_generator(yaml_path, samples_dir=samples_dir)
+    _silence_loggers(os.path.join(REPO_ROOT, "generated", ".logs"))
+    from pge import api
 
-    from rendering.renderer_factory import RendererFactory
-    from rendering.sample_registry import SampleRegistry
-    from rendering.numpy_window_registry import NumpyWindowRegistry
-    from rendering.audio_format import DEFAULT_FORMAT
-    from rendering.rendering_engine import RenderingEngine
-    from rendering.render_mode import MixRenderMode
-    from rendering.naming_strategy import DefaultNamingStrategy
-
-    base_path = samples_dir if samples_dir.endswith(os.sep) else samples_dir + os.sep
-    table_map = gen.ftable_manager.get_all_tables()
-    sample_reg = SampleRegistry(base_path=base_path)
-    window_reg = NumpyWindowRegistry()
-    for _, (ftype, name) in table_map.items():
-        if ftype == "sample":
-            sample_reg.load(name)
-
-    renderer = RendererFactory.create(
-        "numpy",
-        sample_registry=sample_reg,
-        window_registry=window_reg,
-        table_map=table_map,
-        output_sr=output_sr,
-        cache_manager=None,
-        stream_data_map=gen.stream_data_map,
-        audio_format=DEFAULT_FORMAT,
-    )
-    engine = RenderingEngine(
-        renderer, naming_strategy=DefaultNamingStrategy(ext=DEFAULT_FORMAT.extension)
-    )
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-    return engine.render(
-        streams=gen.streams, output_path=output_path, mode=MixRenderMode()
+    result = api.render_file(
+        str(yaml_path),
+        str(output_path),
+        renderer="numpy",
+        samples_dir=samples_dir,
+        output_sr=output_sr,
     )
+    return result.audio_paths
 
 
 def score_pdf(
@@ -136,28 +91,18 @@ def score_pdf(
 ) -> str:
     """Esporta la partitura grafica (PDF) di un YAML via ScoreVisualizer."""
     gen = load_generator(yaml_path, samples_dir=samples_dir)
-    from rendering.score_visualizer import ScoreVisualizer
+    from pge import api
 
-    cfg = {
-        "page_duration": 15.0,
-        "show_static_params": False,
-        "show_voice_offsets": False,
-        "envelope_filter": None,
-        "magnify_auto": False,
-        "magnify_targets": [],
-    }
-    if config:
-        cfg.update(config)
     os.makedirs(os.path.dirname(os.path.abspath(pdf_path)), exist_ok=True)
-    viz = ScoreVisualizer(gen, config=cfg)
-    viz.export_pdf(str(pdf_path))
-    return pdf_path
+    return api.export_score_pdf(
+        gen, str(pdf_path), config=config, samples_dir=samples_dir
+    )
 
 
 def parameter_bounds() -> dict:
     """Ritorna il registry ``GRANULAR_PARAMETERS`` dell'engine."""
     _ensure_engine_on_path()
-    from parameters.parameter_definitions import GRANULAR_PARAMETERS
+    from pge.parameters.parameter_definitions import GRANULAR_PARAMETERS
 
     return GRANULAR_PARAMETERS
 
@@ -172,7 +117,7 @@ def parameter_defaults() -> dict:
     richiedono un baseline esplicito.
     """
     _ensure_engine_on_path()
-    from parameters.parameter_schema import ALL_SCHEMAS
+    from pge.parameters.parameter_schema import ALL_SCHEMAS
 
     out: dict = {}
     for schema in ALL_SCHEMAS.values():
