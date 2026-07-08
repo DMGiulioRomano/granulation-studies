@@ -1,23 +1,22 @@
-"""Generatori di valori d'asse (strategy pattern).
+"""Generatori di valori d'asse.
 
-Un asse di uno studio elenca i valori di test. Oltre alla lista esplicita
-(``values: [...]``) si puo' generare la sequenza con una *strategia*: la chiave
-YAML e' il nome della strategia (``ramp: {...}``) e ``GENERATORS`` fa da
-registry ``nome -> funzione``. Ogni strategia e' una funzione pura
-``**params -> List[float]``: niente stato, nessun factory: aggiungere una
-strategia = una funzione + una riga in ``GENERATORS``.
+Un asse di uno studio elenca i valori di test. Il generatore si riconosce dalla
+*forma* delle chiavi (non piu' da un nome-wrapper): ``values`` (lista esplicita),
+``ramp`` (griglia aritmetica) o ``base`` (la banda ``[base, base+range]``, piatta
+sull'asse). ``y_generator`` estrae la chiave canonica e i parametri; ogni
+generatore e' una funzione pura ``**params -> List[float]`` (niente stato).
 """
 from __future__ import annotations
 
 import math
 import random
 import zlib
-from typing import Any, Callable, Dict, List, Sequence, Union
+from typing import Any, Dict, List, Sequence, Union
 
 Threshold = Union[float, Sequence[float], Dict[str, Any]]
 
-# I generatori rand hanno un parametro YAML che si chiama ``range``: alias del
-# builtin per l'uso interno.
+# La banda ha un parametro YAML che si chiama ``range``: alias del builtin per
+# l'uso interno.
 _range = range
 
 
@@ -46,10 +45,20 @@ def ramp(start: float, stop: float, step: float) -> List[float]:
     return [round(start + sign * step * i, 9) for i in range(n + 1)]
 
 
-def _interp_breakpoints(pts: Sequence[Sequence[float]], frac: float, kind: str = "linear") -> float:
+def _interp_breakpoints(
+    pts: Sequence[Sequence[float]], frac: float, kind: str = "linear", curve: float = 1.0
+) -> float:
     """Soglia su ``[[t, v], ...]`` (t in ``[0, 1]``) al punto ``frac``, con hold
     fuori dai bordi. ``kind``: ``linear`` (rampa tra i punti) o ``step`` (tieni
-    il valore sinistro, salta al breakpoint)."""
+    il valore sinistro, salta al breakpoint).
+
+    ``curve`` piega la frazione locale del segmento prima di interpolare
+    (``u' = u^k``): ``1`` = lineare (default), ``> 1`` parte lento e accelera in
+    coda, ``< 1`` parte ripido e si appiattisce. Agisce solo sulla rampa
+    (``kind == linear``): con ``step`` non c'e' rampa da piegare. Un ``curve``
+    non positivo e' un errore di configurazione (potenza degenere)."""
+    if curve <= 0:
+        raise ValueError(f"curve deve essere > 0 (ricevuto {curve}).")
     pts = sorted(pts, key=lambda p: p[0])
     if frac <= pts[0][0]:
         return pts[0][1]
@@ -59,7 +68,12 @@ def _interp_breakpoints(pts: Sequence[Sequence[float]], frac: float, kind: str =
         if t0 <= frac <= t1:
             if kind == "step":
                 return v0
-            return v0 if t1 == t0 else v0 + (v1 - v0) * (frac - t0) / (t1 - t0)
+            if t1 == t0:
+                return v0
+            u = (frac - t0) / (t1 - t0)
+            if curve != 1.0:
+                u = u ** curve
+            return v0 + (v1 - v0) * u
     return pts[-1][1]  # irraggiungibile: frac e' tra primo e ultimo t
 
 
@@ -68,11 +82,20 @@ def _threshold_at(spec: Threshold, frac: float) -> float:
 
     E' un envelope di secondo ordine (una banda che genera valori). Forme:
     scalare -> costante; ``[a, b]`` (due scalari) -> lineare ``a -> b``;
-    ``[[t, v], ...]`` -> breakpoint temporizzati (linear); ``{type, points}`` ->
-    breakpoint con ``type`` d'interpolazione esplicito (``linear`` | ``step``).
+    ``[[t, v], ...]`` -> breakpoint temporizzati (linear); ``{type, points, curve}``
+    -> breakpoint con ``type`` d'interpolazione esplicito (``linear`` | ``step``)
+    ed eventuale ``curve`` (piega non lineare ``u^k`` del segmento). ``curve`` con
+    ``type: step`` e' un errore: step non ha rampa da piegare.
     """
     if isinstance(spec, dict):
-        return _interp_breakpoints(spec["points"], frac, spec.get("type", "linear"))
+        kind = spec.get("type", "linear")
+        curve = spec.get("curve", 1.0)
+        if kind == "step" and curve != 1.0:
+            raise ValueError(
+                "curve non ha effetto con 'type: step' (nessuna rampa da piegare): "
+                "usa 'type: linear' o togli 'curve'."
+            )
+        return _interp_breakpoints(spec["points"], frac, kind, curve)
     if not isinstance(spec, (list, tuple)):
         return spec
     if all(isinstance(p, (list, tuple)) for p in spec):
@@ -83,7 +106,7 @@ def _threshold_at(spec: Threshold, frac: float) -> float:
 
 def _band_at(base: Threshold, spread: Threshold, frac: float, where: str) -> tuple:
     """Banda ``[lo, hi]`` al punto ``frac``: ``lo = base(frac)``,
-    ``hi = lo + range(frac)``. Stessa semantica della ``cps`` di X-rand."""
+    ``hi = lo + range(frac)``. Stessa semantica della banda di X."""
     lo = _threshold_at(base, frac)
     hi = lo + _threshold_at(spread, frac)
     if hi < lo:
@@ -91,7 +114,7 @@ def _band_at(base: Threshold, spread: Threshold, frac: float, where: str) -> tup
     return lo, hi
 
 
-def rand(n: int, base: Threshold, range: Threshold = 0.0, seed: int = 0) -> List[float]:
+def band(n: int, base: Threshold, range: Threshold = 0.0, seed: int = 0) -> List[float]:
     """``n`` valori casuali entro una banda ``[base, base + range]`` mobile.
 
     ``base``/``range`` scalari = banda fissa; ``[a, b]`` = banda che scorre/si
@@ -102,54 +125,89 @@ def rand(n: int, base: Threshold, range: Threshold = 0.0, seed: int = 0) -> List
     rigenera-e-confronta.
     """
     if n < 1:
-        raise ValueError(f"rand: n deve essere >= 1 (ricevuto {n})")
+        raise ValueError(f"band: n deve essere >= 1 (ricevuto {n})")
     rng = random.Random(seed)
     out: List[float] = []
     for i in _range(n):
         frac = i / (n - 1) if n > 1 else 0.0
-        lo, hi = _band_at(base, range, frac, "rand")
+        lo, hi = _band_at(base, range, frac, "band")
         out.append(round(rng.uniform(lo, hi), 9))
     return out
 
 
-def rand_at(
+def band_at(
     fracs: Sequence[float], base: Threshold, range: Threshold = 0.0, seed: int = 0
 ) -> List[float]:
     """Un valore casuale nella banda ``[base, base + range]`` per ogni ``frac``.
 
-    Variante di ``rand`` per il coupling con la X-rand (stack): quando la X
+    Variante di ``band`` per il coupling con la X-walk (stack): quando la X
     possiede ``n``, la banda va campionata al tempo *reale* ``t_i`` di ogni
     breakpoint, non all'indice ``i/(n-1)``. La Y non possiede ``n``: pesca un
     valore per ogni punto che la X ha creato. Deterministico via ``seed``.
     """
     if not fracs:
-        raise ValueError("rand_at: serve almeno un frac (lista vuota).")
+        raise ValueError("band_at: serve almeno un frac (lista vuota).")
     rng = random.Random(seed)
     out: List[float] = []
     for frac in fracs:
-        lo, hi = _band_at(base, range, frac, "rand_at")
+        lo, hi = _band_at(base, range, frac, "band_at")
         out.append(round(rng.uniform(lo, hi), 9))
     return out
 
 
-GENERATORS: Dict[str, Callable[..., List[float]]] = {"ramp": ramp, "rand": rand}
+# Le chiavi che marcano il generatore Y di un asse (mutuamente esclusive): la
+# lista esplicita ``values``, la griglia ``ramp``, e ``base`` (la banda piatta —
+# non piu' un wrapper ``rand:``, ma la coppia base/range direttamente sull'asse).
+Y_GENERATOR_KEYS = frozenset({"values", "ramp", "base"})
+
+# Chiavi che accompagnano ``base`` nella banda piatta (viaggiano con essa).
+_BAND_KEYS = frozenset({"base", "range", "n", "seed"})
+
+
+def y_generator(cfg: Dict[str, Any]) -> tuple:
+    """(chiave canonica, params) del generatore Y di un asse piatto.
+
+    Riconosce il generatore dalla *forma*: esattamente una tra ``values``,
+    ``ramp``, ``base``. La chiave canonica restituita e' ``values`` | ``ramp`` |
+    ``band``; per la banda raccoglie ``base``/``range``/``n``/``seed`` (le chiavi
+    piatte dell'asse) in un dict. Zero o piu' di un marcatore e' errore.
+    """
+    if "rand" in cfg:
+        raise ValueError(
+            "il wrapper 'rand:' non esiste piu': dichiara la banda piatta "
+            "(base/range/n/seed direttamente sull'asse). Es. 'rand: {n, base, "
+            "range}' -> 'n: ...', 'base: ...', 'range: ...'."
+        )
+    markers = [k for k in cfg if k in Y_GENERATOR_KEYS]
+    if len(markers) != 1:
+        opts = ", ".join(sorted(Y_GENERATOR_KEYS))
+        raise ValueError(
+            f"asse: serve esattamente una chiave-generatore tra {{{opts}}}, "
+            f"trovate {sorted(markers) or 'nessuna'}."
+        )
+    marker = markers[0]
+    if marker == "values":
+        return "values", list(cfg["values"])
+    if marker == "ramp":
+        return "ramp", dict(cfg["ramp"])
+    return "band", {k: cfg[k] for k in _BAND_KEYS if k in cfg}
 
 
 def resolve(cfg: Dict[str, Any]) -> List[float]:
-    """Risolve la lista di valori di un asse scegliendo la strategia dalla chiave.
+    """Risolve la lista di valori di un asse scegliendo il generatore dalla forma.
 
-    Le chiavi-generatore sono ``values`` (lista esplicita) e i nomi in
-    ``GENERATORS`` (``ramp``, ...). Deve essercene esattamente una: zero o piu'
-    di una e' un errore di configurazione.
+    Le chiavi-generatore sono ``values`` (lista esplicita), ``ramp`` (griglia) e
+    ``base`` (banda piatta). Deve essercene esattamente una. La banda richiede
+    ``n`` quando e' la Y a possedere il conteggio (fuori dal coupling con X-walk).
     """
-    keys = [k for k in cfg if k == "values" or k in GENERATORS]
-    if len(keys) != 1:
-        opts = ", ".join(["values", *GENERATORS])
-        raise ValueError(
-            f"asse: serve esattamente una chiave-generatore tra {{{opts}}}, "
-            f"trovate {sorted(keys) or 'nessuna'}."
-        )
-    key = keys[0]
+    key, params = y_generator(cfg)
     if key == "values":
-        return list(cfg["values"])
-    return GENERATORS[key](**cfg[key])
+        return params
+    if key == "ramp":
+        return ramp(**params)
+    if "n" not in params:
+        raise ValueError(
+            "banda: 'n' obbligatorio quando la Y possiede il conteggio "
+            "(omesso solo con la X-walk nel blocco 'stack:')."
+        )
+    return band(**params)
