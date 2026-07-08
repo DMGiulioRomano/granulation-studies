@@ -5,11 +5,11 @@
 # coppia (Y + X) di un asse via `_deep_merge`/`_replace_generators`:
 #   - X-linear + Y `values`            (n dalla Y, default del documento)
 #   - X-linear + Y `ramp`              (n dalla Y)
-#   - X-linear + Y `rand` CON `n`      (rand a n fisso, tempi equispaziati)
-#   - X-rand   + Y `rand` SENZA `n`    (rspline: la X possiede n)
+#   - X-linear + Y banda CON `n`       (banda a n fisso, tempi equispaziati)
+#   - X-walk   + Y banda SENZA `n`     (rspline: la X possiede n)
 #   - stream tutto-scalare (drone)     (nessun asse animato)
 #
-# Le combinazioni illegali (X-rand + Y con n; X-linear + Y-rand senza n) NON
+# Le combinazioni illegali (X-walk + Y con n; X-linear + banda senza n) NON
 # sono qui: falliscono al parse per invariante di n-ownership.
 #
 #   make stack STUDY=study_stack_test_4
@@ -49,31 +49,27 @@ streams:
   # Combinazione di partenza: values + ramp, entrambe X-linear.
   linear_values_ramp: {}
 
-  # density passa a Y-rand CON n fisso + X-linear (tempi equispaziati, valori
+  # density passa a banda Y CON n fisso + X-linear (tempi equispaziati, valori
   # casuali riproducibili dal seed-Y globale).
-  rand_con_n:
+  banda_con_n:
     axes:
       density:
-        rand:
-          n: 12
-          base: [[0, 8], [1, 2]]
-          range: [[0, 12], [1, 4]]
+        n: 12
+        base: [[0, 8], [1, 2]]
+        range: [[0, 12], [1, 4]]
 
-  # density passa a rspline: override SIMULTANEO di axes (Y-rand senza n) e stack
-  # (X-rand). E' la coppia che _replace_generators deve sostituire su entrambi i
+  # density passa a rspline: override SIMULTANEO di axes (banda senza n) e stack
+  # (X-walk). E' la coppia che _replace_generators deve sostituire su entrambi i
   # blocchi.
   rspline:
     axes:
       density:
-        rand:
-          base: [[0, 10], [1, 3]]
-          range: [[0, 10], [1, 3]]
+        base: [[0, 10], [1, 3]]
+        range: [[0, 10], [1, 3]]
     stack:
       density:
-        rand:
-          cps:
-            base:  [[0, 5], [1, 5]]
-            range: [[0, 1], [1, 1]]
+        base:  [[0, 5], [1, 5]]
+        range: [[0, 1], [1, 1]]
 
   # Drone tutto-scalare: coesiste con gli stream animati nello stesso documento.
   drone:

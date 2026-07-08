@@ -17,17 +17,19 @@ from typing import Any, Dict, List
 
 from . import bounds as bounds_mod
 from .study_spec import StudySpec
-from .value_generators import GENERATORS, rand_at
-from .x_strategies import rand as x_rand
-from .x_strategies import resolve_x, x_owns_n
+from .value_generators import band, band_at, ramp
+from .x_strategies import resolve_x, walk, x_owns_n
 from .yaml_builder import build_multi_document, build_stream
 
-# Le chiavi-generatore di Y ammesse in un asse (vocabolario condiviso con sweep).
-_Y_KEYS = frozenset({"values", *GENERATORS})
+# Le chiavi-generatore di Y ammesse in un asse, in forma *canonica* (quella con
+# cui ``study_spec`` popola ``Axis.generator``): la banda ha chiave ``band``,
+# non piu' ``rand``. Nello YAML la banda si riconosce invece dalla presenza di
+# ``base`` (vedi ``value_generators.y_generator``).
+_Y_KEYS = frozenset({"values", "ramp", "band"})
 
 
 def _y_generator(y_cfg: Dict[str, Any]) -> tuple[str, Any]:
-    """Estrae (nome, params) dell'unica chiave-generatore Y di un asse."""
+    """Estrae (nome canonico, params) dell'unica chiave-generatore Y di un asse."""
     keys = [k for k in y_cfg if k in _Y_KEYS]
     if len(keys) != 1:
         opts = ", ".join(sorted(_Y_KEYS))
@@ -50,12 +52,12 @@ def axis_envelope(
 
     Due versi, decisi dalla n-ownership (validata in entrambi):
 
-    - **X possiede n** (strategy ``rand``): i tempi emergono dalla frequenza
-      (``x_strategies.rand``); la Y deve essere ``rand`` *senza* ``n`` e viene
-      campionata ai tempi reali dei punti (``rand_at``). E' rspline.
-    - **Y possiede n** (``values``/``ramp``/``rand`` con ``n``): i valori si
+    - **X possiede n** (camminata ``walk``, banda ``base`` nel blocco stack): i
+      tempi emergono dalla frequenza; la Y deve essere una banda *senza* ``n`` e
+      viene campionata ai tempi reali dei punti (``band_at``). E' la rspline.
+    - **Y possiede n** (``values``/``ramp``/banda con ``n``): i valori si
       risolvono per primi e la X distribuisce ``len(values)`` tempi
-      (``resolve_x``, default ``linear``).
+      (``resolve_x``, ``linear`` per assenza dal blocco).
 
     ``y_seed``/``x_seed`` sono i default globali gia' risolti a monte (catena di
     precedenza in ``study_spec``): il ``seed`` dichiarato dentro la config
@@ -64,33 +66,34 @@ def axis_envelope(
     y_key, y_params = _y_generator(y_cfg)
 
     if x_owns_n(x_cfg):
-        if y_key != "rand" or "n" in y_params:
+        if y_key != "band" or "n" in y_params:
             raise ValueError(
-                "stack: la strategy-X 'rand' possiede n — la Y deve essere "
-                f"'rand' senza 'n' (trovata '{y_key}'"
-                + (" con 'n'" if y_key == "rand" and "n" in y_params else "")
+                "stack: la camminata-X (banda 'base') possiede n — la Y deve "
+                f"essere una banda senza 'n' (trovata '{y_key}'"
+                + (" con 'n'" if y_key == "band" and "n" in y_params else "")
                 + ")."
             )
-        x_params = dict(x_cfg["rand"])
+        x_params = dict(x_cfg)
         x_params.setdefault("seed", x_seed)
-        times = x_rand(duration=duration, **x_params)
+        times = walk(duration=duration, **x_params)
         y_kwargs = dict(y_params)
         y_kwargs.setdefault("seed", y_seed)
-        values = rand_at(times, **y_kwargs)
+        values = band_at(times, **y_kwargs)
         return [[t, v] for t, v in zip(times, values)]
 
-    if y_key == "rand" and "n" not in y_params:
+    if y_key == "band" and "n" not in y_params:
         raise ValueError(
-            "stack: Y 'rand' senza 'n' richiede la strategy-X 'rand' "
-            "(e' la X a possedere n); con X lineare dichiara 'n' nella Y."
+            "stack: banda Y senza 'n' richiede la camminata-X (banda 'base' nel "
+            "blocco 'stack:'); con X lineare dichiara 'n' nella banda Y."
         )
     if y_key == "values":
         values = list(y_params)
-    else:
+    elif y_key == "ramp":
+        values = ramp(**y_params)
+    else:  # band con n
         y_kwargs = dict(y_params)
-        if y_key == "rand":
-            y_kwargs.setdefault("seed", y_seed)
-        values = GENERATORS[y_key](**y_kwargs)
+        y_kwargs.setdefault("seed", y_seed)
+        values = band(**y_kwargs)
     times = resolve_x(x_cfg, n=len(values))
     return [[t, v] for t, v in zip(times, values)]
 

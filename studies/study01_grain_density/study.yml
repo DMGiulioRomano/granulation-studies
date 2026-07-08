@@ -120,7 +120,7 @@ streams:
     sweep:
       orders: []
       orderings: []
-  # Due bande rand che si muovono insieme, morbide (cubic). Migrata da sweep
+  # Due bande che si muovono insieme, morbide (cubic). Migrata da sweep
   # (ex combine: parallel) a stack: stesso n (50) e stessa X linear -> stessi
   # tempi, valori appaiati. Confronto con lettura_avanzata / _b a parità di
   # pointer.start. Fuori dallo sweep: vive solo nel documento stack.
@@ -131,20 +131,18 @@ streams:
     axes:
       density:
         interpolation: cubic
-        rand:
-          n: 50
-          base: [[0, 10], [.6, 2], [1, .1]]
-          range: [[0, 10], [.6, 3], [1, 2.9]]
-          seed: 1988
-      # Prova generatore rand: banda tenuta a .003 fino al 60% della sequenza,
-      # poi si apre (base sale a .002, range si allarga a .09). Seeded = riproducibile.
+        n: 50
+        base: [[0, 10], [.6, 2], [1, .1]]
+        range: [[0, 10], [.6, 3], [1, 2.9]]
+        seed: 1988
+      # Banda piatta: tenuta a .003 fino al 60% della sequenza, poi si apre
+      # (base sale a .002, range si allarga a .09). Seeded = riproducibile.
       grain_duration:
         interpolation: cubic
-        rand:
-          n: 50
-          base: [[0, .001], [.6, .002], [1, .01]]
-          range: [[0, .001], [.6, .003], [1, .09]]
-          seed: 1988
+        n: 50
+        base: [[0, .001], [.6, .002], [1, .01]]
+        range: [[0, .001], [.6, .003], [1, .09]]
+        seed: 1988
     sweep:
       orders: []
       orderings: []

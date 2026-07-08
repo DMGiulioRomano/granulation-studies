@@ -1,16 +1,17 @@
-# TEST STACK 2 — X-strategy `rand` (rspline): la X possiede n.
+# TEST STACK 2 — camminata-X `walk` (rspline): la X possiede n.
 #
-# Copre: X-rand (tempi generati da una frequenza di generazione `cps`, n emerge
-# dalla frequenza integrata sulla durata); Y-rand SENZA n campionata ai tempi
-# reali dei punti (`rand_at`, coupling X->Y); banda `cps.base` + `cps.range` come
-# inviluppi mobili; interpolation cubic (= la spline di rspline); seed-Y globale
-# in `axes:`; seed-X globale in `stack:`; seed-X per-asse (vince sul globale);
-# un secondo asse a X-linear che coesiste (envelope indipendente, niente combine).
+# Copre: X-walk (tempi generati da una frequenza di generazione — la banda
+# `base`/`range` sotto l'asse in `stack:` — n emerge dalla frequenza integrata
+# sulla durata); banda Y SENZA n campionata ai tempi reali dei punti (coupling
+# X->Y); banda `base`/`range` come inviluppi mobili; interpolation cubic (= la
+# spline di rspline); seed-Y globale in `axes:`; seed-X globale in `stack:`;
+# seed-X per-asse (vince sul globale); un secondo asse a X-linear che coesiste
+# (envelope indipendente, niente combine).
 #
 #   make stack STUDY=study_stack_test_2
 
 study_id: study_stack_test_2
-title: "Test stack 2 — X-rand rspline, seed X e Y"
+title: "Test stack 2 — X-walk rspline, seed X e Y"
 seed: 2
 duration: 30
 samples_dir: samples
@@ -33,53 +34,44 @@ axes:
     path: density
     baseline: 20
     values: [6]
-    # Y-rand SENZA n: e' la X-rand a possedere n. Banda mobile base/range.
-    #rand:
-    #  base: [[0, 10], [.6, 2], [1, .1]]
-    #  range: [[0, 10], [.6, 3], [1, 2.9]]
+    # Banda Y SENZA n: e' la X-walk a possedere n. Banda mobile base/range.
+    #base: [[0, 10], [.6, 2], [1, .1]]
+    #range: [[0, 10], [.6, 3], [1, 2.9]]
     #interpolation: cubic     # morbidezza = spline di rspline
   grain_duration:
     path: grain.duration
-    rand:
-      base: [[0, .0010], [.6, .01], [1, 0.007]]
-      range: [[0, .0010], [.6, .02], [1, .003]]
+    base:  [[0, .0010], [.6, .01], [1, 0.007]]
+    range: [[0, .0010], [.6, .02], [1, .003]]
     interpolation: step     # morbidezza = spline di rspline
 
 stack:
-  #density:            # X-rand: la X possiede n (tempi da cps)
-  #  rand:
-  #    cps:
-  #      base:  [[0, .4], [1, 3]]    # frequenza in Hz sulla durata reale
-  #      range: [[0, .3], [1, 1]]     # banda = [base, base+range]
-  #    seed: 7          # seed-X per-asse (vince sul globale 42)
-  # grain_duration assente -> X-linear (n = 19 dalla ramp)
-  grain_duration:            # X-rand: la X possiede n (tempi da cps)
-    rand:
-      cps:
-        base:  [[0, .4], [1, 1]]    # frequenza in Hz sulla durata reale
-        range: [[0, .1], [1, .2]]     # banda = [base, base+range]
+  #density:            # X-walk: la X possiede n (tempi dalla banda base/range)
+  #  base:  [[0, .4], [1, 3]]    # frequenza in Hz sulla durata reale
+  #  range: [[0, .3], [1, 1]]     # banda = [base, base+range]
+  #  seed: 7           # seed-X per-asse (vince sul globale 42)
+  # grain_duration assente dal blocco -> resterebbe linear; qui e' presente:
+  grain_duration:            # X-walk: la X possiede n (tempi dalla banda)
+    base:  [[0, .4], [1, 1]]    # frequenza in Hz sulla durata reale
+    range: [[0, .1], [1, .2]]     # banda = [base, base+range]
 
 streams:
   # Riferimento con i seed del documento.
   base: {}
-  # Override per-stream del seed-X globale: stessi cps, tempi diversi.
+  # Override per-stream del seed-X globale: stessa banda, tempi diversi.
 
   seed_x_diverso:
     base:
       pan: 40
     stack:
       seed: 43
-      density:            # X-rand: la X possiede n (tempi da cps)
-        rand:
-          cps:
-            base:  [[0, .4], [1, 3]]    # frequenza in Hz sulla durata reale
-            range: [[0, .3], [1, 1]]     # banda = [base, base+range]
+      density:            # X-walk: la X possiede n (tempi dalla banda)
+        base:  [[0, .4], [1, 3]]    # frequenza in Hz sulla durata reale
+        range: [[0, .3], [1, 1]]     # banda = [base, base+range]
 
     axes:
       density:
-        rand:
-          base: [[0, 9], [.6, 7], [1, 8]]
-          range: [[0, 1], [.6, 1], [1, 2]]
+        base:  [[0, 9], [.6, 7], [1, 8]]
+        range: [[0, 1], [.6, 1], [1, 2]]
         interpolation: cubic     # morbidezza = spline di rspline
   # Override per-stream del seed-Y globale in axes: stessi tempi (seed-X per-asse
   # invariato), valori Y diversi.

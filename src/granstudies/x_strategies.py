@@ -1,20 +1,22 @@
 """Strategy di X: la sequenza dei *tempi* dei breakpoint, normalizzati in [0, 1].
 
-Registry gemello di ``value_generators.GENERATORS``, ma per l'asse X. Le tre
-cose restano ortogonali: il generatore di Y (``values``/``ramp``/``rand``)
-decide i valori, la strategy di X decide i tempi, ``interpolation`` la curva
-tra i breakpoint. Attenzione alle due "linear": la strategy-X ``linear``
-(tempi equispaziati) non c'entra con l'interpolation ``linear`` (retta tra due
-punti) — si puo' avere una X accelerando con interpolation step.
+Due sole forme, riconosciute dalla *presenza* nel blocco ``stack:`` (niente piu'
+nome-strategy): l'asse **assente** dal blocco usa ``linear`` (tempi equispaziati,
+la Y possiede ``n``); l'asse **presente** con una banda ``base``/``range`` usa
+``walk`` (i tempi emergono dalla frequenza, la X possiede ``n``). Le tre cose
+restano ortogonali: il generatore di Y decide i valori, la strategy di X i tempi,
+``interpolation`` la curva tra i breakpoint. Attenzione alle due "linear": la
+strategy-X ``linear`` (tempi equispaziati) non c'entra con l'interpolation
+``linear`` (retta tra due punti) — si puo' avere una X accelerando con
+interpolation step.
 
 Consumata solo dal processo ``stack``: lo sweep possiede la sua X via
-plateau/transition e non passa di qui. Aggiungere una strategy = una funzione
-pura + una riga in ``X_STRATEGIES``.
+plateau/transition e non passa di qui.
 """
 from __future__ import annotations
 
 import random
-from typing import Any, Callable, Dict, List
+from typing import Any, Dict, List
 
 from .value_generators import Threshold, _threshold_at
 
@@ -38,12 +40,13 @@ def linear(n: int) -> List[float]:
     return [round(i / (n - 1), 9) for i in range(n)]
 
 
-def rand(
+def walk(
     duration: float,
-    cps: Dict[str, Threshold],
+    base: Threshold,
+    range: Threshold = 0.0,
     seed: int = 0,
 ) -> List[float]:
-    """Tempi di breakpoint generati da una *frequenza di generazione* (rspline).
+    """Tempi di breakpoint generati da una *frequenza di generazione* (camminata).
 
     La X possiede ``n``: non si dichiara, emerge dalla frequenza integrata
     sulla durata (``n ~ int f(t) dt``). Meccanica: dal punto corrente ``t`` si
@@ -51,18 +54,17 @@ def rand(
     reale in secondi); il punto successivo cade a ``t + 1/f``; si ripete finche'
     si supera la fine. I tempi sono poi normalizzati in ``[0, 1]``.
 
-    ``base``/``range`` sono inviluppi mobili nelle stesse forme della banda di
-    Y-rand (scalare | ``[a, b]`` | ``[[t, v], ...]`` | ``{type, points}``),
-    valutati via ``_threshold_at`` (modulo condiviso Y-rand/X-rand).
-    Deterministico via ``seed``. Guardie: frequenza non positiva -> errore
-    (passo infinito, nessun punto); piu' di ``MAX_POINTS`` punti -> errore.
+    ``base``/``range`` sono inviluppi mobili nelle stesse forme della banda di Y
+    (scalare | ``[a, b]`` | ``[[t, v], ...]`` | ``{type, points, curve}``),
+    valutati via ``_threshold_at`` (modulo condiviso X/Y). ``range`` assente (0)
+    = banda collassata: la camminata segue ``base`` deterministicamente (nessun
+    seed consumato per la frequenza). Deterministico via ``seed``. Guardie:
+    frequenza non positiva -> errore (passo infinito, nessun punto); piu' di
+    ``MAX_POINTS`` punti -> errore.
     """
     if duration <= 0:
-        raise ValueError(f"rand-X: duration deve essere > 0 (ricevuta {duration})")
-    if "base" not in cps:
-        raise ValueError("rand-X: 'cps.base' e' obbligatorio (frequenza in Hz).")
-    base = cps["base"]
-    spread = cps.get("range", 0.0)
+        raise ValueError(f"walk-X: duration deve essere > 0 (ricevuta {duration})")
+    spread = range
     rng = random.Random(seed)
     times: List[float] = [0.0]
     t = 0.0  # secondi reali
@@ -71,12 +73,12 @@ def rand(
         lo = _threshold_at(base, frac)
         hi = lo + _threshold_at(spread, frac)
         if lo > hi:
-            raise ValueError(f"rand-X: range negativo a t={t:.3f}s (banda [{lo}, {hi}]).")
+            raise ValueError(f"walk-X: range negativo a t={t:.3f}s (banda [{lo}, {hi}]).")
         f = rng.uniform(lo, hi)
         if f <= 0:
             raise ValueError(
-                f"rand-X: frequenza non positiva ({f}) a t={t:.3f}s — "
-                "la banda cps deve restare > 0."
+                f"walk-X: frequenza non positiva ({f}) a t={t:.3f}s — "
+                "la banda base/range deve restare > 0."
             )
         t += 1.0 / f
         # Bordo con tolleranza: l'accumulo float puo' fermarsi un epsilon prima
@@ -87,53 +89,36 @@ def rand(
         times.append(round(t / duration, 9))
         if len(times) > MAX_POINTS:
             raise ValueError(
-                f"rand-X: oltre {MAX_POINTS} breakpoint — banda cps troppo alta "
+                f"walk-X: oltre {MAX_POINTS} breakpoint — banda base troppo alta "
                 f"per duration={duration}s."
             )
 
 
-X_STRATEGIES: Dict[str, Callable[..., List[float]]] = {"linear": linear, "rand": rand}
-
-# Strategy in cui e' la X a possedere ``n`` (i tempi emergono, non si contano):
-# non risolvibili con un ``n`` esterno via ``resolve_x``.
-_X_OWNS_N = frozenset({"rand"})
-
-
 def x_owns_n(cfg: Dict[str, Any] | None) -> bool:
-    """True se la strategy-X configurata possiede ``n`` (es. ``rand``).
+    """True se l'asse ha una camminata-X nel blocco ``stack:`` (possiede ``n``).
 
-    Decide il verso dell'accoppiamento in assemblaggio: X possiede n -> la Y
-    viene campionata ai tempi generati; altrimenti n viene dalla Y e la X
-    distribuisce i tempi.
+    Nel modello piatto non c'e' piu' un nome-strategy: la *presenza* di una entry
+    con ``base`` sotto ``stack.<asse>`` marca la camminata (la X possiede n, i
+    tempi emergono dalla frequenza). Assenza dal blocco = linear (n dalla Y).
     """
-    if not cfg or len(cfg) != 1:
-        return False
-    (name,), = (tuple(cfg),)
-    return name in _X_OWNS_N
+    return isinstance(cfg, dict) and "base" in cfg
 
 
 def resolve_x(cfg: Dict[str, Any] | None, n: int) -> List[float]:
-    """Risolve i tempi dei breakpoint scegliendo la strategy dalla chiave.
+    """Risolve i tempi equispaziati (``linear``) quando la Y possiede ``n``.
 
-    ``cfg`` e' il blocco X di un asse (``{nome_strategy: params}``): assente o
-    vuoto ricade sul default ``linear`` senza parametri. Deve esserci al
-    massimo una chiave, e deve essere una strategy registrata.
+    Nel modello piatto ``linear`` e' l'assenza dell'asse dal blocco ``stack:``:
+    ``cfg`` assente/vuoto -> ``linear(n)``. Una entry con ``base`` e' invece una
+    camminata (possiede n): non risolvibile con un ``n`` esterno -> errore.
     """
     if not cfg:
         return linear(n)
-    if len(cfg) != 1:
-        opts = ", ".join(X_STRATEGIES)
+    if x_owns_n(cfg):
         raise ValueError(
-            f"strategy-X: serve esattamente una chiave tra {{{opts}}}, "
-            f"trovate {sorted(cfg)}."
+            "strategy-X: la camminata (banda 'base') possiede n (i tempi emergono "
+            "dalla frequenza): non risolvibile con un n dalla Y."
         )
-    (name, params), = cfg.items()
-    if name not in X_STRATEGIES:
-        opts = ", ".join(X_STRATEGIES)
-        raise ValueError(f"strategy-X sconosciuta '{name}': usa una tra {{{opts}}}.")
-    if name in _X_OWNS_N:
-        raise ValueError(
-            f"strategy-X '{name}' possiede n (i tempi emergono dalla frequenza): "
-            "non risolvibile con un n dalla Y."
-        )
-    return X_STRATEGIES[name](n=n, **(params or {}))
+    raise ValueError(
+        f"strategy-X: entry stack senza 'base' {sorted(cfg)} — una entry sotto "
+        "'stack:' e' una camminata e richiede 'base' (frequenza in Hz)."
+    )
