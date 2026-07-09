@@ -362,8 +362,19 @@ axes:
     range: 0
 ```
 
-- **Grammatica**: numeri, nomi, `+ - * / **`, meno unario, parentesi. Niente
-  chiamate, indici o confronti — ogni altro costrutto è errore.
+- **Grammatica**: numeri, nomi, `+ - * / // % **`, meno unario, parentesi,
+  le chiamate alle **funzioni primitive** e le costanti `pi` / `e`. Niente
+  indici, confronti o argomenti keyword — ogni altro costrutto è errore.
+- **Funzioni primitive** (whitelist — il set generatore da cui derivare le
+  altre): `abs`, `floor`, `ceil`, `sqrt`, `exp`, `log` (naturale, o
+  `log(x, b)` per la base), `sin`, `cos`, `tan`, `atan`, `min`, `max`
+  (variadiche, almeno 2 argomenti). Una chiamata con un argomento-Env agisce
+  **sulle y** come gli operatori — `min(env, 10)` è un clamp del livello,
+  `floor(env)` quantizza — e due Env nella stessa chiamata sono errore.
+  `%` è il resto con semantica Python (segno del divisore); `//` il
+  quoziente intero: `i % 3` e `i // 3` trasformano l'indice dello spread in
+  coordinate di griglia. Fuori dominio (`sqrt` di un negativo, `log` di zero,
+  potenza frazionaria di un negativo) è errore chiaro, non un NaN.
 - **`let`** dichiara i nomi in scope: scalari o forme **statiche** di Env
   (`[a, b]`, `[[t, v], ...]`, `{type, points, curve}`). Un nodo-generatore
   dentro `let` è errore: i due meccanismi non si annidano — con una sola
