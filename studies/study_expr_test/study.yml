@@ -1,0 +1,74 @@
+# TEST EXPR — nodo-expr negli assi e strategy expr nello spread.
+#
+# Copre tre usi:
+#   1. asse con nodo-expr statico: density.base = sagoma * 50 (stream base);
+#   2. spread con strategy expr su Env: stessa sagoma a livelli crescenti
+#      con i (ventaglio: env * a * (i+1) -> 50, 100, 150, 200);
+#   3. spread con expr scalare: volume a gradini di -2 dB per indice.
+#
+#   make stack STUDY=study_expr_test
+#   -> ispeziona generated/study_expr_test/yaml/streams_expanded.yml
+#      e il documento stack multi-stream.
+
+study_id: study_expr_test
+title: "Test expr — aritmetica su Env"
+seed: 7
+duration: 20
+samples_dir: samples
+
+base:
+  onset: 0
+  duration: 6
+  sample: corpus.wav
+  time_mode: normalized
+  grain:
+    envelope: hanning
+  volume: -6
+  pointer:
+    speed_ratio: 0
+    start: .3
+
+axes:
+  interpolation: linear
+  # uso 1 — nodo-expr statico: la banda (collassata, range 0) segue la
+  # sagoma normalizzata moltiplicata per 50 -> Env [[0,50],[1,75]].
+  density:
+    path: density
+    baseline: 20
+    n: 5
+    base:
+      expr: "env * 50"
+      let:
+        env: [[0, 1], [1, 1.5]]
+    range: 0
+  grain_duration:
+    path: grain.duration
+    ramp: {start: .002, stop: .01, step: .002}
+
+stack: {}
+
+streams:
+  base: {}
+
+  # uso 2 — strategy expr su Env: 4 generati, stessa sagoma, livello che
+  # cresce con l'indice (i 0-based): 50, 100, 150, 200.
+  ventaglio:
+    spread:
+      n: 4
+      over:
+        axes.density.base:
+          expr: "env * a * (i + 1)"
+          let:
+            env: [[0, 1], [0.1583, 1.5]]
+            a: 50
+
+  # uso 3 — expr scalare: gradini di volume, -6, -8, -10 dB.
+  # Nota: i/(n-1) e' il progresso normalizzato, qui non serve.
+  gradino:
+    spread:
+      n: 3
+      over:
+        base.volume:
+          expr: "-6 - 2 * i"
+        base.onset:
+          expr: "4 * i"
