@@ -28,6 +28,19 @@ def test_clamp_within_and_outside():
     assert bounds.clamp("non.esiste", 12345) == 12345
 
 
+def test_bounds_grain_duration_dynamic_output_sr():
+    # con output_sr il minimo e' 1 campione (1/output_sr), non 1ms (issue #17)
+    lo, hi = bounds.bounds_for("grain.duration", output_sr=48000)
+    assert lo == 1.0 / 48000
+    assert hi == 10.0
+
+
+def test_bounds_output_sr_ignored_for_other_paths():
+    # output_sr non tocca i parametri senza bound dinamico
+    assert bounds.bounds_for("density", output_sr=48000) == (0.01, 4000.0)
+    assert bounds.bounds_for("pitch.semitones", output_sr=48000) == (-36.0, 36.0)
+
+
 def test_span():
     assert bounds.span("distribution") == 1.0
     assert bounds.span("pitch.semitones") == 72.0

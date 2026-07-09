@@ -34,10 +34,16 @@ _MANUAL_BOUNDS: Dict[str, Tuple[float, float]] = {
 }
 
 
-def bounds_for(path: str) -> Optional[Tuple[Optional[float], Optional[float]]]:
+def bounds_for(
+    path: str,
+    output_sr: Optional[int] = None,
+) -> Optional[Tuple[Optional[float], Optional[float]]]:
     """(min, max) per un path, o ``None`` se sconosciuto.
 
     ``max`` puo' essere ``None`` (bound dinamico nell'engine, es. loop_*).
+    ``output_sr``, se fornito, attiva i bound dinamici dell'engine: il minimo
+    di ``grain.duration`` diventa 1 campione (``1/output_sr``) invece del
+    fallback statico di 1ms (issue #17).
     """
     if path in _MANUAL_BOUNDS:
         return _MANUAL_BOUNDS[path]
@@ -46,7 +52,7 @@ def bounds_for(path: str) -> Optional[Tuple[Optional[float], Optional[float]]]:
         return None
     from .engine_bridge import parameter_bounds
 
-    pb = parameter_bounds()[key]
+    pb = parameter_bounds(output_sr=output_sr)[key]
     return (pb.min_val, pb.max_val)
 
 
