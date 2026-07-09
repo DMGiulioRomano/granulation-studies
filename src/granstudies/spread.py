@@ -18,7 +18,15 @@ import copy
 from typing import Any, Dict, List
 
 from .errors import ErrCtx
-from .value_generators import band, expand_params, ramp, stable_seed, y_generator
+from .expr import eval_expr, parse_expr_node
+from .value_generators import (
+    Y_GENERATOR_KEYS,
+    band,
+    expand_params,
+    ramp,
+    stable_seed,
+    y_generator,
+)
 from .yaml_loc import Locations
 
 # Chiavi ammesse nel blocco ``spread:``.
@@ -65,12 +73,25 @@ def _strategy(name: str, path: str, cfg: Any, ctx: ErrCtx) -> tuple:
             f"spread: il path '{path}' deve avere una strategy (dict), "
             f"trovato {cfg!r}.",
             key=key,
-            hint="dichiara 'values', 'ramp' o una banda ('base'/'range'/'seed').",
+            hint="dichiara 'values', 'ramp', una banda ('base'/'range'/'seed') "
+            "o un'espressione ('expr').",
         )
+    if "expr" in cfg:
+        # Quarta strategy, locale allo spread (fuori dal vocabolario Y: e'
+        # l'unico posto dove esiste un indice ``i`` su cui fare aritmetica).
+        markers = sorted(Y_GENERATOR_KEYS & set(cfg))
+        if markers:
+            raise ctx.err(
+                f"spread: il path '{path}' mescola 'expr' con {markers} — "
+                "esattamente una strategy per path.",
+                key=key,
+            )
+        with ctx.wrapping(key=key):
+            return "expr", parse_expr_node(cfg)
     with ctx.wrapping(
         key=key,
         hint="ogni path di 'over' vuole esattamente una strategy tra "
-        "'values', 'ramp' e banda ('base').",
+        "'values', 'ramp', banda ('base') ed 'expr'.",
     ):
         return y_generator(cfg)
 
@@ -186,6 +207,17 @@ def _strategy_values(
     if marker == "values":
         return list(params)
     key = ("spread", "over", path)
+    if marker == "expr":
+        text, let = params
+        reserved = sorted({"i", "n"} & set(let))
+        if reserved:
+            raise ctx.err(
+                f"spread: expr sul path '{path}', 'let' ridefinisce i nomi "
+                f"riservati {reserved} ('i' e 'n' li fornisce lo spread).",
+                key=key,
+            )
+        with ctx.wrapping(key=key):
+            return [eval_expr(text, {**let, "i": i, "n": n}) for i in range(n)]
     if marker == "ramp":
         form = _ramp_form(path, params, ctx)
         if form == "full":

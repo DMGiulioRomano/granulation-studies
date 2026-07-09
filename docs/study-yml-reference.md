@@ -190,6 +190,7 @@ due accetta queste forme:
 | `[[t, v], ...]` | breakpoint temporizzati, `t` in `[0, 1]`, interpolati **linear** (hold fuori dai bordi) |
 | `{type, points, curve}` | breakpoint con `type` esplicito (`linear`/`step`) ed eventuale `curve` (vedi sotto) |
 | nodo generatore (`{values}` \| `{ramp}` \| `{n, base, range, seed}`, più `type`/`curve` opzionali) | breakpoint **generati** invece che scritti a mano (vedi «Generatori annidati») |
+| nodo-expr `{expr, let}` | Env **calcolato** da un'espressione aritmetica su sagome e scalari (vedi «Il nodo-expr») |
 
 Esempio con banda mobile (si apre dopo il 60% della sequenza):
 
@@ -344,6 +345,46 @@ Regole:
 
 Design completo: `docs/plans/done/nested-generators.md`.
 
+### Il nodo-expr — aritmetica su Env
+
+`{expr, let}` è una forma di Env che **calcola** i breakpoint invece di
+scriverli o generarli: fattorizza forma e livello di una sagoma, per riusarla
+a livelli diversi.
+
+```yaml
+axes:
+  density:
+    n: 4
+    base:
+      expr: "env * 50"              # sempre tra virgolette
+      let:
+        env: [[0, 1], [0.1583, 1.5]]   # → [[0, 50], [0.1583, 75]]
+    range: 0
+```
+
+- **Grammatica**: numeri, nomi, `+ - * / **`, meno unario, parentesi. Niente
+  chiamate, indici o confronti — ogni altro costrutto è errore.
+- **`let`** dichiara i nomi in scope: scalari o forme **statiche** di Env
+  (`[a, b]`, `[[t, v], ...]`, `{type, points, curve}`). Un nodo-generatore
+  dentro `let` è errore: i due meccanismi non si annidano.
+- **Env ⊙ scalare** agisce **sulle y**, i tempi restano intatti; con la forma
+  dict, `type`/`curve` si preservano. L'ordine conta dove deve
+  (`100 - env`, `env / 2`). **Env ⊙ Env non è supportato** (errore).
+- Vale ovunque c'è un Env: `base`/`range` (Y e camminata-X), `step` di
+  ramp e di `drift`. Vale anche nei **parametri statici dello stream**
+  (`base.volume`, `base.grain.duration`, ...): lì si valuta alla costruzione
+  del documento engine e il risultato passa così come lo scriveresti a mano
+  — l'engine accetta envelope diretti nei parametri stream, quindi il
+  risultato deve essere una forma che l'engine capisce (scalare o envelope).
+- Una **patch** di un generato di spread può rimpiazzare il valore calcolato
+  con un altro nodo-expr: su un path-Env (`axes.*`/`stack.*`) la valutazione
+  avviene alla seam degli assi, su un parametro statico alla costruzione del
+  documento. In entrambi i casi mai nello spread.
+- Le espressioni vanno **sempre quotate**: `expr: env * 50` senza virgolette
+  è YAML valido ma fragile; con `{}` non lo è affatto.
+
+Design completo: `docs/plans/expr-env-arithmetic.md`.
+
 ## Il blocco `stack:`
 
 Il processo stack è il gemello verticale dello sweep: **collassa** tutti gli
@@ -472,6 +513,7 @@ per gli assi:
 | `ramp` | `{start, step}` | no | progressione aritmetica `start + i·step` (offset additivo) |
 | `ramp` | `{start, stop}` | no | suddivisione lineare in `n` punti |
 | banda | `base`/`range`/`seed`/`distribution`/`drift` (+`n` opz.) | solo con `n` proprio | `n` estrazioni nella banda |
+| `expr` | `{expr, let}` | no | un eval per stream: `i` (0-based) e `n` in scope |
 
 `spread.n` esplicito e conteggi posseduti devono **coincidere**; se `n` è
 omesso lo definisce l'unico conteggio posseduto; nessuna fonte → errore. Con
@@ -479,6 +521,24 @@ più path in `over` i valori si appaiano **per indice** (niente prodotto
 cartesiano, come in stack): lo stream i-esimo prende il valore i-esimo di ogni
 strategy. Le forme-Env dentro le strategy (banda che scorre, nodi-generatore
 annidati) valgono anche qui: `frac` corre sulla popolazione di stream.
+
+**La strategy `expr`** è il nodo-expr (vedi «Il nodo-expr») con due nomi in
+più nello scope: `i`, l'indice 0-based dello stream generato, e `n`, il
+conteggio totale (`i / (n - 1)` è il progresso normalizzato). Il risultato —
+scalare o Env intero — va così com'è sul path. Ridefinire `i` o `n` in `let`
+è errore; il conteggio non è mai posseduto da `expr` (serve `spread.n` o una
+strategy sorella che lo possiede).
+
+```yaml
+spread:
+  n: 4
+  over:
+    axes.density.base:
+      expr: "env * a * (i + 1)"     # livelli 50, 100, 150, 200 — stessa sagoma
+      let:
+        env: [[0, 1], [0.1583, 1.5]]
+        a: 50
+```
 
 **Ordine del merge** (il più specifico vince): override comune dell'entry →
 valore della strategy → patch esplicita. Una entry esplicita omonima di un

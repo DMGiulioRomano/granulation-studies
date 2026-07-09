@@ -10,6 +10,31 @@ from __future__ import annotations
 import copy
 from typing import Any, Dict, Mapping, Sequence
 
+from .expr import eval_expr, is_expr_node, parse_expr_node
+
+
+def _resolve_expr_nodes(node: Any, path: str = "") -> Any:
+    """Valuta i nodi-expr nei parametri statici dello stream.
+
+    ``base.*`` non passa dalle seam degli Env (axes/stack), ma l'engine
+    accetta envelope scritti direttamente nei parametri stream: un nodo-expr
+    qui si valuta alla costruzione del documento — il choke point comune a
+    sweep/stack/compose — e il risultato (scalare o Env in stile engine)
+    passa cosi' come l'utente l'avrebbe scritto a mano.
+    """
+    if is_expr_node(node):
+        try:
+            text, let = parse_expr_node(node)
+            return eval_expr(text, let)
+        except ValueError as exc:
+            raise ValueError(f"{path or 'stream'}: {exc}") from exc
+    if isinstance(node, dict):
+        return {
+            k: _resolve_expr_nodes(v, f"{path}.{k}" if path else str(k))
+            for k, v in node.items()
+        }
+    return node
+
 
 def deep_set(d: Dict[str, Any], dotted_path: str, value: Any) -> None:
     """Imposta ``value`` in ``d`` seguendo un path dotted, creando i dict mancanti.
@@ -66,7 +91,7 @@ def build_stream(
                 "time_mode": envelope_time_mode,
             }
         deep_set(stream, path, value)
-    return stream
+    return _resolve_expr_nodes(stream)
 
 
 def build_document(

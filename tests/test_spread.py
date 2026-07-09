@@ -520,3 +520,140 @@ def test_cmd_sweep_writes_expanded_streams(tmp_path, monkeypatch):
     cli, study, gdir = _cli_study(tmp_path, monkeypatch, doc)
     assert cli.cmd_sweep(study) == 0
     assert (gdir / "yaml" / "streams_expanded.yml").exists()
+
+
+# --- strategy expr: aritmetica per-stream su i/n -----------------------------------
+
+def _expr_entry(n=4):
+    return {
+        "spread": {
+            "n": n,
+            "over": {
+                "axes.density.base": {
+                    "expr": "env * a * (i + 1)",
+                    "let": {"env": [[0, 1], [0.1583, 1.5]], "a": 50},
+                },
+            },
+        },
+    }
+
+
+def test_expr_generates_scaled_envs():
+    out = expand_spreads(_streams(v=_expr_entry()))
+    assert list(out) == ["v_1", "v_2", "v_3", "v_4"]
+    bases = [out[k]["axes"]["density"]["base"] for k in out]
+    assert bases[0] == [[0, 50], [0.1583, 75]]
+    assert bases[1] == [[0, 100], [0.1583, 150]]
+    assert bases[3] == [[0, 200], [0.1583, 300]]
+
+
+def test_expr_scalar_values():
+    entry = {"spread": {"n": 3, "over": {"base.onset": {"expr": "10 * (i + 1)"}}}}
+    out = expand_spreads(_streams(v=entry))
+    assert [out[k]["base"]["onset"] for k in out] == [10, 20, 30]
+
+
+def test_expr_i_and_n_in_scope():
+    entry = {"spread": {"n": 5, "over": {"base.volume": {"expr": "-12 * i / (n - 1)"}}}}
+    out = expand_spreads(_streams(v=entry))
+    assert [out[k]["base"]["volume"] for k in out] == [0, -3, -6, -9, -12]
+
+
+def test_expr_paired_with_sibling_that_owns_count():
+    entry = {
+        "spread": {
+            "over": {
+                "base.onset": {"values": [0, 5, 10]},
+                "base.volume": {"expr": "-6 * i"},
+            },
+        },
+    }
+    out = expand_spreads(_streams(v=entry))
+    assert list(out) == ["v_1", "v_2", "v_3"]
+    assert [out[k]["base"]["volume"] for k in out] == [0, -6, -12]
+
+
+def test_expr_n_1():
+    entry = {"spread": {"n": 1, "over": {"base.onset": {"expr": "i"}}}}
+    out = expand_spreads(_streams(v=entry))
+    assert out["v_1"]["base"]["onset"] == 0
+
+
+def test_expr_patch_still_applies():
+    streams = _streams(v=_expr_entry(), v_2={"base": {"volume": -20}})
+    out = expand_spreads(streams)
+    assert list(out) == ["v_1", "v_2", "v_3", "v_4"]
+    assert out["v_2"]["base"]["volume"] == -20
+    assert out["v_2"]["axes"]["density"]["base"] == [[0, 100], [0.1583, 150]]
+
+
+def test_expr_alone_without_n_raises():
+    entry = {"spread": {"over": {"base.onset": {"expr": "i * 2"}}}}
+    with pytest.raises(SpecError, match="derivabile"):
+        expand_spreads(_streams(v=entry))
+
+
+def test_expr_let_redefining_i_raises():
+    entry = {
+        "spread": {
+            "n": 2,
+            "over": {"base.onset": {"expr": "i * 2", "let": {"i": 3}}},
+        },
+    }
+    with pytest.raises(SpecError, match="riservat"):
+        expand_spreads(_streams(v=entry))
+
+
+def test_expr_plus_values_marker_raises():
+    entry = {
+        "spread": {
+            "over": {"base.onset": {"expr": "i", "values": [1, 2]}},
+        },
+    }
+    with pytest.raises(SpecError):
+        expand_spreads(_streams(v=entry))
+
+
+def test_expr_eval_error_carries_stream_and_line():
+    text = """\
+study_id: s
+base:
+  onset: 0
+axes:
+  a: {path: density, baseline: 20, values: [5, 50]}
+streams:
+  v:
+    spread:
+      n: 2
+      over:
+        base.onset: {expr: "boh * 2"}
+"""
+    data, locs = yaml_loc.loads(text, source="study.yml")
+    with pytest.raises(SpecError) as exc:
+        resolve_streams(data, "s", locs=locs)
+    assert exc.value.stream == "v"
+    assert exc.value.source == "study.yml"
+    assert "boh" in str(exc.value)
+
+
+def test_expr_resolve_streams_end_to_end():
+    doc = _doc()
+    # asse a banda: base scalare di default, rimpiazzata per-stream dall'expr
+    doc["axes"]["a"] = {"path": "density", "baseline": 20,
+                        "base": 5, "range": 0, "n": 2}
+    doc["streams"]["v"] = {
+        "spread": {
+            "n": 2,
+            "over": {
+                "axes.a.base": {
+                    "expr": "env * a * (i + 1)",
+                    "let": {"env": [[0, 1], [0.1583, 1.5]], "a": 50},
+                },
+            },
+        },
+    }
+    specs = resolve_streams(doc)
+    by_id = {s.stream_id: s for s in specs}
+    (axis,) = by_id["v_2"].axes
+    # banda collassata (range 0) sull'Env valutato: frac 0 -> 100, frac 1 -> 150
+    assert axis.values == [100.0, 150.0]

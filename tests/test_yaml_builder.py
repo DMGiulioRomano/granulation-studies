@@ -1,3 +1,4 @@
+import pytest
 from granstudies.yaml_builder import deep_set, deep_get, build_stream, build_document
 
 
@@ -145,3 +146,33 @@ def test_build_multi_document_rejects_empty():
 
     with pytest.raises(ValueError):
         build_multi_document([])
+
+
+# --- nodi-expr nei parametri statici: valutati alla costruzione del documento ----
+
+def test_build_stream_resolves_expr_node_scalar():
+    base = {"volume": {"expr": "v - 1", "let": {"v": -19}}}
+    assert build_stream(base, {})["volume"] == -20
+
+
+def test_build_stream_resolves_expr_node_nested_env():
+    # l'engine accetta envelope scritti direttamente nei parametri stream:
+    # un nodo-expr qui produce lo stesso Env che si scriverebbe a mano.
+    base = {"grain": {"duration": {"expr": "env / 10",
+                                   "let": {"env": [[0, 0.02], [1, 0.1]]}}}}
+    assert build_stream(base, {})["grain"]["duration"] == [[0, 0.002], [1, 0.01]]
+
+
+def test_build_stream_resolves_expr_node_in_override():
+    assert build_stream({"volume": -6}, {"onset": {"expr": "2 * 3"}})["onset"] == 6
+
+
+def test_build_stream_expr_error_carries_path():
+    base = {"grain": {"duration": {"expr": "boh"}}}
+    with pytest.raises(ValueError, match=r"grain\.duration"):
+        build_stream(base, {})
+
+
+def test_build_stream_static_params_untouched():
+    base = {"volume": -6, "pointer": {"start": 0.3}, "sample": "c.wav"}
+    assert build_stream(base, {}) == base
