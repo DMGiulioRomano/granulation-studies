@@ -572,3 +572,75 @@ def test_drift_step_nested_generator_via_expand():
     b = band(**params)
     assert a == b
     assert all(0 <= v <= 10 for v in a)
+
+
+# --- nodo-expr: {expr, let} come forma di Threshold (plan expr-env-arithmetic) ----
+
+def test_expand_env_expr_node_breakpoints():
+    node = {"expr": "env * 50", "let": {"env": [[0, 1], [0.1583, 1.5]]}}
+    assert expand_env(node, seed=0, path="base") == [[0, 50], [0.1583, 75]]
+
+
+def test_expand_env_expr_node_scalar():
+    assert expand_env({"expr": "2 * 25"}, seed=0, path="base") == 50
+
+
+def test_expand_params_routes_expr_node_in_band_base():
+    params = {
+        "base": {"expr": "env + 1", "let": {"env": [[0, 0], [1, 1]]}},
+        "range": 0,
+    }
+    out = expand_params(params, seed=0)
+    assert out["base"] == [[0, 1], [1, 2]]
+    assert out["range"] == 0
+
+
+def test_expand_params_expr_node_in_drift_step():
+    # drift non e' un nodo: expand_params lo attraversa e trova l'expr dentro.
+    params = {"drift": {"step": {"expr": "s / 2", "let": {"s": 0.2}}}}
+    out = expand_params(params, seed=0)
+    assert out["drift"]["step"] == 0.1
+
+
+def test_expr_node_eval_error_carries_path():
+    with pytest.raises(ValueError, match=r"range\.step"):
+        expand_env({"expr": "boh * 2"}, seed=0, path="range.step")
+
+
+def test_expr_node_extra_key_raises():
+    with pytest.raises(ValueError, match="seed"):
+        expand_env({"expr": "1", "seed": 3}, seed=0, path="base")
+
+
+def test_expr_node_result_env_validated_immediately():
+    # il risultato passa da _threshold_at: curve con type step e' rifiutata qui,
+    # col path, non a valle.
+    node = {
+        "expr": "env * 2",
+        "let": {"env": {"type": "step", "points": [[0, 1], [1, 2]], "curve": 2}},
+    }
+    with pytest.raises(ValueError, match="base"):
+        expand_env(node, seed=0, path="base")
+
+
+def test_threshold_at_rejects_unexpanded_expr_node():
+    with pytest.raises(ValueError, match="espanso"):
+        _threshold_at({"expr": "1 + 1"}, 0.0)
+
+
+def test_expr_node_resolves_end_to_end_in_axis_band():
+    from granstudies.study_spec import resolve_streams
+
+    doc = {
+        "study_id": "s",
+        "base": {"onset": 0},
+        "axes": {
+            "a": {
+                "path": "density", "baseline": 20, "n": 2, "range": 0,
+                "base": {"expr": "env * 50", "let": {"env": [[0, 1], [1, 1.5]]}},
+            },
+        },
+    }
+    (spec,) = resolve_streams(doc)
+    (axis,) = spec.axes
+    assert axis.values == [50.0, 75.0]  # banda collassata sull'Env valutato

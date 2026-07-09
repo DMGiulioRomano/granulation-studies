@@ -13,6 +13,8 @@ import random
 import zlib
 from typing import Any, Dict, List, Sequence, Union
 
+from .expr import eval_expr, is_expr_node, parse_expr_node
+
 Threshold = Union[float, Sequence[float], Dict[str, Any]]
 
 # La banda ha un parametro YAML che si chiama ``range``: alias del builtin per
@@ -126,6 +128,11 @@ def _threshold_at(spec: Threshold, frac: float) -> float:
     ``type: step`` e' un errore: step non ha rampa da piegare.
     """
     if isinstance(spec, dict):
+        if "expr" in spec:
+            raise ValueError(
+                "nodo-expr non espanso (seam mancata): questo Env andava "
+                "compilato con expand_env/expand_params prima dell'uso."
+            )
         kind = spec.get("type", "linear")
         curve = spec.get("curve", 1.0)
         if kind == "step" and curve != 1.0:
@@ -416,6 +423,17 @@ def expand_env(spec: Threshold, *, seed: int, path: str, depth: int = 0) -> Thre
     percorso locale dal padre, es. ``base`` o ``range.step``): ``base`` e
     ``range`` si decorrelano da soli, un seed esplicito congela il sottoalbero.
     """
+    if is_expr_node(spec):
+        # Nodo-expr: aritmetica su scalari ed Env statici (niente seed, niente
+        # ricorsione — le forme in ``let`` sono statiche per contratto).
+        try:
+            text, let = parse_expr_node(spec)
+            out = eval_expr(text, let)
+            if isinstance(out, (list, dict)):
+                _threshold_at(out, 0.0)  # valida subito la forma del risultato
+        except ValueError as exc:
+            raise ValueError(f"{path}: {exc}") from exc
+        return out
     if not is_generator_node(spec):
         return spec
     if depth >= MAX_ENV_DEPTH:
@@ -479,7 +497,7 @@ def expand_params(
     out: Dict[str, Any] = {}
     for k, v in params.items():
         sub = f"{path}.{k}" if path else k
-        if isinstance(v, dict) and not is_generator_node(v):
+        if isinstance(v, dict) and not is_generator_node(v) and not is_expr_node(v):
             out[k] = expand_params(v, seed=seed, path=sub, depth=depth)
         else:
             out[k] = expand_env(v, seed=seed, path=sub, depth=depth)
