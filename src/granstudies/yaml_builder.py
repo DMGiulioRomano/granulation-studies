@@ -10,26 +10,30 @@ from __future__ import annotations
 import copy
 from typing import Any, Dict, Mapping, Sequence
 
-from .expr import is_expr_node
+from .expr import eval_expr, is_expr_node, parse_expr_node
 
 
-def _reject_unresolved_expr(node: Any, path: str = "") -> None:
-    """Errore chiaro se un nodo-expr e' sopravvissuto fino al documento engine.
+def _resolve_expr_nodes(node: Any, path: str = "") -> Any:
+    """Valuta i nodi-expr nei parametri statici dello stream.
 
-    I nodi-expr si risolvono alle seam degli Env (axes/stack); un parametro
-    statico di ``base.*`` non passa da nessuna seam, quindi un expr li' dentro
-    arriverebbe crudo all'engine come dict — YAML rotto in silenzio. Meglio
-    fermarsi qui, nel choke point comune a sweep/stack/compose, col path.
+    ``base.*`` non passa dalle seam degli Env (axes/stack), ma l'engine
+    accetta envelope scritti direttamente nei parametri stream: un nodo-expr
+    qui si valuta alla costruzione del documento — il choke point comune a
+    sweep/stack/compose — e il risultato (scalare o Env in stile engine)
+    passa cosi' come l'utente l'avrebbe scritto a mano.
     """
     if is_expr_node(node):
-        raise ValueError(
-            f"nodo-expr non supportato in '{path}': le espressioni valgono "
-            "solo nei parametri-Env (dentro 'axes.*' e 'stack.*'), non nei "
-            "parametri statici dello stream."
-        )
-    if isinstance(node, Mapping):
-        for k, v in node.items():
-            _reject_unresolved_expr(v, f"{path}.{k}" if path else str(k))
+        try:
+            text, let = parse_expr_node(node)
+            return eval_expr(text, let)
+        except ValueError as exc:
+            raise ValueError(f"{path or 'stream'}: {exc}") from exc
+    if isinstance(node, dict):
+        return {
+            k: _resolve_expr_nodes(v, f"{path}.{k}" if path else str(k))
+            for k, v in node.items()
+        }
+    return node
 
 
 def deep_set(d: Dict[str, Any], dotted_path: str, value: Any) -> None:
@@ -87,8 +91,7 @@ def build_stream(
                 "time_mode": envelope_time_mode,
             }
         deep_set(stream, path, value)
-    _reject_unresolved_expr(stream)
-    return stream
+    return _resolve_expr_nodes(stream)
 
 
 def build_document(

@@ -88,7 +88,6 @@ streams:
 
   # patch 3 — rimpiazza l'Env calcolato con un ALTRO nodo-expr: axes.* e' un
   # path-Env, la valutazione avviene alla seam degli assi, non nello spread.
-  # (In base.* un nodo-expr e' errore: i parametri statici non hanno seam.)
   ventaglio_4:
     axes:
       density:
@@ -97,8 +96,11 @@ streams:
           let:
             env: [[0, 1], [1, 2]]
 
-  # patch 4 — statica su un path della strategy: vince sul valore calcolato
-  # (-8), il fratello onset calcolato (4) resta.
+  # patch 4 — nodo-expr in base.* (parametro statico): si valuta alla
+  # costruzione del documento engine, come un envelope scritto a mano per
+  # pge. Vince sul valore calcolato (-8); il fratello onset (4) resta.
   gradino_2:
     base:
-      volume: -20
+      volume:
+        expr: "v - 1"
+        let: {v: -19}

@@ -371,13 +371,15 @@ axes:
   dict, `type`/`curve` si preservano. L'ordine conta dove deve
   (`100 - env`, `env / 2`). **Env ⊙ Env non è supportato** (errore).
 - Vale ovunque c'è un Env: `base`/`range` (Y e camminata-X), `step` di
-  ramp e di `drift`. **Non** vale nei parametri statici dello stream
-  (`base.volume`, `base.onset`, ...): quei path non passano da nessuna seam
-  e un nodo-expr lì dentro è un errore esplicito alla costruzione del
-  documento engine (non YAML rotto in silenzio).
-- Una **patch** di un generato di spread può rimpiazzare l'Env calcolato con
-  un altro nodo-expr, purché su un path-Env (`axes.*`/`stack.*`): la
-  valutazione avviene alla seam degli assi, non nello spread.
+  ramp e di `drift`. Vale anche nei **parametri statici dello stream**
+  (`base.volume`, `base.grain.duration`, ...): lì si valuta alla costruzione
+  del documento engine e il risultato passa così come lo scriveresti a mano
+  — l'engine accetta envelope diretti nei parametri stream, quindi il
+  risultato deve essere una forma che l'engine capisce (scalare o envelope).
+- Una **patch** di un generato di spread può rimpiazzare il valore calcolato
+  con un altro nodo-expr: su un path-Env (`axes.*`/`stack.*`) la valutazione
+  avviene alla seam degli assi, su un parametro statico alla costruzione del
+  documento. In entrambi i casi mai nello spread.
 - Le espressioni vanno **sempre quotate**: `expr: env * 50` senza virgolette
   è YAML valido ma fragile; con `{}` non lo è affatto.
 
