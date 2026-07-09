@@ -47,7 +47,7 @@ def _dump(path: str, doc: Dict[str, Any]) -> None:
         fh.write(text)
 
 
-def _write_discrete(spec: StudySpec, out_dir: str) -> List[str]:
+def _write_discrete(spec: StudySpec, out_dir: str, *, output_sr: int = 48000) -> List[str]:
     """Scrive le varianti statiche (una per combinazione) in ``out_dir``."""
     variants = generate_discrete_variants(spec)
     if variants and spec.duration is None and "duration" not in spec.base:
@@ -59,12 +59,14 @@ def _write_discrete(spec: StudySpec, out_dir: str) -> List[str]:
     written: List[str] = []
     for v in variants:
         path = os.path.join(out_dir, f"{v.name}.yml")
-        _dump(path, v.to_document(spec))
+        _dump(path, v.to_document(spec, output_sr=output_sr))
         written.append(path)
     return written
 
 
-def _envelope_document(spec: StudySpec, ev: EnvelopeVariant) -> Dict[str, Any]:
+def _envelope_document(
+    spec: StudySpec, ev: EnvelopeVariant, *, output_sr: int = 48000
+) -> Dict[str, Any]:
     """Documento YAML di un ``EnvelopeVariant``: stream dinamico normalizzato.
 
     La ``base.duration`` statica (valida solo per i file discrete) viene
@@ -80,7 +82,7 @@ def _envelope_document(spec: StudySpec, ev: EnvelopeVariant) -> Dict[str, Any]:
     base["duration"] = duration
     return build_document(
         base,
-        ev.overrides(spec),
+        ev.overrides(spec, output_sr=output_sr),
         title=f"{spec.study_id} :: {ev.name}",
         seed=spec.seed,
         duration=duration,
@@ -89,26 +91,29 @@ def _envelope_document(spec: StudySpec, ev: EnvelopeVariant) -> Dict[str, Any]:
     )
 
 
-def _write_envelope(spec: StudySpec, out_dir: str) -> List[str]:
+def _write_envelope(spec: StudySpec, out_dir: str, *, output_sr: int = 48000) -> List[str]:
     """Scrive le varianti envelope (una per combinazione di assi) in ``out_dir``."""
     variants = generate_envelope_variants(spec)
     os.makedirs(out_dir, exist_ok=True)
     written: List[str] = []
     for ev in variants:
         path = os.path.join(out_dir, f"{ev.name}.yml")
-        _dump(path, _envelope_document(spec, ev))
+        _dump(path, _envelope_document(spec, ev, output_sr=output_sr))
         written.append(path)
     return written
 
 
-def write_stack(specs: List[StudySpec], out_dir: str) -> List[str]:
+def write_stack(specs: List[StudySpec], out_dir: str, *, output_sr: int = 48000) -> List[str]:
     """Scrive il documento multi-stream del processo stack.
 
     Un solo file (``out_dir/stack/stack.yml``): stack collassa gli stream, non
     enumera varianti. Stessa scrittura incrementale di ``_dump`` (mtime fermo a
     contenuto identico -> il render salta i documenti gia' aggiornati).
+    ``output_sr`` deve combaciare con quello usato in ``render_variants``,
+    altrimenti il floor di ``grain.duration`` clampato qui non e' quello che
+    l'engine applichera' in render.
     """
-    doc = generate_stack_document(specs)
+    doc = generate_stack_document(specs, output_sr=output_sr)
     d = os.path.join(out_dir, "stack")
     os.makedirs(d, exist_ok=True)
     path = os.path.join(d, "stack.yml")
@@ -116,7 +121,7 @@ def write_stack(specs: List[StudySpec], out_dir: str) -> List[str]:
     return [path]
 
 
-def write_variants(spec: StudySpec, out_dir: str) -> List[str]:
+def write_variants(spec: StudySpec, out_dir: str, *, output_sr: int = 48000) -> List[str]:
     """Genera lo sweep e scrive i file YAML in sotto-cartelle per modalita'.
 
     A seconda di ``spec.mode`` materializza ``out_dir/discrete/`` (varianti
@@ -128,10 +133,10 @@ def write_variants(spec: StudySpec, out_dir: str) -> List[str]:
     written: List[str] = []
     if spec.mode in ("discrete", "both"):
         d = os.path.join(out_dir, "discrete", sub) if sub else os.path.join(out_dir, "discrete")
-        written += _write_discrete(spec, d)
+        written += _write_discrete(spec, d, output_sr=output_sr)
     if spec.mode in ("envelope", "both"):
         e = os.path.join(out_dir, "envelope", sub) if sub else os.path.join(out_dir, "envelope")
-        written += _write_envelope(spec, e)
+        written += _write_envelope(spec, e, output_sr=output_sr)
     return written
 
 

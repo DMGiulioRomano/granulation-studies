@@ -118,7 +118,7 @@ class EnvelopeVariant:
     moved: List[str]                          # nomi degli assi mossi
     combinations: List[Dict[str, float]]      # plateau in ordine lessicografico
 
-    def overrides(self, spec: StudySpec) -> Dict[str, Any]:
+    def overrides(self, spec: StudySpec, *, output_sr: int = 48000) -> Dict[str, Any]:
         """path YAML -> envelope (assi mossi) o scalare baseline (assi fermi).
 
         Gli assi mossi condividono la stessa griglia temporale (breakpoint
@@ -132,7 +132,7 @@ class EnvelopeVariant:
         for ax in spec.axes:
             if ax.name in moved_set:
                 seq = [
-                    bounds_mod.clamp(ax.path, combo[ax.name])
+                    bounds_mod.clamp(ax.path, combo[ax.name], output_sr=output_sr)
                     for combo in self.combinations
                 ]
                 # File tutto-step: layout collassato (durata ridotta). Misto:
@@ -145,7 +145,9 @@ class EnvelopeVariant:
                     plateau_single=(not all_step and ax.interpolation == "step"),
                 )
             else:
-                out[ax.path] = bounds_mod.clamp(ax.path, ax.baseline)
+                out[ax.path] = bounds_mod.clamp(
+                    ax.path, ax.baseline, output_sr=output_sr
+                )
         return out
 
     def _all_step(self, spec: StudySpec) -> bool:
