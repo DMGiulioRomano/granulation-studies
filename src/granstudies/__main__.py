@@ -41,9 +41,15 @@ def samples_dir(spec_samples: str | None) -> str:
 
 
 def _load_spec(study: str):
-    from .study_spec import load_study_spec
+    """Primo spec dello studio, con le stream risolte.
 
-    return load_study_spec(os.path.join(study_dir(study), "study.yml"))
+    Il documento grezzo di uno studio multi-stream e' incompleto per
+    costruzione (gli override di stream completano le bande): va validato
+    per-stream, mai cosi' com'e'. I campi che i comandi consumano da questo
+    spec (samples_dir, base, seed) sono top-level, identici su ogni stream.
+    """
+    specs = _load_specs(study)
+    return specs[0]
 
 
 def _load_data(study: str) -> Dict[str, Any]:
