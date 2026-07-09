@@ -1,7 +1,9 @@
 import pytest
 
+from granstudies import yaml_loc
 from granstudies.errors import SpecError
 from granstudies.spread import expand_spreads
+from granstudies.study_spec import resolve_streams
 
 
 def _streams(**entries):
@@ -364,3 +366,77 @@ def test_over_entry_with_two_strategies_raises():
     }
     with pytest.raises(SpecError):
         expand_spreads(_streams(v=entry))
+
+
+# --- integrazione con resolve_streams ---------------------------------------------
+
+def _doc():
+    return {
+        "study_id": "s",
+        "duration": 30,
+        "base": {"onset": 0, "sample": "c.wav"},
+        "axes": {"a": {"path": "density", "baseline": 20, "values": [5, 50]}},
+        "streams": {
+            "base": {},
+            "v": {
+                "spread": {
+                    "n": 3,
+                    "over": {"base.onset": {"ramp": {"start": 0, "step": 2}}},
+                },
+            },
+        },
+    }
+
+
+def test_resolve_streams_expands_spread():
+    specs = resolve_streams(_doc())
+    assert [s.stream_id for s in specs] == ["base", "v_1", "v_2", "v_3"]
+    onsets = [s.base["onset"] for s in specs[1:]]
+    assert onsets == [0, 2, 4]
+
+
+def test_resolve_streams_spread_has_sweep_off_by_default():
+    specs = resolve_streams(_doc())
+    by_id = {s.stream_id: s for s in specs}
+    assert by_id["v_1"].orders == []
+    assert by_id["v_1"].orderings == []
+    # lo stream non-spread conserva il default (tutti gli ordini)
+    assert by_id["base"].orders == [1]
+
+
+def test_resolve_streams_applies_patch():
+    doc = _doc()
+    doc["streams"]["v_2"] = {"base": {"volume": -20}}
+    specs = resolve_streams(doc)
+    by_id = {s.stream_id: s for s in specs}
+    assert len(specs) == 4
+    assert by_id["v_2"].base["volume"] == -20
+    assert by_id["v_2"].base["onset"] == 2
+
+
+def test_generated_streams_have_decorrelated_seeds():
+    specs = resolve_streams(_doc())
+    by_id = {s.stream_id: s for s in specs}
+    assert by_id["v_1"].resolved_y_seed() != by_id["v_2"].resolved_y_seed()
+
+
+def test_spread_error_carries_line_and_stream():
+    text = """\
+study_id: s
+base:
+  onset: 0
+axes:
+  a: {path: density, baseline: 20, values: [5, 50]}
+streams:
+  v:
+    spread:
+      n: 3
+      over:
+        base.onset: {values: [1, 2]}
+"""
+    data, locs = yaml_loc.loads(text, source="study.yml")
+    with pytest.raises(SpecError) as exc:
+        resolve_streams(data, "s", locs=locs)
+    assert exc.value.stream == "v"
+    assert exc.value.source == "study.yml"
+    assert exc.value.line == 8  # riga di streams.v.spread
