@@ -56,9 +56,13 @@ def bounds_for(
     return (pb.min_val, pb.max_val)
 
 
-def clamp(path: str, value: float) -> float:
-    """Riporta ``value`` entro i bounds del path (no-op se path sconosciuto)."""
-    b = bounds_for(path)
+def clamp(path: str, value: float, *, output_sr: Optional[int] = None) -> float:
+    """Riporta ``value`` entro i bounds del path (no-op se path sconosciuto).
+
+    ``output_sr``, se fornito, attiva il floor dinamico di ``grain.duration``
+    (vedi ``bounds_for``) invece del fallback statico di 1ms.
+    """
+    b = bounds_for(path, output_sr=output_sr)
     if b is None:
         return value
     lo, hi = b

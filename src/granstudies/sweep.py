@@ -33,19 +33,21 @@ class Variant:
     moved: List[str]              # nomi degli assi mossi rispetto alla baseline
     values: Dict[str, float]      # nome asse -> valore (tutti gli assi)
 
-    def overrides(self, spec: StudySpec) -> Dict[str, float]:
+    def overrides(self, spec: StudySpec, *, output_sr: int = 48000) -> Dict[str, float]:
         """path YAML -> valore clampato ai bounds engine, per ogni asse."""
         out: Dict[str, float] = {}
         for ax in spec.axes:
-            out[ax.path] = bounds_mod.clamp(ax.path, self.values[ax.name])
+            out[ax.path] = bounds_mod.clamp(
+                ax.path, self.values[ax.name], output_sr=output_sr
+            )
         return out
 
-    def to_document(self, spec: StudySpec) -> Dict[str, Any]:
+    def to_document(self, spec: StudySpec, *, output_sr: int = 48000) -> Dict[str, Any]:
         base = dict(spec.base)
         base.setdefault("stream_id", "stream")  # l'engine lo richiede
         return build_document(
             base,
-            self.overrides(spec),
+            self.overrides(spec, output_sr=output_sr),
             title=f"{spec.study_id} :: {self.name}",
             seed=spec.seed,
             duration=spec.duration,
