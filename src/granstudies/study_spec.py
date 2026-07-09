@@ -318,8 +318,8 @@ def _stack_config(
         raise ctx.err(
             f"stack: unit '{unit}' non ammessa ({opts}).",
             key=("stack", "unit"),
-            hint="'hz' = banda in frequenza di generazione, 's' = banda in "
-            "periodo (secondi tra breakpoint).",
+            hint="'hz' = frequenza di generazione, 's' = periodo in secondi "
+            "tra breakpoint, 'bpm' = battiti al minuto.",
         )
     raw = {name: xcfg for name, xcfg in raw.items() if xcfg is not None}
     for name, xcfg in raw.items():
@@ -334,7 +334,8 @@ def _stack_config(
         if not isinstance(xcfg, dict) or "base" not in xcfg:
             raise ctx.err(
                 f"stack: asse '{name}' deve avere una camminata con 'base' "
-                f"(banda in Hz, o in secondi con 'unit: s'), trovato {xcfg!r}.",
+                f"(banda nell'unita' di 'unit': hz, default | s | bpm), "
+                f"trovato {xcfg!r}.",
                 key=("stack", name),
                 axis=name,
                 hint="un asse assente dal blocco 'stack:' resta 'linear' (n dalla Y).",
@@ -354,8 +355,8 @@ def _stack_config(
                 f"stack: asse '{name}', unit '{xcfg['unit']}' non ammessa ({opts}).",
                 key=("stack", name),
                 axis=name,
-                hint="'hz' = banda in frequenza di generazione, 's' = banda in "
-                "periodo (secondi tra breakpoint).",
+                hint="'hz' = frequenza di generazione, 's' = periodo in secondi "
+                "tra breakpoint, 'bpm' = battiti al minuto.",
             )
     return raw, seed, unit
 

@@ -219,6 +219,27 @@ def test_walk_unknown_unit_raises():
         walk(duration=10.0, base=2, range=0, unit="ms")
 
 
+def test_walk_unit_bpm_deterministic_pulse():
+    # Banda collassata: 60 bpm = un punto al secondo su 10 s -> 10 punti.
+    times = walk(duration=10.0, base=60, range=0, unit="bpm")
+    assert times == [round(i / 10, 9) for i in range(10)]
+    # Equivalenza col rate: 60 bpm = 1 Hz.
+    assert times == walk(duration=10.0, base=1, range=0)
+
+
+def test_walk_unit_bpm_is_rescaled_hz_space():
+    # bpm e' lo spazio-rate riscalato (bpm = 60*hz): la banda [60, 120] bpm
+    # produce la stessa camminata della banda [1, 2] Hz, a parita' di seed.
+    a = walk(duration=10.0, base=60, range=60, seed=7, unit="bpm")
+    b = walk(duration=10.0, base=1, range=1, seed=7, unit="hz")
+    assert a == pytest.approx(b)
+
+
+def test_walk_unit_bpm_rejects_non_positive():
+    with pytest.raises(ValueError, match="bpm"):
+        walk(duration=10.0, base=0, range=0, unit="bpm")
+
+
 # --- n-ownership -----------------------------------------------------------------
 
 def test_x_owns_n_true_when_base_present():

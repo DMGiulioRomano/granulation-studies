@@ -72,7 +72,8 @@ sweep:
 stack:
   seed: 42                       # seed-X globale (chiave riservata; opzionale)
   unit: s                        # unita' globale della banda (chiave riservata;
-                                 #   hz = frequenza, default | s = periodo in secondi)
+                                 #   hz = frequenza, default | s = periodo in
+                                 #   secondi | bpm = battiti al minuto)
   nome_asse:                     # un asse con camminata-X: la X possiede n, la
     base:  [[0, 20], [1, 4]]     #   sua Y dev'essere una banda senza n. base/range
     range: [[0, 5], [1, 1]]      #   nell'unita' scelta (qui: secondi tra breakpoint)
@@ -361,7 +362,7 @@ blocco.
 | Strategy-X | Come si dichiara | Chi possiede `n` |
 |------------|------------------|-------------------|
 | `linear` | asse **assente** dal blocco | la **Y** (`values`/`ramp`/banda con `n`); tempi equispaziati `t_i = i/(n-1)`, estremo `t=1` incluso |
-| camminata (`walk`, alla `rspline`) | asse **presente** con `{base: <env>, range?: <env>, seed?: int, unit?: hz\|s, distribution?, drift?}` | la **X**: `n` emerge dalla banda integrata sulla durata |
+| camminata (`walk`, alla `rspline`) | asse **presente** con `{base: <env>, range?: <env>, seed?: int, unit?: hz\|s\|bpm, distribution?, drift?}` | la **X**: `n` emerge dalla banda integrata sulla durata |
 
 Con la camminata a ogni punto si pesca un valore nella banda
 `[base(t), base(t)+range(t)]` (`base`/`range` accettano le stesse forme della
@@ -369,7 +370,11 @@ banda di Y). Con `unit: hz` (default) il valore è una **frequenza di
 generazione** e il punto successivo cade a `t + 1/f`; con `unit: s` è il
 **periodo** in secondi e il punto cade a `t + p` — comodo quando gli intervalli
 sono nell'ordine delle decine di secondi e le frequenze frazionarie (0.0x Hz)
-diventano scomode. Anche `distribution` e `drift` valgono qui, con la stessa
+diventano scomode; con `unit: bpm` sono **battiti al minuto** e il punto cade a
+`t + 60/v` — comodo quando il gesto si pensa come pulsazione. Le unità vivono
+nel registro `X_UNITS` di `x_strategies`: aggiungerne una nuova è una entry
+(convertitore valore → passo in secondi) più doc e test. Anche
+`distribution` e `drift` valgono qui, con la stessa
 semantica della banda di Y (il dominio degli `Env` è il tempo reale
 normalizzato): con `drift` la frequenza (o il periodo) di generazione deriva
 invece di saltare — accelerandi/ritardandi stocastici ma organici. La Y
@@ -385,7 +390,10 @@ enumera; banda Y senza `n` con X lineare) sono errori di parse (*n-ownership*).
 > scelto: `base: [20, 2]` con `unit: s` è un accelerando lineare *nel periodo*,
 > `base: [0.05, 0.5]` in Hz è lineare *nel rate* — curve percettive diverse.
 > Anche `drift.step` (frazione della banda corrente) cammina nello spazio
-> scelto.
+> scelto. Le famiglie sono due: **rate** (`hz`, e `bpm` che è hz riscalato per
+> 60 — la banda `[60, 120]` bpm è esattamente la banda `[1, 2]` Hz) e
+> **periodo** (`s`). `bpm` è zucchero notazionale sullo spazio-rate; `s` è uno
+> spazio davvero diverso.
 
 > **Due equispaziati diversi.** «`base` costante = tempi equispaziati» vale per la
 > **camminata** ed è un equispaziato *per frequenza*: `n` emerge da `durata × f` e

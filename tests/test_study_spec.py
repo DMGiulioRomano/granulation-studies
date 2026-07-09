@@ -414,6 +414,15 @@ def test_stack_entry_unit_allowed_and_validated():
         parse_study_spec(d)
 
 
+def test_stack_unit_bpm_accepted_at_both_levels():
+    d = _stack_dict()
+    d["stack"]["unit"] = "bpm"
+    d["stack"]["density"]["unit"] = "bpm"
+    spec = parse_study_spec(d)
+    assert spec.stack_unit == "bpm"
+    assert spec.stack["density"]["unit"] == "bpm"
+
+
 def test_stack_unit_override_per_stream():
     d = _stack_dict()
     d["stack"]["unit"] = "s"

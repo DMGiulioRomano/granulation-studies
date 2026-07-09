@@ -15,7 +15,8 @@ plateau/transition e non passa di qui.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List
 
 from .value_generators import Threshold, _band_sampler
 
@@ -24,11 +25,43 @@ from .value_generators import Threshold, _band_sampler
 # ingestibile: e' un errore di configurazione, non un caso d'uso.
 MAX_POINTS = 10_000
 
-# Le unita' della banda della camminata: ``hz`` (frequenza di generazione,
-# storico) o ``s`` (periodo tra punti, in secondi). Non e' una conversione di
-# notazione ma la scelta dello *spazio* del walk: pescaggio in banda,
-# interpolazione degli Env di base/range e drift vivono nell'unita' scelta.
-X_UNITS = frozenset({"hz", "s"})
+@dataclass(frozen=True)
+class XUnit:
+    """Un'unita' della banda della camminata.
+
+    ``to_step`` mappa il valore pescato in banda nel passo in secondi verso il
+    punto successivo — e' l'unica cosa che distingue le unita': la meccanica
+    del walk (pescaggio, drift, guardie, normalizzazione) resta condivisa.
+    ``err``/``runaway`` parametrizzano i messaggi delle due guardie.
+    """
+
+    to_step: Callable[[float], float]
+    err: str        # valore in banda non positivo (passo infinito o nullo)
+    runaway: str    # oltre MAX_POINTS (banda che genera troppi punti)
+
+
+# Il registro delle unita'. Due sole *famiglie* semantiche: rate (``hz``,
+# ``bpm`` = hz riscalato per 60) e periodo (``s``). Un'unita' nuova e' una
+# entry qui piu' doc e test — ma la scelta tra rate e periodo non e'
+# notazionale: pescaggio in banda, interpolazione degli Env di base/range e
+# drift vivono nello spazio scelto (uniforme in periodo != uniforme in rate).
+X_UNITS: Dict[str, XUnit] = {
+    "hz": XUnit(
+        to_step=lambda v: 1.0 / v,
+        err="frequenza non positiva",
+        runaway="banda base troppo alta",
+    ),
+    "s": XUnit(
+        to_step=lambda v: v,
+        err="periodo non positivo",
+        runaway="periodo troppo corto",
+    ),
+    "bpm": XUnit(
+        to_step=lambda v: 60.0 / v,
+        err="bpm non positivi",
+        runaway="banda base troppo alta",
+    ),
+}
 
 
 def linear(n: int) -> List[float]:
@@ -63,7 +96,9 @@ def walk(
     ``t + 1/f``; con ``unit: s`` e' il *periodo* in secondi e il punto cade a
     ``t + p`` — comodo quando gli intervalli sono nell'ordine delle decine di
     secondi (frequenze frazionarie scomode). Si ripete finche' si supera la
-    fine; i tempi sono poi normalizzati in ``[0, 1]``.
+    fine; i tempi sono poi normalizzati in ``[0, 1]``. Le altre unita' vivono
+    nel registro ``X_UNITS`` (``bpm``: battiti al minuto, ``t + 60/v`` — lo
+    spazio-rate di hz riscalato).
 
     ``unit`` sceglie lo *spazio* della camminata, non una notazione: uniforme
     in periodo non e' uniforme in frequenza, e gli Env di ``base``/``range``
@@ -85,18 +120,18 @@ def walk(
     if unit not in X_UNITS:
         opts = " | ".join(sorted(X_UNITS))
         raise ValueError(f"walk-X: unit '{unit}' non ammessa ({opts}).")
+    xu = X_UNITS[unit]
     sample = _band_sampler(base, range, seed, distribution, drift, "walk-X")
     times: List[float] = [0.0]
     t = 0.0  # secondi reali
     while True:
         v = sample(t / duration)
         if v <= 0:
-            kind = "frequenza non positiva" if unit == "hz" else "periodo non positivo"
             raise ValueError(
-                f"walk-X: {kind} ({v}) a t={t:.3f}s — "
+                f"walk-X: {xu.err} ({v}) a t={t:.3f}s — "
                 "la banda base/range deve restare > 0."
             )
-        t += 1.0 / v if unit == "hz" else v
+        t += xu.to_step(v)
         # Bordo con tolleranza: l'accumulo float puo' fermarsi un epsilon prima
         # della fine (es. 50 passi da 0.2 -> 9.999...8) e produrre un punto
         # spurio a ~1.0. Un punto sul bordo esatto non e' comunque un plateau.
@@ -104,11 +139,8 @@ def walk(
             return times
         times.append(round(t / duration, 9))
         if len(times) > MAX_POINTS:
-            hint = (
-                "banda base troppo alta" if unit == "hz" else "periodo troppo corto"
-            )
             raise ValueError(
-                f"walk-X: oltre {MAX_POINTS} breakpoint — {hint} "
+                f"walk-X: oltre {MAX_POINTS} breakpoint — {xu.runaway} "
                 f"per duration={duration}s."
             )
 
