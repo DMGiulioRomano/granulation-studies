@@ -7,9 +7,14 @@ curve}``). Un'operazione tra un Env e uno scalare agisce elementwise sulle y
 (i tempi restano intatti); tra due Env e' un errore esplicito — richiederebbe
 unione dei breakpoint, si estende se servira' davvero.
 
-Grammatica (whitelist AST, ``mode="eval"``): numeri, nomi, ``+ - * / **``,
-unario ``-``, parentesi. Niente call, subscript, confronti: il parser rifiuta
-ogni altro costrutto col frammento incriminato.
+Grammatica (whitelist AST, ``mode="eval"``): numeri, nomi, ``+ - * / // % **``,
+unario ``-``, parentesi, le chiamate alle funzioni primitive di ``_FUNCTIONS``
+(``abs``/``floor``/``ceil``/``sqrt``/``exp``/``log``/``sin``/``cos``/``tan``/
+``atan``/``min``/``max``) e le costanti ``pi``/``e`` (ombreggiabili dallo
+scope). Una chiamata con un argomento-Env agisce elementwise sulle y (es.
+``min(env, 10)`` e' un clamp); due Env nella stessa chiamata sono un errore,
+come per gli operatori. Niente subscript, confronti o keyword: il parser
+rifiuta ogni altro costrutto col frammento incriminato.
 
 Modulo puro, solo stdlib: chi lo chiama decide lo scope (``expand_env`` passa
 il solo ``let``; la strategy di spread aggiunge ``i``, ``n`` e i pescaggi
@@ -19,6 +24,7 @@ proprio contesto (path, stream, riga).
 from __future__ import annotations
 
 import ast
+import math
 import operator
 from typing import Any, Dict, Mapping, Tuple
 
@@ -27,7 +33,32 @@ _BINOPS = {
     ast.Sub: operator.sub,
     ast.Mult: operator.mul,
     ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
     ast.Pow: operator.pow,
+}
+
+# Costanti note alle espressioni; un nome uguale nello scope (``let``) le
+# ombreggia.
+_CONSTANTS = {"pi": math.pi, "e": math.e}
+
+# Funzioni primitive: nome -> (fn, arieta' minima, arieta' massima o None).
+# Il criterio e' il set generatore: da queste si costruiscono le altre
+# (tan = sin/cos e' comodita'; asin/acos derivano da atan e sqrt; le basi di
+# log da log(x, b); il clamp da min/max annidate).
+_FUNCTIONS = {
+    "abs": (abs, 1, 1),
+    "floor": (math.floor, 1, 1),
+    "ceil": (math.ceil, 1, 1),
+    "sqrt": (math.sqrt, 1, 1),
+    "exp": (math.exp, 1, 1),
+    "log": (math.log, 1, 2),
+    "sin": (math.sin, 1, 1),
+    "cos": (math.cos, 1, 1),
+    "tan": (math.tan, 1, 1),
+    "atan": (math.atan, 1, 1),
+    "min": (min, 2, None),
+    "max": (max, 2, None),
 }
 
 # Chiavi ammesse nel nodo-expr.
@@ -81,7 +112,7 @@ def eval_expr(text: str, scope: Mapping[str, Any]) -> Any:
     try:
         out = _eval(tree.body, scope)
     except ZeroDivisionError:
-        raise ValueError(f"expr: divisione per zero in {text!r}.") from None
+        raise ValueError(f"expr: divisione o modulo per zero in {text!r}.") from None
     return _rebuild(out)
 
 
@@ -137,12 +168,14 @@ def _eval(node: ast.AST, scope: Mapping[str, Any]) -> Any:
             raise ValueError(f"expr: costante non numerica {node.value!r}.")
         return node.value
     if isinstance(node, ast.Name):
-        if node.id not in scope:
-            names = ", ".join(sorted(scope)) or "nessuno"
-            raise ValueError(
-                f"expr: nome ignoto '{node.id}' (disponibili: {names})."
-            )
-        return _checked(node.id, scope[node.id])
+        if node.id in scope:
+            return _checked(node.id, scope[node.id])
+        if node.id in _CONSTANTS:
+            return _CONSTANTS[node.id]
+        names = ", ".join(sorted(set(scope) | set(_CONSTANTS))) or "nessuno"
+        raise ValueError(
+            f"expr: nome ignoto '{node.id}' (disponibili: {names})."
+        )
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
         v = _eval(node.operand, scope)
         if isinstance(node.op, ast.UAdd):
@@ -163,14 +196,65 @@ def _eval(node: ast.AST, scope: Mapping[str, Any]) -> Any:
         if right_env:
             return _map_y(right, lambda y: op(left, y))
         return op(left, right)
+    if isinstance(node, ast.Call):
+        return _call(node, scope)
     raise ValueError(
         f"expr: costrutto non ammesso {ast.unparse(node)!r} "
-        "(solo numeri, nomi, + - * / **, parentesi)."
+        "(solo numeri, nomi, + - * / // % **, funzioni primitive, parentesi)."
     )
+
+
+def _call(node: ast.Call, scope: Mapping[str, Any]) -> Any:
+    """Una chiamata a funzione primitiva, elementwise se un argomento e' Env."""
+    if not isinstance(node.func, ast.Name) or node.func.id not in _FUNCTIONS:
+        got = ast.unparse(node.func)
+        names = ", ".join(sorted(_FUNCTIONS))
+        raise ValueError(f"expr: funzione ignota '{got}' (disponibili: {names}).")
+    name = node.func.id
+    if node.keywords:
+        raise ValueError(
+            f"expr: '{name}' non accetta argomenti keyword (solo posizionali)."
+        )
+    fn, lo, hi = _FUNCTIONS[name]
+    args = [_eval(a, scope) for a in node.args]
+    count = len(args)
+    if count < lo or (hi is not None and count > hi):
+        span = str(lo) if hi == lo else (f"{lo}-{hi}" if hi else f"almeno {lo}")
+        raise ValueError(
+            f"expr: '{name}' vuole {span} argomenti (ricevuti {count})."
+        )
+
+    def apply(*xs):
+        try:
+            return fn(*xs)
+        except (ValueError, OverflowError):
+            frag = ", ".join(repr(x) for x in xs)
+            raise ValueError(f"expr: {name}({frag}) fuori dominio.") from None
+
+    env_pos = [k for k, a in enumerate(args) if not _is_scalar(a)]
+    if not env_pos:
+        return apply(*args)
+    if len(env_pos) > 1:
+        raise ValueError(
+            "expr: operazione tra due Env non supportata (solo Env con scalare)."
+        )
+    (k,) = env_pos
+
+    def on_y(y):
+        xs = list(args)
+        xs[k] = y
+        return apply(*xs)
+
+    return _map_y(args[k], on_y)
 
 
 def _rebuild(v: Any) -> Any:
     """Copia del risultato con i float arrotondati a 9 decimali."""
+    if isinstance(v, complex):
+        raise ValueError(
+            "expr: risultato complesso (potenza frazionaria di un negativo?) "
+            "— le espressioni producono solo reali."
+        )
     if isinstance(v, float):
         return round(v, 9)
     if isinstance(v, int):

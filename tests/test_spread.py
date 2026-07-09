@@ -636,6 +636,37 @@ streams:
     assert "boh" in str(exc.value)
 
 
+def test_expr_functions_and_modulo_in_spread():
+    # griglia 3x2 dagli operatori interi: colonna = i % 3, riga = i // 3
+    entry = {
+        "spread": {
+            "n": 6,
+            "over": {"base.onset": {"expr": "4 * (i % 3) + 10 * (i // 3)"}},
+        },
+    }
+    out = expand_spreads(_streams(v=entry))
+    assert [out[k]["base"]["onset"] for k in out] == [0, 4, 8, 10, 14, 18]
+
+
+def test_expr_clamp_with_min_on_band_let():
+    # clamp di un pescaggio: volume mai sotto -10
+    entry = {
+        "spread": {
+            "n": 8,
+            "over": {
+                "base.volume": {
+                    "expr": "max(v - 2 * i, 0 - 10)",
+                    "let": {"v": {"base": -3, "range": 3}},
+                },
+            },
+        },
+    }
+    out = expand_spreads(_streams(v=entry))
+    vols = [out[k]["base"]["volume"] for k in out]
+    assert all(v >= -10 for v in vols)
+    assert vols[-1] == -10  # a i=7 il pescaggio meno 14 sta sempre sotto il clamp
+
+
 # --- strategy expr: banda-let (un pescaggio per stream generato) -------------------
 
 def _rand_let_entry(n=6, **band_spec):
