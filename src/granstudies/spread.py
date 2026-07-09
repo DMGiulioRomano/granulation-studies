@@ -237,31 +237,31 @@ def _validate_spread(name: str, spread: Any, ctx: ErrCtx) -> Dict[str, Any]:
     return over
 
 
-def _expand_entry(
+def _plan_entry(
     name: str, entry: Dict[str, Any], locs: Locations | None
-) -> Dict[str, Dict[str, Any]]:
-    """Espande una entry-spread nel dict ``{nome generato: override}``."""
+) -> tuple[List[str], Dict[str, List[Any]]]:
+    """(nomi generati, valori per path) di una entry-spread.
+
+    I nomi sono 1-based, zero-padded alla larghezza di ``n``. Una collisione
+    tra generati di spread diverse e' strutturalmente impossibile (l'indice e'
+    solo cifre, i nomi delle entry sono chiavi uniche del dict): l'unico
+    incontro possibile e' con una entry esplicita, cioe' la patch.
+    """
     ctx = ErrCtx(locs=locs, stream=name)
-    spread = entry["spread"]
-    over = _validate_spread(name, spread, ctx)
+    over = _validate_spread(name, entry["spread"], ctx)
     strategies = {path: _strategy(name, path, cfg, ctx) for path, cfg in over.items()}
-    n = _resolve_n(name, spread, strategies, ctx)
+    n = _resolve_n(name, entry["spread"], strategies, ctx)
     per_path = {
         path: _strategy_values(name, path, marker, params, n, ctx)
         for path, (marker, params) in strategies.items()
     }
-
-    proto = {k: v for k, v in entry.items() if k != "spread"}
     width = len(str(n))
-    generated: Dict[str, Dict[str, Any]] = {}
-    for i in range(n):
-        override = copy.deepcopy(proto)
-        for path, values in per_path.items():
-            _deep_set(override, path, values[i])
-        if "sweep" not in override:
-            override["sweep"] = copy.deepcopy(_SWEEP_OFF)
-        generated[f"{name}_{i + 1:0{width}d}"] = override
-    return generated
+    names = [f"{name}_{i + 1:0{width}d}" for i in range(n)]
+    return names, per_path
+
+
+def _is_spread(entry: Any) -> bool:
+    return isinstance(entry, dict) and "spread" in entry
 
 
 def expand_spreads(
@@ -270,14 +270,50 @@ def expand_spreads(
     """Espande le entry-spread di ``streams:`` in entry ordinarie.
 
     Le entry senza ``spread`` passano invariate; l'ordine del documento e'
-    preservato (i generati compaiono al posto della loro entry). Con ``locs``
-    gli errori portano file e riga (lookup override-first dentro
-    ``streams.<nome>``).
+    preservato (i generati compaiono al posto della loro entry). Una entry
+    esplicita omonima di un generato e' una *patch*: deep-merge sopra il
+    generato e viene consumata ("genera n, poi ritocca a mano il quinto"),
+    ovunque compaia nel documento. Con ``locs`` gli errori portano file e
+    riga (lookup override-first dentro ``streams.<nome>``).
     """
+    plans = {
+        name: _plan_entry(name, entry, locs)
+        for name, entry in streams.items()
+        if _is_spread(entry)
+    }
+    # Le patch si individuano prima di costruire: una entry-patch che e' a sua
+    # volta una spread e' ambigua (generatore o ritocco?) -> errore.
+    consumed: set = set()
+    for name, (names, _) in plans.items():
+        for gname in names:
+            if gname not in streams:
+                continue
+            if _is_spread(streams[gname]):
+                raise ErrCtx(locs=locs, stream=name).err(
+                    f"spread: '{gname}' e' generato da '{name}' ma e' a sua "
+                    "volta una entry-spread — patch ambigua.",
+                    key=("spread",),
+                    hint=f"rinomina una delle due entry, oppure togli 'spread' "
+                    f"da '{gname}' per farne un ritocco del generato.",
+                )
+            consumed.add(gname)
+
     expanded: Dict[str, Any] = {}
     for name, entry in streams.items():
-        if not isinstance(entry, dict) or "spread" not in entry:
+        if name in consumed:
+            continue
+        if name not in plans:
             expanded[name] = entry
             continue
-        expanded.update(_expand_entry(name, entry, locs))
+        names, per_path = plans[name]
+        proto = {k: v for k, v in entry.items() if k != "spread"}
+        for i, gname in enumerate(names):
+            override = copy.deepcopy(proto)
+            for path, values in per_path.items():
+                _deep_set(override, path, values[i])
+            if "sweep" not in override:
+                override["sweep"] = copy.deepcopy(_SWEEP_OFF)
+            if gname in consumed:
+                override = _deep_merge(override, copy.deepcopy(streams[gname] or {}))
+            expanded[gname] = override
     return expanded

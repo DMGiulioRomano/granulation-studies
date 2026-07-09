@@ -277,6 +277,55 @@ def test_ramp_full_paired_with_band():
     assert all("volume" in out[k]["base"] for k in out)
 
 
+# --- patch: l'esplicito ritocca il generato ---------------------------------------
+
+def test_patch_merges_on_top_and_is_consumed():
+    streams = _streams(v=_spread_entry(), v_2={"base": {"volume": -20}})
+    out = expand_spreads(streams)
+    assert list(out) == ["v_1", "v_2", "v_3"]     # la patch non e' un quarto stream
+    assert out["v_2"]["base"]["volume"] == -20
+    assert out["v_2"]["base"]["pointer"]["start"] == 0.2   # strategy preservata
+    assert "volume" not in out["v_1"]["base"]
+
+
+def test_patch_wins_on_strategy_path():
+    streams = _streams(v=_spread_entry(), v_2={"base": {"pointer": {"start": 0.99}}})
+    out = expand_spreads(streams)
+    assert out["v_2"]["base"]["pointer"]["start"] == 0.99
+    assert out["v_1"]["base"]["pointer"]["start"] == 0.1
+
+
+def test_patch_defined_before_spread_applies():
+    streams = _streams(v_2={"base": {"volume": -20}}, v=_spread_entry())
+    out = expand_spreads(streams)
+    assert list(out) == ["v_1", "v_2", "v_3"]
+    assert out["v_2"]["base"]["volume"] == -20
+
+
+def test_patch_none_entry_is_noop():
+    streams = _streams(v=_spread_entry(), v_2=None)
+    out = expand_spreads(streams)
+    assert list(out) == ["v_1", "v_2", "v_3"]
+    assert out["v_2"]["base"]["pointer"]["start"] == 0.2
+
+
+def test_patch_can_reactivate_sweep():
+    streams = _streams(v=_spread_entry(), v_2={"sweep": {"orders": [1]}})
+    out = expand_spreads(streams)
+    assert out["v_2"]["sweep"]["orders"] == [1]
+    assert out["v_1"]["sweep"] == {"orders": [], "orderings": []}
+
+
+def test_patch_with_spread_raises():
+    streams = _streams(
+        v={"spread": {"n": 2, "over": {"base.onset": {"values": [0, 1]}}}},
+        v_2={"spread": {"n": 2, "over": {"base.onset": {"values": [5, 6]}}}},
+    )
+    with pytest.raises(SpecError) as exc:
+        expand_spreads(streams)
+    assert "v_2" in str(exc.value)
+
+
 # --- errori di schema ------------------------------------------------------------
 
 def test_spread_without_over_raises():
