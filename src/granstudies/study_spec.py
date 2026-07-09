@@ -14,6 +14,8 @@ from typing import Any, Dict, List
 import yaml
 
 from . import bounds as bounds_mod
+from . import yaml_loc
+from .errors import ErrCtx, SpecError
 from .value_generators import (
     Y_GENERATOR_KEYS,
     band,
@@ -111,44 +113,64 @@ class StudySpec:
         return stable_seed(f"{self._seed_key()}:x")
 
 
-def _validate(spec: StudySpec) -> None:
+def _validate(spec: StudySpec, ctx: ErrCtx) -> None:
     if not spec.axes:
-        raise ValueError("Lo studio deve definire almeno un asse in 'axes'.")
+        raise ctx.err(
+            "Lo studio deve definire almeno un asse in 'axes'.", key=("axes",)
+        )
     n = len(spec.axes)
     for order in spec.orders:
         if order < 0 or order > n:
-            raise ValueError(
+            raise ctx.err(
                 f"order {order} fuori range: con {n} assi gli ordini validi "
-                f"sono 0..{n}."
+                f"sono 0..{n}.",
+                key=("sweep", "orders"),
             )
     axis_names = {ax.name for ax in spec.axes}
     for ordering in spec.orderings:
         unknown = set(ordering) - axis_names
         if unknown:
-            raise ValueError(f"orderings: assi sconosciuti {sorted(unknown)}")
+            raise ctx.err(
+                f"orderings: assi sconosciuti {sorted(unknown)}",
+                key=("sweep", "orderings"),
+                hint=f"gli assi dichiarati sono {sorted(axis_names)}.",
+            )
         dupes = [n for n in ordering if ordering.count(n) > 1]
         if dupes:
-            raise ValueError(f"orderings: assi duplicati {sorted(set(dupes))}")
+            raise ctx.err(
+                f"orderings: assi duplicati {sorted(set(dupes))}",
+                key=("sweep", "orderings"),
+            )
     seen = set()
     for ax in spec.axes:
         if ax.name in seen:
-            raise ValueError(f"Asse duplicato: {ax.name}")
+            raise ctx.err(f"Asse duplicato: {ax.name}", key=("axes", ax.name))
         seen.add(ax.name)
         if not ax.values and not ax.defers_n():
-            raise ValueError(f"Asse '{ax.name}' senza valori di test.")
+            raise ctx.err(
+                f"Asse '{ax.name}' senza valori di test.",
+                key=("axes", ax.name),
+                axis=ax.name,
+                hint="dichiara 'values', 'ramp' o una banda ('base'/'range'/'n').",
+            )
         # Avviso non bloccante: valori fuori bounds engine vengono poi clampati.
         for v in list(ax.values) + [ax.baseline]:
             b = bounds_mod.bounds_for(ax.path)
             if b is not None:
                 lo, hi = b
                 if (lo is not None and v < lo) or (hi is not None and v > hi):
-                    raise ValueError(
+                    raise ctx.err(
                         f"Asse '{ax.name}' valore {v} fuori bounds {b} "
-                        f"per il path '{ax.path}'."
+                        f"per il path '{ax.path}'.",
+                        key=("axes", ax.name),
+                        axis=ax.name,
+                        hint=f"i valori (e il baseline) devono stare in {b}.",
                     )
 
 
-def _resolve_baseline(name: str, cfg: Dict[str, Any], defaults: Dict[str, Any] | None):
+def _resolve_baseline(
+    name: str, cfg: Dict[str, Any], defaults: Dict[str, Any] | None, ctx: ErrCtx
+):
     """Risolve il ``baseline`` di un asse: esplicito o dal default engine.
 
     Single source of truth: se ``baseline`` e' omesso, lo si legge dal default
@@ -160,18 +182,24 @@ def _resolve_baseline(name: str, cfg: Dict[str, Any], defaults: Dict[str, Any] |
         return cfg["baseline"]
     path = cfg["path"]
     if path == "pitch" or path.startswith("pitch."):
-        raise ValueError(
+        raise ctx.err(
             f"Asse '{name}': path '{path}' e' unit-driven (pitch), "
-            f"'baseline' e' obbligatorio."
+            f"'baseline' e' obbligatorio.",
+            key=("axes", name),
+            axis=name,
+            hint=f"aggiungi 'baseline:' all'asse '{name}'.",
         )
     if defaults is None:
         from .engine_bridge import parameter_defaults
 
         defaults = parameter_defaults()
     if path not in defaults or defaults[path] is None:
-        raise ValueError(
+        raise ctx.err(
             f"Asse '{name}': nessun default engine per il path '{path}', "
-            f"'baseline' e' obbligatorio."
+            f"'baseline' e' obbligatorio.",
+            key=("axes", name),
+            axis=name,
+            hint=f"aggiungi 'baseline:' all'asse '{name}'.",
         )
     return defaults[path]
 
@@ -217,26 +245,44 @@ def _replace_generators(merged: Dict[str, Any], override: Dict[str, Any]) -> Non
                 ax.pop(k, None)
 
 
-def resolve_streams(data: Dict[str, Any], study_id: str | None = None) -> List["StudySpec"]:
+def resolve_streams(
+    data: Dict[str, Any],
+    study_id: str | None = None,
+    locs: yaml_loc.Locations | None = None,
+) -> List["StudySpec"]:
     """Ritorna una lista di StudySpec, uno per stream.
 
     Se ``streams:`` è assente, ritorna un singolo spec senza stream_id.
+    Con ``locs`` gli errori di parse portano file e riga; la rete di
+    sicurezza sotto etichetta con lo stream anche i ``ValueError`` nudi
+    non ancora migrati a ``SpecError``.
     """
     sid = study_id or data.get("study_id") or "study"
     streams = data.get("streams")
     if not streams:
-        return [parse_study_spec(data, sid)]
+        return [parse_study_spec(data, sid, locs=locs)]
     result = []
     for stream_id, override in streams.items():
         merged = _deep_merge(data, override or {})
         _replace_generators(merged, override or {})
         merged.pop("streams", None)
         merged.setdefault("sweep", {})["stream_id"] = stream_id
-        result.append(parse_study_spec(merged, sid))
+        try:
+            result.append(parse_study_spec(merged, sid, locs=locs))
+        except SpecError:
+            raise
+        except ValueError as e:
+            raise SpecError(
+                str(e),
+                stream=stream_id,
+                source=locs.source if locs else None,
+            ) from e
     return result
 
 
-def _stack_config(data: Dict[str, Any]) -> tuple[Dict[str, Any] | None, int | None]:
+def _stack_config(
+    data: Dict[str, Any], ctx: ErrCtx
+) -> tuple[Dict[str, Any] | None, int | None]:
     """Estrae dal documento il blocco ``stack:``: (config per-asse, seed-X globale).
 
     Schema piatto: ``seed`` e' l'unica chiave riservata; ogni altra chiave e' un
@@ -253,28 +299,45 @@ def _stack_config(data: Dict[str, Any]) -> tuple[Dict[str, Any] | None, int | No
     raw = {name: xcfg for name, xcfg in raw.items() if xcfg is not None}
     for name, xcfg in raw.items():
         if isinstance(xcfg, dict) and ("rand" in xcfg or "cps" in xcfg):
-            raise ValueError(
+            raise ctx.err(
                 f"stack: asse '{name}', i wrapper 'rand:'/'cps:' non esistono "
-                "piu': dichiara la camminata piatta (base/range/seed diretti). "
-                "Es. 'rand: {cps: {base, range}}' -> 'base: ...', 'range: ...'."
+                "piu': dichiara la camminata piatta (base/range/seed diretti).",
+                key=("stack", name),
+                axis=name,
+                hint="es. 'rand: {cps: {base, range}}' -> 'base: ...', 'range: ...'.",
             )
         if not isinstance(xcfg, dict) or "base" not in xcfg:
-            raise ValueError(
+            raise ctx.err(
                 f"stack: asse '{name}' deve avere una camminata con 'base' "
-                f"(frequenza in Hz), trovato {xcfg!r}. Un asse assente dal blocco "
-                "resta 'linear' (n dalla Y)."
+                f"(frequenza in Hz), trovato {xcfg!r}.",
+                key=("stack", name),
+                axis=name,
+                hint="un asse assente dal blocco 'stack:' resta 'linear' (n dalla Y).",
             )
         extra = set(xcfg) - {"base", "range", "seed"}
         if extra:
-            raise ValueError(
+            raise ctx.err(
                 f"stack: asse '{name}', chiavi non ammesse {sorted(extra)} "
-                "(solo base/range/seed; 'curve' va dentro l'Env di base/range)."
+                "(solo base/range/seed).",
+                key=("stack", name),
+                axis=name,
+                hint="'curve' va dentro l'Env di base/range, non come chiave dell'entry.",
             )
     return raw, seed
 
 
-def parse_study_spec(data: Dict[str, Any], study_id: str | None = None) -> StudySpec:
-    """Costruisce uno ``StudySpec`` da un dict gia' caricato."""
+def parse_study_spec(
+    data: Dict[str, Any],
+    study_id: str | None = None,
+    locs: yaml_loc.Locations | None = None,
+) -> StudySpec:
+    """Costruisce uno ``StudySpec`` da un dict gia' caricato.
+
+    ``locs`` (opzionale) sono le posizioni delle chiavi nel file d'origine
+    (``yaml_loc``): con esse gli errori portano file e riga. Il documento puo'
+    essere il merge di una stream: lo ``stream_id`` in ``sweep:`` guida sia
+    l'etichetta degli errori sia il lookup override-first delle righe.
+    """
     axes_raw = data.get("axes") or {}
     # Risolve i default engine una sola volta, solo se serve (lazy).
     _defaults_cache: Dict[str, Any] | None = None
@@ -288,13 +351,16 @@ def parse_study_spec(data: Dict[str, Any], study_id: str | None = None) -> Study
         _defaults_cache = parameter_defaults()
 
     sweep_cfg = data.get("sweep") or {}
+    ctx = ErrCtx(locs=locs, stream=sweep_cfg.get("stream_id") or None)
     if "combine" in sweep_cfg:
-        raise ValueError(
+        raise ctx.err(
             "sweep.combine non esiste piu': lo sweep fa solo il prodotto "
-            "cartesiano. L'accoppiamento degli assi (ex parallel) vive nel "
-            "processo stack — stessa strategy-X e stesso n."
+            "cartesiano.",
+            key=("sweep", "combine"),
+            hint="l'accoppiamento degli assi (ex parallel) vive nel processo "
+            "stack — stessa strategy-X e stesso n.",
         )
-    stack_axes, stack_seed = _stack_config(data)
+    stack_axes, stack_seed = _stack_config(data, ctx)
     axes_seed = axes_raw.get("seed")
     sid = study_id or data.get("study_id") or "study"
     seed_key = sweep_cfg.get("stream_id") or sid
@@ -309,52 +375,70 @@ def parse_study_spec(data: Dict[str, Any], study_id: str | None = None) -> Study
             continue
         if not isinstance(cfg, dict):
             hint = (
-                " ('plateau'/'transition' vivono in 'sweep:', non in 'axes:')"
+                "'plateau'/'transition' vivono in 'sweep:', non in 'axes:'."
                 if name in ("plateau", "transition")
-                else ""
+                else "un asse e' un dict con 'path' e un generatore Y."
             )
-            raise ValueError(
-                f"Asse '{name}': config non valida ({cfg!r}), serve un dict{hint}."
+            raise ctx.err(
+                f"Asse '{name}': config non valida ({cfg!r}), serve un dict.",
+                key=("axes", name),
+                axis=name,
+                hint=hint,
+            )
+        if "path" not in cfg:
+            raise ctx.err(
+                f"Asse '{name}': manca 'path' (il parametro engine da muovere).",
+                key=("axes", name),
+                axis=name,
+                hint="es. 'path: density' o 'path: grain.duration'.",
             )
         # Generatore Y riconosciuto dalla forma (values | ramp | base): chiave
         # canonica values|ramp|band, con i parametri della banda raccolti piatti.
-        gen_key, gen_params = y_generator(cfg)
+        with ctx.wrapping(key=("axes", name), axis=name):
+            gen_key, gen_params = y_generator(cfg)
         x_cfg = (stack_axes or {}).get(name)
         defers = gen_key == "band" and "n" not in gen_params
         if defers:
             # n-ownership, verso X: solo la camminata-X 'base' puo' possedere n.
             if not x_owns_n(x_cfg):
-                raise ValueError(
+                raise ctx.err(
                     f"Asse '{name}': banda senza 'n' richiede la camminata-X "
-                    "'base' nel blocco 'stack:' (e' la X a possedere n); con X "
-                    "lineare dichiara 'n'."
+                    "'base' nel blocco 'stack:' (e' la X a possedere n).",
+                    key=("axes", name),
+                    axis=name,
+                    hint=f"dichiara 'n' nella banda (axes.{name}.n) oppure la "
+                    f"camminata sotto 'stack: {{{name}: {{base: ...}}}}'.",
                 )
             values: List[float] = []
         else:
             # n-ownership, verso Y: con la camminata-X la Y non puo' contare i valori.
             if x_owns_n(x_cfg):
-                raise ValueError(
+                raise ctx.err(
                     f"Asse '{name}': la camminata-X 'base' possiede n, ma il "
-                    f"generatore Y '{gen_key}' enumera i valori — usa la banda "
-                    "senza 'n' (o togli la camminata-X)."
+                    f"generatore Y '{gen_key}' enumera i valori.",
+                    key=("stack", name),
+                    axis=name,
+                    hint=f"usa la banda senza 'n' su axes.{name}, oppure togli "
+                    f"la camminata-X (stack.{name}).",
                 )
             # Seam sweep/Y dei generatori annidati: i nodi dentro gli Env
             # (base/range della banda, step del ramp) si compilano in
             # breakpoint qui, col seed effettivo gia' risolto.
-            if gen_key == "values":
-                values = list(gen_params)
-            elif gen_key == "ramp":
-                params = expand_params(gen_params, seed=default_y_seed)
-                values = ramp(**params)
-            else:  # band con n: la Y possiede il conteggio
-                params = dict(gen_params)
-                params.setdefault("seed", default_y_seed)
-                values = band(**expand_params(params, seed=params["seed"]))
+            with ctx.wrapping(key=("axes", name), axis=name):
+                if gen_key == "values":
+                    values = list(gen_params)
+                elif gen_key == "ramp":
+                    params = expand_params(gen_params, seed=default_y_seed)
+                    values = ramp(**params)
+                else:  # band con n: la Y possiede il conteggio
+                    params = dict(gen_params)
+                    params.setdefault("seed", default_y_seed)
+                    values = band(**expand_params(params, seed=params["seed"]))
         axes.append(
             Axis(
                 name=name,
                 path=cfg["path"],
-                baseline=_resolve_baseline(name, cfg, _defaults_cache),
+                baseline=_resolve_baseline(name, cfg, _defaults_cache, ctx),
                 values=values,
                 interpolation=cfg.get("interpolation", study_interpolation),
                 generator={gen_key: gen_params},
@@ -364,11 +448,17 @@ def parse_study_spec(data: Dict[str, Any], study_id: str | None = None) -> Study
         axis_names = {ax.name for ax in axes}
         unknown = set(stack_axes) - axis_names
         if unknown:
-            raise ValueError(f"stack: assi sconosciuti {sorted(unknown)}.")
+            raise ctx.err(
+                f"stack: assi sconosciuti {sorted(unknown)}.",
+                key=("stack",),
+                hint=f"gli assi dichiarati in 'axes:' sono {sorted(axis_names)}.",
+            )
     if stack_axes is not None and data.get("duration") is None:
-        raise ValueError(
+        raise ctx.err(
             "stack: serve 'duration:' top-level (la durata condivisa su cui "
-            "il processo normalizza i tempi)."
+            "il processo normalizza i tempi).",
+            key=("stack",),
+            hint="aggiungi 'duration: <secondi>' al livello top del documento.",
         )
     orders = list(sweep_cfg.get("orders", list(range(1, len(axes) + 1))))
     orderings = [list(o) for o in sweep_cfg.get("orderings", [])]
@@ -391,13 +481,12 @@ def parse_study_spec(data: Dict[str, Any], study_id: str | None = None) -> Study
         stack_seed=stack_seed,
         axes_seed=axes_seed,
     )
-    _validate(spec)
+    _validate(spec, ctx)
     return spec
 
 
 def load_study_spec(path: str) -> StudySpec:
-    """Carica e valida ``study.yml`` da disco."""
-    with open(path, "r", encoding="utf-8") as fh:
-        data = yaml.safe_load(fh)
+    """Carica e valida ``study.yml`` da disco (con posizioni per gli errori)."""
+    data, locs = yaml_loc.load(path)
     study_id = data.get("study_id") or os.path.basename(os.path.dirname(os.path.abspath(path)))
-    return parse_study_spec(data, study_id=study_id)
+    return parse_study_spec(data, study_id=study_id, locs=locs)

@@ -60,10 +60,12 @@ def _load_data(study: str) -> Dict[str, Any]:
 
 def _load_specs(study: str, stream: str | None = None) -> list:
     from .study_spec import resolve_streams
+    from .yaml_loc import load as load_with_locations
 
-    data = _load_data(study)
+    path = os.path.join(study_dir(study), "study.yml")
+    data, locs = load_with_locations(path)
     sid = data.get("study_id") or study
-    specs = resolve_streams(data, sid)
+    specs = resolve_streams(data, sid, locs=locs)
     if stream:
         specs = [s for s in specs if s.stream_id == stream]
         if not specs:
