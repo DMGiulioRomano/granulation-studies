@@ -366,7 +366,9 @@ axes:
   chiamate, indici o confronti — ogni altro costrutto è errore.
 - **`let`** dichiara i nomi in scope: scalari o forme **statiche** di Env
   (`[a, b]`, `[[t, v], ...]`, `{type, points, curve}`). Un nodo-generatore
-  dentro `let` è errore: i due meccanismi non si annidano.
+  dentro `let` è errore: i due meccanismi non si annidano — con una sola
+  eccezione, la **banda-let** della strategy `expr` dello spread (un
+  pescaggio random per stream generato, vedi «La strategy `expr`»).
 - **Env ⊙ scalare** agisce **sulle y**, i tempi restano intatti; con la forma
   dict, `type`/`curve` si preservano. L'ordine conta dove deve
   (`100 - env`, `env / 2`). **Env ⊙ Env non è supportato** (errore).
@@ -513,7 +515,7 @@ per gli assi:
 | `ramp` | `{start, step}` | no | progressione aritmetica `start + i·step` (offset additivo) |
 | `ramp` | `{start, stop}` | no | suddivisione lineare in `n` punti |
 | banda | `base`/`range`/`seed`/`distribution`/`drift` (+`n` opz.) | solo con `n` proprio | `n` estrazioni nella banda |
-| `expr` | `{expr, let}` | no | un eval per stream: `i` (0-based) e `n` in scope |
+| `expr` | `{expr, let}` | no | un eval per stream: `i` (0-based), `n` e le bande-let in scope |
 
 `spread.n` esplicito e conteggi posseduti devono **coincidere**; se `n` è
 omesso lo definisce l'unico conteggio posseduto; nessuna fonte → errore. Con
@@ -540,6 +542,34 @@ spread:
         a: 50
 ```
 
+**La banda-let (random per stream).** Solo nella strategy `expr` dello
+spread, una variabile di `let` può essere una **banda**
+(`{base, range?, seed?, distribution?, drift?}`): per ogni stream generato
+viene pescato un valore nella banda, che entra nello scope dell'espressione
+accanto a `i` e `n`. È l'unica eccezione al divieto di nodi-generatore in
+`let`; `values`/`ramp` restano fuori (una progressione deterministica si
+scrive con l'aritmetica su `i`/`n`). La banda non possiede mai il conteggio
+(`n` dentro la banda-let è errore) e `frac` corre sulla popolazione di
+stream, come nelle altre strategy: un `base`-Env fa scorrere la banda lungo
+i generati (con `range` omesso la segue deterministicamente). Deterministico
+via seed: senza `seed` esplicito ogni variabile deriva il proprio (vedi
+«Seed» sotto), quindi variabili e path diversi si decorrelano da soli.
+
+```yaml
+spread:
+  n: 8
+  over:
+    base.volume:
+      expr: "v - 2 * i"             # pescaggio + gradino deterministico
+      let:
+        v: {base: -12, range: 6}    # banda-let: un random per stream in [-12, -6]
+    axes.density.base:
+      expr: "env * g"
+      let:
+        env: [[0, 1], [0.1583, 1.5]]
+        g: {base: 40, range: 20, seed: 42}   # stessa sagoma, livello random
+```
+
 **Ordine del merge** (il più specifico vince): override comune dell'entry →
 valore della strategy → patch esplicita. Una entry esplicita omonima di un
 generato è una **patch**: deep-merge sopra il generato e viene consumata (non
@@ -552,9 +582,10 @@ generati entrano nel documento stack ma, se l'entry non dichiara un proprio
 varianti di sweep. Un `sweep:` esplicito nell'entry lo riattiva per tutti i
 generati (una patch può riattivarlo per uno solo).
 
-**Seed.** La banda senza `seed` deriva `stable_seed("<entry>:spread:<path>")`:
-deterministico tra run, path diversi decorrelati da soli. I generati hanno poi
-ciascuno il proprio `stream_id`, quindi i seed Y/X per-stream si
+**Seed.** La banda senza `seed` deriva `stable_seed("<entry>:spread:<path>")`;
+una banda-let senza `seed` deriva `stable_seed("<entry>:spread:<path>:let:<var>")`:
+deterministico tra run, path e variabili diversi decorrelati da soli. I generati
+hanno poi ciascuno il proprio `stream_id`, quindi i seed Y/X per-stream si
 auto-decorrelano col meccanismo esistente.
 
 ## Layout di `generated/`
