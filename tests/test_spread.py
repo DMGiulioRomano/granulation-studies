@@ -440,3 +440,65 @@ streams:
     assert exc.value.stream == "v"
     assert exc.value.source == "study.yml"
     assert exc.value.line == 8  # riga di streams.v.spread
+
+
+# --- CLI: artefatto streams_expanded.yml (lo "yaml di aiuto") ----------------------
+
+def _cli_study(tmp_path, monkeypatch, doc):
+    import os
+
+    import yaml as _yaml
+
+    from granstudies import __main__ as cli
+
+    sdir = tmp_path / "studies" / doc["study_id"]
+    sdir.mkdir(parents=True)
+    (sdir / "study.yml").write_text(_yaml.safe_dump(doc, sort_keys=False))
+    monkeypatch.setattr(
+        cli, "study_dir",
+        lambda study: os.path.join(str(tmp_path), "studies", study),
+    )
+    monkeypatch.setattr(
+        cli, "gen_dir",
+        lambda study: os.path.join(str(tmp_path), "generated", study),
+    )
+    return cli, doc["study_id"], tmp_path / "generated" / doc["study_id"]
+
+
+def _stack_doc():
+    doc = _doc()
+    doc["stack"] = {}
+    doc["streams"]["v"]["spread"]["over"]["base.onset"] = {
+        "ramp": {"start": 0, "step": 2},
+    }
+    return doc
+
+
+def test_cmd_stack_writes_expanded_streams(tmp_path, monkeypatch):
+    import yaml as _yaml
+
+    cli, study, gdir = _cli_study(tmp_path, monkeypatch, _stack_doc())
+    assert cli.cmd_stack(study) == 0
+    artifact = gdir / "yaml" / "streams_expanded.yml"
+    assert artifact.exists()
+    expanded = _yaml.safe_load(artifact.read_text())
+    assert list(expanded) == ["base", "v_1", "v_2", "v_3"]
+    assert expanded["v_2"]["base"]["onset"] == 2
+    assert all("spread" not in (e or {}) for e in expanded.values())
+
+
+def test_cmd_stack_without_spread_writes_no_artifact(tmp_path, monkeypatch):
+    doc = _stack_doc()
+    doc["streams"] = {"base": {}}
+    cli, study, gdir = _cli_study(tmp_path, monkeypatch, doc)
+    assert cli.cmd_stack(study) == 0
+    assert not (gdir / "yaml" / "streams_expanded.yml").exists()
+
+
+def test_cmd_sweep_writes_expanded_streams(tmp_path, monkeypatch):
+    doc = _stack_doc()
+    doc["sweep"] = {"mode": "discrete"}
+    doc["base"]["duration"] = 5
+    cli, study, gdir = _cli_study(tmp_path, monkeypatch, doc)
+    assert cli.cmd_sweep(study) == 0
+    assert (gdir / "yaml" / "streams_expanded.yml").exists()

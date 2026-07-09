@@ -74,6 +74,28 @@ def _load_specs(study: str, stream: str | None = None) -> list:
     return specs
 
 
+def _write_expanded_streams(study: str, data: Dict[str, Any]) -> None:
+    """Materializza il dict ``streams:`` espanso quando lo studio ha spread.
+
+    E' lo "yaml di aiuto": ``generated/<study>/yaml/streams_expanded.yml``
+    mostra gli stream generati dalle entry-spread (solo ispezione, la
+    pipeline legge sempre ``study.yml``). Va chiamato dopo ``_load_specs``,
+    a validazione gia' avvenuta. Scrittura incrementale come ogni YAML
+    generato (mtime fermo a contenuto identico).
+    """
+    from .render import _dump
+    from .spread import expand_spreads
+
+    streams = data.get("streams") or {}
+    if not any(isinstance(e, dict) and "spread" in e for e in streams.values()):
+        return
+    out = os.path.join(gen_dir(study), "yaml")
+    os.makedirs(out, exist_ok=True)
+    path = os.path.join(out, "streams_expanded.yml")
+    _dump(path, expand_spreads(streams))
+    print(f"[spread] streams espansi -> {path}")
+
+
 # --- comandi ---------------------------------------------------------------
 
 def cmd_sweep(study: str, stream: str | None = None) -> int:
@@ -81,12 +103,14 @@ def cmd_sweep(study: str, stream: str | None = None) -> int:
 
     # Attivazione per presenza: parte solo il processo il cui blocco e'
     # definito nel documento (nessun selettore mode a scegliere tra i due).
-    if "sweep" not in _load_data(study):
+    data = _load_data(study)
+    if "sweep" not in data:
         print(f"[sweep] nessun blocco 'sweep:' in {study}/study.yml — niente da fare.")
         return 0
     specs = _load_specs(study, stream)
     if not specs:
         return 1
+    _write_expanded_streams(study, data)
     out = os.path.join(gen_dir(study), "yaml", "sweep")
     # Snapshot degli mtime pre-sweep: _dump non tocca i file a contenuto
     # identico, quindi "mtime cambiato o file nuovo" = variante da rirenderizzare
@@ -157,12 +181,14 @@ def _warn_orphans(variants_dir: str, written: set[str], scoped: bool) -> None:
 def cmd_stack(study: str) -> int:
     from .render import write_stack
 
-    if "stack" not in _load_data(study):
+    data = _load_data(study)
+    if "stack" not in data:
         print(f"[stack] nessun blocco 'stack:' in {study}/study.yml — niente da fare.")
         return 0
     specs = _load_specs(study)
     if not specs:
         return 1
+    _write_expanded_streams(study, data)
     out = os.path.join(gen_dir(study), "yaml")
     target = os.path.join(out, "stack", "stack.yml")
     before = os.path.getmtime(target) if os.path.exists(target) else None
