@@ -18,7 +18,7 @@ import copy
 from typing import Any, Dict, List
 
 from .errors import ErrCtx
-from .value_generators import y_generator
+from .value_generators import band, expand_params, ramp, stable_seed, y_generator
 from .yaml_loc import Locations
 
 # Chiavi ammesse nel blocco ``spread:``.
@@ -75,15 +75,66 @@ def _strategy(name: str, path: str, cfg: Any, ctx: ErrCtx) -> tuple:
         return y_generator(cfg)
 
 
-def _owned_count(marker: str, params: Any) -> int | None:
+def _ramp_form(path: str, params: Dict[str, Any], ctx: ErrCtx) -> str:
+    """Forma del ramp di uno spread: ``full`` | ``step`` | ``stop``.
+
+    ``{start, stop, step}`` e' il ramp pieno degli assi (possiede il
+    conteggio); le forme parziali lasciano ``n`` allo spread: ``{start, step}``
+    e' la progressione aritmetica (l'offset additivo), ``{start, stop}`` la
+    suddivisione lineare in ``n`` punti.
+    """
+    key = ("spread", "over", path)
+    extra = set(params) - {"start", "stop", "step"}
+    if extra:
+        raise ctx.err(
+            f"spread: ramp sul path '{path}', chiavi non ammesse "
+            f"{sorted(extra)} (solo start/stop/step).",
+            key=key,
+        )
+    if "start" not in params:
+        raise ctx.err(
+            f"spread: ramp sul path '{path}' senza 'start'.",
+            key=key,
+        )
+    has_stop, has_step = "stop" in params, "step" in params
+    if has_stop and has_step:
+        return "full"
+    if has_step:
+        return "step"
+    if has_stop:
+        return "stop"
+    raise ctx.err(
+        f"spread: ramp sul path '{path}' con solo 'start' — serve almeno "
+        "'step' (progressione aritmetica) o 'stop' (suddivisione su n).",
+        key=key,
+    )
+
+
+def _owned_count(
+    name: str, path: str, marker: str, params: Any, ctx: ErrCtx
+) -> int | None:
     """Conteggio posseduto dalla strategy, se lo possiede.
 
-    ``values`` possiede sempre la propria lunghezza. Le altre strategy si
-    risolvono in ``_strategy_values`` (fetta successiva).
+    ``values`` possiede la propria lunghezza; il ramp pieno la sua griglia;
+    la banda solo se dichiara ``n`` proprio. Le forme parziali di ramp e la
+    banda senza ``n`` lasciano il conteggio allo spread.
     """
     if marker == "values":
         return len(params)
+    if marker == "ramp" and _ramp_form(path, params, ctx) == "full":
+        return len(_ramp_full(name, path, params, ctx))
+    if marker == "band" and "n" in params:
+        return params["n"]
     return None
+
+
+def _ramp_full(
+    name: str, path: str, params: Dict[str, Any], ctx: ErrCtx
+) -> List[float]:
+    """Griglia del ramp pieno, con i nodi-generatore di ``step`` gia' espansi."""
+    with ctx.wrapping(key=("spread", "over", path)):
+        seed = stable_seed(f"{name}:spread:{path}")
+        return ramp(**expand_params(params, seed=seed))
 
 
 def _resolve_n(
@@ -94,7 +145,7 @@ def _resolve_n(
     if "n" in spread:
         counts["spread.n"] = spread["n"]
     for path, (marker, params) in strategies.items():
-        owned = _owned_count(marker, params)
+        owned = _owned_count(name, path, marker, params, ctx)
         if owned is not None:
             counts[path] = owned
     if not counts:
@@ -126,14 +177,39 @@ def _resolve_n(
 def _strategy_values(
     name: str, path: str, marker: str, params: Any, n: int, ctx: ErrCtx
 ) -> List[Any]:
-    """Gli ``n`` valori della strategy, uno per stream generato."""
+    """Gli ``n`` valori della strategy, uno per stream generato.
+
+    Il seed di default (banda senza ``seed``, nodi-generatore negli Env) e'
+    ``stable_seed(f"{nome}:spread:{path}")``: deterministico tra run, e path
+    diversi della stessa spread si decorrelano da soli.
+    """
     if marker == "values":
         return list(params)
-    raise ctx.err(
-        f"spread: strategy '{marker}' non supportata sul path '{path}'.",
-        key=("spread", "over", path),
-        hint="per ora e' disponibile 'values' (lista esplicita).",
-    )
+    key = ("spread", "over", path)
+    if marker == "ramp":
+        form = _ramp_form(path, params, ctx)
+        if form == "full":
+            return _ramp_full(name, path, params, ctx)
+        start = params["start"]
+        if form == "step":
+            step = params["step"]
+            if not isinstance(step, (int, float)):
+                raise ctx.err(
+                    f"spread: ramp sul path '{path}', senza 'stop' il passo "
+                    f"deve essere scalare (ricevuto {step!r}).",
+                    key=key,
+                    hint="per un passo-Env dichiara anche 'stop' (ramp pieno).",
+                )
+            return [round(start + step * i, 9) for i in range(n)]
+        stop = params["stop"]  # form == "stop": suddivisione lineare su n
+        if n == 1:
+            return [round(start, 9)]
+        return [round(start + (stop - start) * i / (n - 1), 9) for i in range(n)]
+    # banda: n dello spread, seed esplicito o derivato per-path.
+    band_params = {k: v for k, v in params.items() if k != "n"}
+    band_params.setdefault("seed", stable_seed(f"{name}:spread:{path}"))
+    with ctx.wrapping(key=key):
+        return band(n=n, **expand_params(band_params, seed=band_params["seed"]))
 
 
 def _validate_spread(name: str, spread: Any, ctx: ErrCtx) -> Dict[str, Any]:

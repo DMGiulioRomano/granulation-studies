@@ -141,6 +141,142 @@ def test_n_below_one_raises():
         expand_spreads(_streams(v=entry))
 
 
+# --- strategy ramp ---------------------------------------------------------------
+
+def test_ramp_full_owns_count():
+    entry = {"spread": {"over": {"base.onset": {"ramp": {"start": 0, "stop": 6, "step": 2}}}}}
+    out = expand_spreads(_streams(v=entry))
+    assert list(out) == ["v_1", "v_2", "v_3", "v_4"]
+    assert [out[k]["base"]["onset"] for k in out] == [0, 2, 4, 6]
+
+
+def test_ramp_start_step_needs_n():
+    entry = {
+        "spread": {
+            "n": 4,
+            "over": {"base.pointer.start": {"ramp": {"start": 0.1, "step": 0.1}}},
+        },
+    }
+    out = expand_spreads(_streams(v=entry))
+    assert [out[k]["base"]["pointer"]["start"] for k in out] == [0.1, 0.2, 0.3, 0.4]
+
+
+def test_ramp_start_step_without_n_raises():
+    entry = {"spread": {"over": {"base.onset": {"ramp": {"start": 0, "step": 1}}}}}
+    with pytest.raises(SpecError):
+        expand_spreads(_streams(v=entry))
+
+
+def test_ramp_start_stop_is_linspace_over_n():
+    entry = {
+        "spread": {
+            "n": 5,
+            "over": {"base.volume": {"ramp": {"start": -12, "stop": 0}}},
+        },
+    }
+    out = expand_spreads(_streams(v=entry))
+    assert [out[k]["base"]["volume"] for k in out] == [-12, -9, -6, -3, 0]
+
+
+def test_ramp_start_stop_with_n_1_holds_start():
+    entry = {"spread": {"n": 1, "over": {"base.volume": {"ramp": {"start": -12, "stop": 0}}}}}
+    out = expand_spreads(_streams(v=entry))
+    assert out["v_1"]["base"]["volume"] == -12
+
+
+def test_ramp_only_start_raises():
+    entry = {"spread": {"n": 3, "over": {"base.onset": {"ramp": {"start": 0}}}}}
+    with pytest.raises(SpecError):
+        expand_spreads(_streams(v=entry))
+
+
+def test_ramp_full_count_mismatch_with_explicit_n_raises():
+    entry = {
+        "spread": {
+            "n": 3,
+            "over": {"base.onset": {"ramp": {"start": 0, "stop": 6, "step": 2}}},
+        },
+    }
+    with pytest.raises(SpecError):
+        expand_spreads(_streams(v=entry))
+
+
+# --- strategy banda ----------------------------------------------------------------
+
+def test_band_draws_n_values_in_band():
+    entry = {
+        "spread": {
+            "n": 6,
+            "over": {"base.volume": {"base": -12, "range": 6}},
+        },
+    }
+    out = expand_spreads(_streams(v=entry))
+    vols = [out[k]["base"]["volume"] for k in out]
+    assert len(vols) == 6
+    assert all(-12 <= v <= -6 for v in vols)
+
+
+def test_band_explicit_seed_matches_band_generator():
+    from granstudies.value_generators import band
+
+    entry = {
+        "spread": {
+            "n": 4,
+            "over": {"base.volume": {"base": -12, "range": 6, "seed": 42}},
+        },
+    }
+    out = expand_spreads(_streams(v=entry))
+    assert [out[k]["base"]["volume"] for k in out] == band(n=4, base=-12, range=6, seed=42)
+
+
+def test_band_default_seed_deterministic_and_decorrelated_per_path():
+    entry = {
+        "spread": {
+            "n": 5,
+            "over": {
+                "base.volume": {"base": -12, "range": 6},
+                "base.pointer.start": {"base": 0.1, "range": 0.5},
+            },
+        },
+    }
+    out_a = expand_spreads(_streams(v=entry))
+    out_b = expand_spreads(_streams(v=entry))
+    vols = [out_a[k]["base"]["volume"] for k in out_a]
+    starts = [out_a[k]["base"]["pointer"]["start"] for k in out_a]
+    # deterministico tra run
+    assert vols == [out_b[k]["base"]["volume"] for k in out_b]
+    # path diversi si decorrelano da soli (frazioni della banda diverse)
+    frac_v = [(v + 12) / 6 for v in vols]
+    frac_s = [(s - 0.1) / 0.5 for s in starts]
+    assert frac_v != frac_s
+
+
+def test_band_with_inner_n_owns_count():
+    entry = {"spread": {"over": {"base.volume": {"base": -12, "range": 6, "n": 3}}}}
+    out = expand_spreads(_streams(v=entry))
+    assert list(out) == ["v_1", "v_2", "v_3"]
+
+
+def test_band_without_n_anywhere_raises():
+    entry = {"spread": {"over": {"base.volume": {"base": -12, "range": 6}}}}
+    with pytest.raises(SpecError):
+        expand_spreads(_streams(v=entry))
+
+
+def test_ramp_full_paired_with_band():
+    entry = {
+        "spread": {
+            "over": {
+                "base.onset": {"ramp": {"start": 0, "stop": 4, "step": 2}},
+                "base.volume": {"base": -12, "range": 6},
+            },
+        },
+    }
+    out = expand_spreads(_streams(v=entry))
+    assert list(out) == ["v_1", "v_2", "v_3"]
+    assert all("volume" in out[k]["base"] for k in out)
+
+
 # --- errori di schema ------------------------------------------------------------
 
 def test_spread_without_over_raises():
