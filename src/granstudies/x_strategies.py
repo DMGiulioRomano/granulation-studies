@@ -15,10 +15,9 @@ plateau/transition e non passa di qui.
 """
 from __future__ import annotations
 
-import random
 from typing import Any, Dict, List
 
-from .value_generators import Threshold, _threshold_at
+from .value_generators import Threshold, _band_sampler
 
 # Tetto anti-runaway: una banda di frequenza troppo alta (o una durata enorme)
 # genererebbe milioni di breakpoint. Meglio un errore esplicito di un file YAML
@@ -45,6 +44,8 @@ def walk(
     base: Threshold,
     range: Threshold = 0.0,
     seed: int = 0,
+    distribution: str = "uniform",
+    drift: Dict[str, Any] | None = None,
 ) -> List[float]:
     """Tempi di breakpoint generati da una *frequenza di generazione* (camminata).
 
@@ -55,26 +56,24 @@ def walk(
     si supera la fine. I tempi sono poi normalizzati in ``[0, 1]``.
 
     ``base``/``range`` sono inviluppi mobili nelle stesse forme della banda di Y
-    (scalare | ``[a, b]`` | ``[[t, v], ...]`` | ``{type, points, curve}``),
-    valutati via ``_threshold_at`` (modulo condiviso X/Y). ``range`` assente (0)
-    = banda collassata: la camminata segue ``base`` deterministicamente (il
-    ``seed`` non influisce sui tempi). Deterministico via ``seed``. Guardie:
-    frequenza non positiva -> errore (passo infinito, nessun punto); piu' di
+    (scalare | ``[a, b]`` | ``[[t, v], ...]`` | ``{type, points, curve}``);
+    il pescaggio della frequenza e' lo stesso della banda di Y
+    (``_band_sampler``, modulo condiviso X/Y): ``distribution`` governa come si
+    pesca (``uniform`` | ``gaussian``), ``drift`` la rende un random walk
+    correlato — ``step`` letto sul tempo reale normalizzato, il dominio di
+    ``base``/``range`` in questo registro. ``range`` assente (0) = banda
+    collassata: la camminata segue ``base`` deterministicamente (il ``seed``
+    non influisce sui tempi). Deterministico via ``seed``. Guardie: frequenza
+    non positiva -> errore (passo infinito, nessun punto); piu' di
     ``MAX_POINTS`` punti -> errore.
     """
     if duration <= 0:
         raise ValueError(f"walk-X: duration deve essere > 0 (ricevuta {duration})")
-    spread = range
-    rng = random.Random(seed)
+    sample = _band_sampler(base, range, seed, distribution, drift, "walk-X")
     times: List[float] = [0.0]
     t = 0.0  # secondi reali
     while True:
-        frac = t / duration
-        lo = _threshold_at(base, frac)
-        hi = lo + _threshold_at(spread, frac)
-        if lo > hi:
-            raise ValueError(f"walk-X: range negativo a t={t:.3f}s (banda [{lo}, {hi}]).")
-        f = rng.uniform(lo, hi)
+        f = sample(t / duration)
         if f <= 0:
             raise ValueError(
                 f"walk-X: frequenza non positiva ({f}) a t={t:.3f}s — "

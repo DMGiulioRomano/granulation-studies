@@ -32,7 +32,7 @@ from .x_strategies import x_owns_n
 _GENERATOR_KEYS = Y_GENERATOR_KEYS
 # Chiavi della banda piatta che accompagnano ``base`` (viaggiano con essa,
 # vanno rimosse insieme quando uno stream cambia generatore su quell'asse).
-_BAND_KEYS = frozenset({"base", "range", "n", "seed"})
+_BAND_KEYS = frozenset({"base", "range", "n", "seed", "distribution", "drift"})
 
 
 @dataclass(frozen=True)
@@ -290,9 +290,10 @@ def _stack_config(
     """Estrae dal documento il blocco ``stack:``: (config per-asse, seed-X globale).
 
     Schema piatto: ``seed`` e' l'unica chiave riservata; ogni altra chiave e' un
-    nome d'asse -> camminata-X (banda ``base``/``range``/``seed``). La *presenza*
-    dell'asse marca la camminata; l'assenza dal blocco = ``linear``. Una entry
-    annullata (``asse: null``, utile per riportare a linear in uno stream) viene
+    nome d'asse -> camminata-X (banda ``base``/``range``/``seed``, piu'
+    ``distribution``/``drift`` come nella banda di Y). La *presenza* dell'asse
+    marca la camminata; l'assenza dal blocco = ``linear``. Una entry annullata
+    (``asse: null``, utile per riportare a linear in uno stream) viene
     scartata. Blocco assente -> (None, None); ``curve`` va dentro l'Env di
     ``base``/``range``, non come chiave dell'entry.
     """
@@ -318,11 +319,11 @@ def _stack_config(
                 axis=name,
                 hint="un asse assente dal blocco 'stack:' resta 'linear' (n dalla Y).",
             )
-        extra = set(xcfg) - {"base", "range", "seed"}
+        extra = set(xcfg) - {"base", "range", "seed", "distribution", "drift"}
         if extra:
             raise ctx.err(
                 f"stack: asse '{name}', chiavi non ammesse {sorted(extra)} "
-                "(solo base/range/seed).",
+                "(solo base/range/seed/distribution/drift).",
                 key=("stack", name),
                 axis=name,
                 hint="'curve' va dentro l'Env di base/range, non come chiave dell'entry.",

@@ -218,6 +218,24 @@ def test_band_draws_n_values_in_band():
     assert all(-12 <= v <= -6 for v in vols)
 
 
+def test_band_with_distribution_and_drift_in_spread():
+    # Le chiavi di banda dell'issue #16 viaggiano anche nella strategy di spread.
+    entry = {
+        "spread": {
+            "n": 6,
+            "over": {"base.volume": {"base": -12, "range": 6,
+                                     "distribution": "gaussian",
+                                     "drift": {"step": 0.2}}},
+        },
+    }
+    a = expand_spreads(_streams(v=entry))
+    b = expand_spreads(_streams(v=entry))
+    vols = [a[k]["base"]["volume"] for k in a]
+    assert [b[k]["base"]["volume"] for k in b] == vols
+    assert len(vols) == 6
+    assert all(-12 <= v <= -6 for v in vols)
+
+
 def test_band_explicit_seed_matches_band_generator():
     from granstudies.value_generators import band
 

@@ -166,6 +166,8 @@ density:
   range: .009                  # ampiezza della banda; opzionale (default 0 = banda
                                # collassata: la sequenza segue `base` deterministicamente)
   seed: 1988                   # opzionale (default: `axes.seed`, poi auto per-stream)
+  distribution: gaussian       # opzionale: come si pesca (uniform, il default | gaussian)
+  drift: {step: 0.1}           # opzionale: pescaggio correlato (random walk, vedi sotto)
 ```
 
 `n` appartiene a chi possiede il conteggio dei punti (*n-ownership*): con la
@@ -198,6 +200,59 @@ density:
 > Nel processo `stack` più assi generati con lo stesso `n` e la stessa strategy-X
 > si muovono insieme (breakpoint agli stessi tempi): si sentono più modulazioni
 > contemporaneamente, senza il prodotto cartesiano.
+
+### `distribution` — come si pesca dentro la banda
+
+Sibling di `base`/`range` (sia nella banda di Y sia nella camminata-X del
+blocco `stack:`): governa **come** si estrae dentro `[base, base+range]`,
+indipendentemente dal fatto che il pescaggio sia correlato (`drift`) o no.
+
+- `uniform` (default) — il comportamento storico, ogni punto della banda è
+  equiprobabile. Bit-identico ai file generati finora.
+- `gaussian` — media al **centro banda**, deviazione standard pari a un sesto
+  della larghezza (i bordi cadono a 3 sigma); il ~0.3% di estrazioni fuori
+  banda si appiattisce sul bordo (clamp). I valori si addensano sul centro
+  invece di riempire la banda uniformemente.
+
+Con banda collassata (`range` 0) non c'è varianza: entrambe seguono `base`.
+
+### `drift` — pescaggio correlato (random walk)
+
+Marcatore sibling di `base`/`range`, valido negli stessi due registri di
+`distribution`. Quando presente, il valore non è più un pescaggio indipendente
+a ogni punto ma `precedente + passo_casuale` — il «passo dell'ubriaco»: niente
+su-e-giù a scatti dentro la banda, ma una deriva organica.
+
+```yaml
+drift:
+  step: 0.1        # frazione della banda per passo; è un Env: [[0,.02],[.5,.2]]
+  seed: 7          # opzionale: deriva dal seed della banda se assente
+```
+
+Meccanica:
+
+- **valore iniziale**: il pescaggio di sempre (`uniform`/`gaussian` secondo
+  `distribution`), poi da lì in poi cammina;
+- **passo**: `step(frac) * larghezza_banda(frac)` — `step` è **frazione della
+  banda corrente**, si adatta da solo se la banda si allarga o si restringe.
+  `step` è un `Env` (stesse forme di `base`/`range`, **nodi-generatore
+  annidati compresi**), consultato a ogni passo sul dominio del registro:
+  posizione sull'asse per la banda-Y, tempo reale normalizzato per la
+  camminata-X. Negativo in un punto → errore; `0` congela il valore;
+- **distribuzione del passo**: la stessa `distribution` della banda —
+  `uniform` → passo uniforme in `[-s, +s]`, `gaussian` → passo gaussiano con
+  sigma `s`;
+- **bordo banda**: **riflessione** — il valore rimbalza su `[base, base+range]`
+  invece di appiattirsi;
+- **banda mobile**: se la banda trasla e il valore corrente resta fuori,
+  clamp immediato dentro i nuovi limiti, poi si riparte a camminare;
+- **seed**: l'RNG del passo è separato da quello della banda; senza `seed`
+  proprio deriva dalla catena gerarchica (`stable_seed` del seed effettivo
+  della banda con salt `:drift`, come per i nodi annidati): cambiare il seed
+  della banda rigenera anche la deriva, fissare `drift.seed` congela solo la
+  forma della camminata.
+
+Design completo: `docs/plans/done/drift-distribution.md` (issue #16).
 
 ### `curve` — piega non lineare del segmento
 
@@ -302,14 +357,17 @@ riconosce dalla **presenza** dell'asse nel blocco.
 | Strategy-X | Come si dichiara | Chi possiede `n` |
 |------------|------------------|-------------------|
 | `linear` | asse **assente** dal blocco | la **Y** (`values`/`ramp`/banda con `n`); tempi equispaziati `t_i = i/(n-1)`, estremo `t=1` incluso |
-| camminata (`walk`, alla `rspline`) | asse **presente** con `{base: <env>, range?: <env>, seed?: int}` | la **X**: `n` emerge dalla frequenza integrata sulla durata |
+| camminata (`walk`, alla `rspline`) | asse **presente** con `{base: <env>, range?: <env>, seed?: int, distribution?, drift?}` | la **X**: `n` emerge dalla frequenza integrata sulla durata |
 
 Con la camminata la frequenza si pesca a ogni punto nella banda
 `[base(t), base(t)+range(t)]` (Hz sulla durata reale; `base`/`range` accettano
-le stesse forme della banda di Y) e il punto successivo cade a `t + 1/f`. La Y
-dev'essere una **banda senza** `n`, campionata ai tempi reali dei breakpoint.
-`range` assente = camminata **deterministica** (segue `base`, il seed non
-influisce sui tempi). Le due direzioni sbagliate (camminata-X con Y che enumera; banda Y
+le stesse forme della banda di Y) e il punto successivo cade a `t + 1/f`. Anche
+`distribution` e `drift` valgono qui, con la stessa semantica della banda di Y
+(il dominio degli `Env` è il tempo reale normalizzato): con `drift` la
+frequenza di generazione deriva invece di saltare — accelerandi/ritardandi
+stocastici ma organici. La Y dev'essere una **banda senza** `n`, campionata ai
+tempi reali dei breakpoint. `range` assente = camminata **deterministica**
+(segue `base`, il seed non influisce sui tempi). Le due direzioni sbagliate (camminata-X con Y che enumera; banda Y
 senza `n` con X lineare) sono errori di parse (*n-ownership*).
 
 > **Due equispaziati diversi.** «`base` costante = tempi equispaziati» vale per la
@@ -386,7 +444,7 @@ per gli assi:
 | `ramp` | `{start, stop, step}` | sì (griglia) | il ramp pieno degli assi |
 | `ramp` | `{start, step}` | no | progressione aritmetica `start + i·step` (offset additivo) |
 | `ramp` | `{start, stop}` | no | suddivisione lineare in `n` punti |
-| banda | `base`/`range`/`seed` (+`n` opz.) | solo con `n` proprio | `n` estrazioni nella banda |
+| banda | `base`/`range`/`seed`/`distribution`/`drift` (+`n` opz.) | solo con `n` proprio | `n` estrazioni nella banda |
 
 `spread.n` esplicito e conteggi posseduti devono **coincidere**; se `n` è
 omesso lo definisce l'unico conteggio posseduto; nessuna fonte → errore. Con

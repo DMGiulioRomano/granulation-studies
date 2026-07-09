@@ -152,45 +152,173 @@ def _band_at(base: Threshold, spread: Threshold, frac: float, where: str) -> tup
     return lo, hi
 
 
-def band(n: int, base: Threshold, range: Threshold = 0.0, seed: int = 0) -> List[float]:
+# Le distribuzioni di pescaggio dentro la banda (issue #16). ``uniform`` e' il
+# comportamento storico; ``gaussian`` concentra sul centro banda.
+_DISTRIBUTIONS = frozenset({"uniform", "gaussian"})
+
+
+def _draw(rng: random.Random, lo: float, hi: float, distribution: str) -> float:
+    """Un pescaggio dentro ``[lo, hi]`` secondo ``distribution``.
+
+    ``uniform``: come sempre. ``gaussian``: media al centro banda, sigma
+    ``(hi - lo) / 6`` (i bordi cadono a 3 sigma), clamp ai bordi — la coda
+    fuori banda (~0.3%) si appiattisce sull'estremo invece di uscire.
+    """
+    if distribution == "uniform":
+        return rng.uniform(lo, hi)
+    mu = (lo + hi) / 2.0
+    sigma = (hi - lo) / 6.0
+    if sigma == 0:
+        return mu
+    return min(max(rng.gauss(mu, sigma), lo), hi)
+
+
+def _check_distribution(distribution: str, where: str) -> None:
+    if distribution not in _DISTRIBUTIONS:
+        opts = " | ".join(sorted(_DISTRIBUTIONS))
+        raise ValueError(
+            f"{where}: distribution '{distribution}' non ammessa ({opts})."
+        )
+
+
+# Chiavi ammesse nel marcatore ``drift`` (issue #16): ``step`` (Env, frazione
+# della banda corrente per passo) obbligatoria, ``seed`` opzionale (derivato
+# dal seed della banda se assente, catena gerarchica alla nested-generators).
+_DRIFT_KEYS = frozenset({"step", "seed"})
+
+
+def _check_drift(drift: Any, where: str) -> None:
+    if not isinstance(drift, dict):
+        raise ValueError(
+            f"{where}: drift deve essere un dict {{step, seed?}} (ricevuto {drift!r})."
+        )
+    if "step" not in drift:
+        raise ValueError(f"{where}: drift senza 'step' (frazione della banda per passo).")
+    extra = set(drift) - _DRIFT_KEYS
+    if extra:
+        raise ValueError(
+            f"{where}: drift, chiavi non ammesse {sorted(extra)} (solo step/seed)."
+        )
+
+
+def _reflect(v: float, lo: float, hi: float) -> float:
+    """Riflette ``v`` dentro ``[lo, hi]`` (fold triangolare sul bordo banda).
+
+    Periodica su ``2 * larghezza``: robusta anche a passi piu' grandi della
+    banda. Banda collassata -> ``lo``.
+    """
+    width = hi - lo
+    if width <= 0:
+        return lo
+    t = (v - lo) % (2.0 * width)
+    return lo + (width - abs(t - width))
+
+
+def _band_sampler(
+    base: Threshold,
+    spread: Threshold,
+    seed: int,
+    distribution: str,
+    drift: Dict[str, Any] | None,
+    where: str,
+):
+    """``sample(frac) -> valore``: il pescaggio in banda, con o senza drift.
+
+    L'unico posto dove vive la meccanica del pescaggio, condiviso da ``band``,
+    ``band_at`` e dalla camminata-X. Senza ``drift`` ogni chiamata e' un
+    pescaggio indipendente (``_draw``). Con ``drift`` il primo valore e' il
+    pescaggio di sempre (RNG della banda), poi ``precedente + passo``:
+    ``s = step(frac) * larghezza`` (frazione della banda *corrente*), passo
+    ``U(-s, +s)`` o ``N(0, s)`` secondo ``distribution``, estratto da un RNG
+    separato (``drift.seed``, altrimenti ``stable_seed(f"{seed}:drift")``);
+    riflessione sul bordo banda, clamp immediato se la banda mobile ha
+    lasciato fuori il valore corrente.
+    """
+    _check_distribution(distribution, where)
+    rng = random.Random(seed)
+    if drift is None:
+        def sample(frac: float) -> float:
+            lo, hi = _band_at(base, spread, frac, where)
+            return _draw(rng, lo, hi, distribution)
+        return sample
+    _check_drift(drift, where)
+    step_env = drift["step"]
+    drift_rng = random.Random(drift.get("seed", stable_seed(f"{seed}:drift")))
+    prev: List[float] = []  # stato del walk (vuoto = primo punto)
+
+    def sample(frac: float) -> float:
+        lo, hi = _band_at(base, spread, frac, where)
+        if not prev:
+            v = _draw(rng, lo, hi, distribution)
+        else:
+            s = _threshold_at(step_env, frac)
+            if s < 0:
+                raise ValueError(
+                    f"{where}: drift.step negativo ({s}) a frac={frac} — "
+                    "l'Env di step deve restare >= 0."
+                )
+            s *= hi - lo
+            v = min(max(prev[0], lo), hi)   # la banda mobile puo' esser scappata
+            if distribution == "uniform":
+                v += drift_rng.uniform(-s, s)
+            else:
+                v += drift_rng.gauss(0.0, s)
+            v = _reflect(v, lo, hi)
+        prev[:] = [v]
+        return v
+
+    return sample
+
+
+def band(
+    n: int,
+    base: Threshold,
+    range: Threshold = 0.0,
+    seed: int = 0,
+    distribution: str = "uniform",
+    drift: Dict[str, Any] | None = None,
+) -> List[float]:
     """``n`` valori casuali entro una banda ``[base, base + range]`` mobile.
 
     ``base``/``range`` scalari = banda fissa; ``[a, b]`` = banda che scorre/si
     allarga linearmente lungo la sequenza. Il valore al passo ``i`` e' estratto
-    uniformemente nella banda a quel punto; ``range`` omesso (0) = banda
-    collassata, la sequenza segue ``base`` deterministicamente. Deterministico
-    via ``seed`` (stesso seed -> stessa sequenza), requisito del ciclo
-    rigenera-e-confronta.
+    nella banda a quel punto secondo ``distribution`` (``uniform`` |
+    ``gaussian``); con ``drift`` il pescaggio e' correlato — un random walk
+    ``precedente + passo`` dentro la banda (vedi ``_band_sampler``). ``range``
+    omesso (0) = banda collassata, la sequenza segue ``base``
+    deterministicamente. Deterministico via ``seed`` (stesso seed -> stessa
+    sequenza), requisito del ciclo rigenera-e-confronta.
     """
     if n < 1:
         raise ValueError(f"band: n deve essere >= 1 (ricevuto {n})")
-    rng = random.Random(seed)
+    sample = _band_sampler(base, range, seed, distribution, drift, "band")
     out: List[float] = []
     for i in _range(n):
         frac = i / (n - 1) if n > 1 else 0.0
-        lo, hi = _band_at(base, range, frac, "band")
-        out.append(round(rng.uniform(lo, hi), 9))
+        out.append(round(sample(frac), 9))
     return out
 
 
 def band_at(
-    fracs: Sequence[float], base: Threshold, range: Threshold = 0.0, seed: int = 0
+    fracs: Sequence[float],
+    base: Threshold,
+    range: Threshold = 0.0,
+    seed: int = 0,
+    distribution: str = "uniform",
+    drift: Dict[str, Any] | None = None,
 ) -> List[float]:
     """Un valore casuale nella banda ``[base, base + range]`` per ogni ``frac``.
 
     Variante di ``band`` per il coupling con la X-walk (stack): quando la X
     possiede ``n``, la banda va campionata al tempo *reale* ``t_i`` di ogni
     breakpoint, non all'indice ``i/(n-1)``. La Y non possiede ``n``: pesca un
-    valore per ogni punto che la X ha creato. Deterministico via ``seed``.
+    valore per ogni punto che la X ha creato. Deterministico via ``seed``;
+    ``distribution``/``drift`` come in ``band``.
     """
     if not fracs:
         raise ValueError("band_at: serve almeno un frac (lista vuota).")
-    rng = random.Random(seed)
-    out: List[float] = []
-    for frac in fracs:
-        lo, hi = _band_at(base, range, frac, "band_at")
-        out.append(round(rng.uniform(lo, hi), 9))
-    return out
+    sample = _band_sampler(base, range, seed, distribution, drift, "band_at")
+    return [round(sample(frac), 9) for frac in fracs]
 
 
 # Le chiavi che marcano il generatore Y di un asse (mutuamente esclusive): la
@@ -199,7 +327,7 @@ def band_at(
 Y_GENERATOR_KEYS = frozenset({"values", "ramp", "base"})
 
 # Chiavi che accompagnano ``base`` nella banda piatta (viaggiano con essa).
-_BAND_KEYS = frozenset({"base", "range", "n", "seed"})
+_BAND_KEYS = frozenset({"base", "range", "n", "seed", "distribution", "drift"})
 
 
 def y_generator(cfg: Dict[str, Any]) -> tuple:
@@ -339,13 +467,20 @@ def expand_params(
     """Espande i nodi-generatore nei parametri di un generatore (walk generico).
 
     Cammina il dict senza schema per-strategia: ogni valore che e' un nodo
-    (``base``/``range`` di banda e camminata, ``step`` di ramp, e ogni parametro
-    Env futuro) si compila in breakpoint; il resto passa invariato. Da chiamare
-    alle seam, col seed effettivo gia' risolto (il ``path`` accumulato entra
-    nella derivazione del seed dei nodi figli).
+    (``base``/``range`` di banda e camminata, ``step`` di ramp e di drift, e
+    ogni parametro Env futuro) si compila in breakpoint; il resto passa
+    invariato. I dict che *non* sono nodi (es. ``drift: {step, seed}``) si
+    attraversano ricorsivamente, cosi' gli Env annidati in parametri composti
+    si trovano senza schema (le forme statiche ``{type, points, curve}``
+    attraversano invariate: nessun loro valore e' un nodo). Da chiamare alle
+    seam, col seed effettivo gia' risolto (il ``path`` accumulato entra nella
+    derivazione del seed dei nodi figli).
     """
     out: Dict[str, Any] = {}
     for k, v in params.items():
         sub = f"{path}.{k}" if path else k
-        out[k] = expand_env(v, seed=seed, path=sub, depth=depth)
+        if isinstance(v, dict) and not is_generator_node(v):
+            out[k] = expand_params(v, seed=seed, path=sub, depth=depth)
+        else:
+            out[k] = expand_env(v, seed=seed, path=sub, depth=depth)
     return out

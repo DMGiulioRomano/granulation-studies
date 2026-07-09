@@ -248,3 +248,52 @@ def test_nested_y_ramp_with_env_step_in_stack():
     y = {"ramp": {"start": 0, "stop": 10, "step": {"type": "step", "points": [[0, 2], [0.5, 1]]}}}
     env = axis_envelope(y, None, duration=10.0)
     assert [v for _, v in env] == [0, 2, 4, 6, 7, 8, 9, 10]
+
+
+# --- distribution e drift alle seam dello stack (issue #16) ------------------------
+
+def test_drift_in_y_band_with_x_walk_deterministic_in_band():
+    # rspline con Y in deriva: la banda [0, 10] contiene tutti i valori e la
+    # sequenza e' riproducibile.
+    y = {"band": {"base": 0, "range": 10, "drift": {"step": 0.1}}}
+    x = {"base": 5, "range": 0}
+    a = axis_envelope(y, x, duration=10.0, y_seed=1, x_seed=2)
+    b = axis_envelope(y, x, duration=10.0, y_seed=1, x_seed=2)
+    assert a == b
+    assert all(0 <= v <= 10 for _, v in a)
+    ind = axis_envelope({"band": {"base": 0, "range": 10}}, x,
+                        duration=10.0, y_seed=1, x_seed=2)
+    assert a != ind
+
+
+def test_drift_in_x_walk_changes_times_deterministically():
+    y = {"band": {"base": 0, "range": 10}}
+    x = {"base": 3, "range": 4, "drift": {"step": 0.1}}
+    a = axis_envelope(y, x, duration=10.0, y_seed=1, x_seed=2)
+    b = axis_envelope(y, x, duration=10.0, y_seed=1, x_seed=2)
+    assert a == b
+    times = [t for t, _ in a]
+    assert times == sorted(times)
+    ind = axis_envelope(y, {"base": 3, "range": 4}, duration=10.0,
+                        y_seed=1, x_seed=2)
+    assert times != [t for t, _ in ind]
+
+
+def test_gaussian_in_y_band_with_n_and_x_linear():
+    y = {"band": {"n": 12, "base": 0, "range": 10, "distribution": "gaussian"}}
+    env = axis_envelope(y, None, duration=10.0, y_seed=3)
+    assert len(env) == 12
+    assert all(0 <= v <= 10 for _, v in env)
+    assert env != axis_envelope({"band": {"n": 12, "base": 0, "range": 10}},
+                                None, duration=10.0, y_seed=3)
+
+
+def test_drift_step_nested_node_at_stack_seam():
+    # drift.step come nodo-generatore: l'espansione alla seam lo compila.
+    y = {"band": {"base": 0, "range": 10,
+                  "drift": {"step": {"n": 3, "base": 0.01, "range": 0.1}}}}
+    x = {"base": 5, "range": 0}
+    a = axis_envelope(y, x, duration=10.0, y_seed=1, x_seed=2)
+    b = axis_envelope(y, x, duration=10.0, y_seed=1, x_seed=2)
+    assert a == b
+    assert all(0 <= v <= 10 for _, v in a)

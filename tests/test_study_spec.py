@@ -380,6 +380,66 @@ def _dict_no_seeds():
     return d
 
 
+# --- distribution e drift: plumbing di parse (issue #16) --------------------------
+
+def test_sweep_band_axis_with_gaussian_and_drift():
+    # Le nuove chiavi viaggiano con la banda (sibling di base/range) e i valori
+    # si risolvono al parse, dentro la banda.
+    d = _spec_dict()
+    d["axes"]["a"] = {
+        "path": "density", "baseline": 20,
+        "n": 20, "base": 5, "range": 40,
+        "distribution": "gaussian", "drift": {"step": 0.1},
+    }
+    spec = parse_study_spec(d)
+    vals = spec.axis("a").values
+    assert len(vals) == 20
+    assert all(5 <= v <= 45 for v in vals)
+    assert parse_study_spec(d).axis("a").values == vals   # deterministico
+
+
+def test_axis_generator_carries_distribution_and_drift():
+    d = _stack_dict()
+    d["axes"]["density"]["distribution"] = "gaussian"
+    d["axes"]["density"]["drift"] = {"step": 0.1}
+    spec = parse_study_spec(d)
+    params = spec.axis("density").generator["band"]
+    assert params["distribution"] == "gaussian"
+    assert params["drift"] == {"step": 0.1}
+
+
+def test_stack_entry_accepts_distribution_and_drift():
+    d = _stack_dict()
+    d["stack"]["density"] = {
+        "base": [[0, 3], [1, 10]], "range": 1,
+        "distribution": "gaussian", "drift": {"step": 0.15},
+    }
+    spec = parse_study_spec(d)
+    assert spec.stack["density"]["drift"] == {"step": 0.15}
+
+
+def test_stack_entry_still_rejects_unknown_keys():
+    d = _stack_dict()
+    d["stack"]["density"]["sigma"] = 2
+    with pytest.raises(ValueError, match="sigma"):
+        parse_study_spec(d)
+
+
+def test_stream_generator_switch_strips_drift_and_distribution():
+    # Uno stream che passa a values deve perdere anche le nuove chiavi di banda
+    # ereditate (come gia' base/range/n/seed).
+    d = _stack_dict()
+    d["axes"]["density"]["distribution"] = "gaussian"
+    d["axes"]["density"]["drift"] = {"step": 0.1}
+    d["streams"] = {
+        "voce_a": {},
+        "voce_b": {"axes": {"density": {"values": [5, 10]}},
+                   "stack": {"density": None}},
+    }
+    specs = {s.stream_id: s for s in resolve_streams(d)}
+    assert specs["voce_b"].axis("density").generator == {"values": [5, 10]}
+
+
 def test_global_seeds_win_over_autoderivation():
     spec = parse_study_spec(_stack_dict())
     assert spec.resolved_y_seed() == 1988
