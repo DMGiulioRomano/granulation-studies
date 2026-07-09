@@ -24,6 +24,12 @@ from .value_generators import Threshold, _band_sampler
 # ingestibile: e' un errore di configurazione, non un caso d'uso.
 MAX_POINTS = 10_000
 
+# Le unita' della banda della camminata: ``hz`` (frequenza di generazione,
+# storico) o ``s`` (periodo tra punti, in secondi). Non e' una conversione di
+# notazione ma la scelta dello *spazio* del walk: pescaggio in banda,
+# interpolazione degli Env di base/range e drift vivono nell'unita' scelta.
+X_UNITS = frozenset({"hz", "s"})
+
 
 def linear(n: int) -> List[float]:
     """``n`` tempi equispaziati in ``[0, 1]``: ``t_i = i / (n - 1)``.
@@ -46,40 +52,51 @@ def walk(
     seed: int = 0,
     distribution: str = "uniform",
     drift: Dict[str, Any] | None = None,
+    unit: str = "hz",
 ) -> List[float]:
-    """Tempi di breakpoint generati da una *frequenza di generazione* (camminata).
+    """Tempi di breakpoint generati da una camminata in banda (frequenza o periodo).
 
-    La X possiede ``n``: non si dichiara, emerge dalla frequenza integrata
-    sulla durata (``n ~ int f(t) dt``). Meccanica: dal punto corrente ``t`` si
-    pesca ``f`` nella banda ``[base(t), base(t) + range(t)]`` (Hz sulla durata
-    reale in secondi); il punto successivo cade a ``t + 1/f``; si ripete finche'
-    si supera la fine. I tempi sono poi normalizzati in ``[0, 1]``.
+    La X possiede ``n``: non si dichiara, emerge dalla banda integrata sulla
+    durata. Meccanica: dal punto corrente ``t`` si pesca un valore nella banda
+    ``[base(t), base(t) + range(t)]``; con ``unit: hz`` (default, storico) il
+    valore e' una *frequenza di generazione* e il punto successivo cade a
+    ``t + 1/f``; con ``unit: s`` e' il *periodo* in secondi e il punto cade a
+    ``t + p`` — comodo quando gli intervalli sono nell'ordine delle decine di
+    secondi (frequenze frazionarie scomode). Si ripete finche' si supera la
+    fine; i tempi sono poi normalizzati in ``[0, 1]``.
 
-    ``base``/``range`` sono inviluppi mobili nelle stesse forme della banda di Y
-    (scalare | ``[a, b]`` | ``[[t, v], ...]`` | ``{type, points, curve}``);
-    il pescaggio della frequenza e' lo stesso della banda di Y
+    ``unit`` sceglie lo *spazio* della camminata, non una notazione: uniforme
+    in periodo non e' uniforme in frequenza, e gli Env di ``base``/``range``
+    si interpolano nello spazio scelto (lineare nel periodo != lineare nel
+    rate). ``base``/``range`` sono inviluppi mobili nelle stesse forme della
+    banda di Y (scalare | ``[a, b]`` | ``[[t, v], ...]`` |
+    ``{type, points, curve}``); il pescaggio e' lo stesso della banda di Y
     (``_band_sampler``, modulo condiviso X/Y): ``distribution`` governa come si
     pesca (``uniform`` | ``gaussian``), ``drift`` la rende un random walk
     correlato — ``step`` letto sul tempo reale normalizzato, il dominio di
     ``base``/``range`` in questo registro. ``range`` assente (0) = banda
     collassata: la camminata segue ``base`` deterministicamente (il ``seed``
-    non influisce sui tempi). Deterministico via ``seed``. Guardie: frequenza
-    non positiva -> errore (passo infinito, nessun punto); piu' di
+    non influisce sui tempi). Deterministico via ``seed``. Guardie: valore di
+    banda non positivo -> errore (passo infinito o nullo); piu' di
     ``MAX_POINTS`` punti -> errore.
     """
     if duration <= 0:
         raise ValueError(f"walk-X: duration deve essere > 0 (ricevuta {duration})")
+    if unit not in X_UNITS:
+        opts = " | ".join(sorted(X_UNITS))
+        raise ValueError(f"walk-X: unit '{unit}' non ammessa ({opts}).")
     sample = _band_sampler(base, range, seed, distribution, drift, "walk-X")
     times: List[float] = [0.0]
     t = 0.0  # secondi reali
     while True:
-        f = sample(t / duration)
-        if f <= 0:
+        v = sample(t / duration)
+        if v <= 0:
+            kind = "frequenza non positiva" if unit == "hz" else "periodo non positivo"
             raise ValueError(
-                f"walk-X: frequenza non positiva ({f}) a t={t:.3f}s — "
+                f"walk-X: {kind} ({v}) a t={t:.3f}s — "
                 "la banda base/range deve restare > 0."
             )
-        t += 1.0 / f
+        t += 1.0 / v if unit == "hz" else v
         # Bordo con tolleranza: l'accumulo float puo' fermarsi un epsilon prima
         # della fine (es. 50 passi da 0.2 -> 9.999...8) e produrre un punto
         # spurio a ~1.0. Un punto sul bordo esatto non e' comunque un plateau.
@@ -87,8 +104,11 @@ def walk(
             return times
         times.append(round(t / duration, 9))
         if len(times) > MAX_POINTS:
+            hint = (
+                "banda base troppo alta" if unit == "hz" else "periodo troppo corto"
+            )
             raise ValueError(
-                f"walk-X: oltre {MAX_POINTS} breakpoint — banda base troppo alta "
+                f"walk-X: oltre {MAX_POINTS} breakpoint — {hint} "
                 f"per duration={duration}s."
             )
 

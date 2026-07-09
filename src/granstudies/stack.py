@@ -47,6 +47,7 @@ def axis_envelope(
     *,
     y_seed: int = 0,
     x_seed: int = 0,
+    x_unit: str = "hz",
 ) -> List[List[float]]:
     """Assembla l'envelope ``[[t, v], ...]`` di un asse: coupling X per Y.
 
@@ -59,9 +60,10 @@ def axis_envelope(
       risolvono per primi e la X distribuisce ``len(values)`` tempi
       (``resolve_x``, ``linear`` per assenza dal blocco).
 
-    ``y_seed``/``x_seed`` sono i default globali gia' risolti a monte (catena di
-    precedenza in ``study_spec``): il ``seed`` dichiarato dentro la config
-    dell'asse vince sempre (default, non override brutale).
+    ``y_seed``/``x_seed``/``x_unit`` sono i default globali gia' risolti a
+    monte (catena di precedenza in ``study_spec``): il ``seed`` (e ``unit``)
+    dichiarato dentro la config dell'asse vince sempre (default, non override
+    brutale).
     """
     y_key, y_params = _y_generator(y_cfg)
 
@@ -77,6 +79,7 @@ def axis_envelope(
         # seed effettivo, sia sulla X (banda di frequenza) sia sulla Y.
         x_params = dict(x_cfg)
         x_params.setdefault("seed", x_seed)
+        x_params.setdefault("unit", x_unit)
         x_params = expand_params(x_params, seed=x_params["seed"])
         times = walk(duration=duration, **x_params)
         y_kwargs = dict(y_params)
@@ -136,6 +139,7 @@ def generate_stack_document(specs: List[StudySpec]) -> Dict[str, Any]:
                 spec.duration,
                 y_seed=spec.resolved_y_seed(),
                 x_seed=spec.resolved_x_seed(),
+                x_unit=spec.resolved_x_unit(),
             )
             env = [[t, bounds_mod.clamp(ax.path, v)] for t, v in env]
             if len(env) == 1:

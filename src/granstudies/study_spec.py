@@ -25,7 +25,7 @@ from .value_generators import (
     stable_seed,
     y_generator,
 )
-from .x_strategies import x_owns_n
+from .x_strategies import X_UNITS, x_owns_n
 
 # Chiavi che marcano il generatore Y di un asse (values | ramp | base): la
 # presenza di ``base`` marca la banda piatta. Mutuamente esclusive.
@@ -79,11 +79,13 @@ class StudySpec:
     transition: float = 5.0         # secondi per transizione tra plateau
     interpolation: str = "linear"   # linear | cubic
     stream_id: str | None = None    # sotto-cartella per versionare gli output
-    # Processo stack: config X per-asse (None = blocco ``stack:`` assente) e i
-    # due seed globali (seed-Y in axes, seed-X in stack), override-abili
-    # per-stream via il deep-merge di ``resolve_streams``.
+    # Processo stack: config X per-asse (None = blocco ``stack:`` assente), i
+    # due seed globali (seed-Y in axes, seed-X in stack) e l'unita' globale
+    # della camminata (``stack.unit``), override-abili per-stream via il
+    # deep-merge di ``resolve_streams``.
     stack: Dict[str, Any] | None = None
     stack_seed: int | None = None
+    stack_unit: str | None = None
     axes_seed: int | None = None
 
     def axis(self, name: str) -> Axis:
@@ -112,6 +114,14 @@ class StudySpec:
         if self.stack_seed is not None:
             return self.stack_seed
         return stable_seed(f"{self._seed_key()}:x")
+
+    def resolved_x_unit(self) -> str:
+        """Unita' della camminata-X per questo stream (il per-asse vince comunque).
+
+        Stessa catena del seed: ``stack.<asse>.unit`` > ``stack.unit`` globale
+        (per-stream via deep-merge) > default ``hz`` (retrocompatibile).
+        """
+        return self.stack_unit or "hz"
 
 
 def _validate(spec: StudySpec, ctx: ErrCtx) -> None:
@@ -286,21 +296,31 @@ def resolve_streams(
 
 def _stack_config(
     data: Dict[str, Any], ctx: ErrCtx
-) -> tuple[Dict[str, Any] | None, int | None]:
-    """Estrae dal documento il blocco ``stack:``: (config per-asse, seed-X globale).
+) -> tuple[Dict[str, Any] | None, int | None, str | None]:
+    """Estrae dal documento il blocco ``stack:``: (config per-asse, seed-X
+    globale, unit globale della camminata).
 
-    Schema piatto: ``seed`` e' l'unica chiave riservata; ogni altra chiave e' un
-    nome d'asse -> camminata-X (banda ``base``/``range``/``seed``, piu'
-    ``distribution``/``drift`` come nella banda di Y). La *presenza* dell'asse
-    marca la camminata; l'assenza dal blocco = ``linear``. Una entry annullata
-    (``asse: null``, utile per riportare a linear in uno stream) viene
-    scartata. Blocco assente -> (None, None); ``curve`` va dentro l'Env di
-    ``base``/``range``, non come chiave dell'entry.
+    Schema piatto: ``seed`` e ``unit`` sono le chiavi riservate; ogni altra
+    chiave e' un nome d'asse -> camminata-X (banda ``base``/``range``/``seed``,
+    piu' ``unit``/``distribution``/``drift`` come nella banda di Y). La
+    *presenza* dell'asse marca la camminata; l'assenza dal blocco = ``linear``.
+    Una entry annullata (``asse: null``, utile per riportare a linear in uno
+    stream) viene scartata. Blocco assente -> (None, None, None); ``curve`` va
+    dentro l'Env di ``base``/``range``, non come chiave dell'entry.
     """
     if "stack" not in data:
-        return None, None
+        return None, None, None
     raw = dict(data.get("stack") or {})
     seed = raw.pop("seed", None)
+    unit = raw.pop("unit", None)
+    if unit is not None and unit not in X_UNITS:
+        opts = " | ".join(sorted(X_UNITS))
+        raise ctx.err(
+            f"stack: unit '{unit}' non ammessa ({opts}).",
+            key=("stack", "unit"),
+            hint="'hz' = banda in frequenza di generazione, 's' = banda in "
+            "periodo (secondi tra breakpoint).",
+        )
     raw = {name: xcfg for name, xcfg in raw.items() if xcfg is not None}
     for name, xcfg in raw.items():
         if isinstance(xcfg, dict) and ("rand" in xcfg or "cps" in xcfg):
@@ -314,21 +334,30 @@ def _stack_config(
         if not isinstance(xcfg, dict) or "base" not in xcfg:
             raise ctx.err(
                 f"stack: asse '{name}' deve avere una camminata con 'base' "
-                f"(frequenza in Hz), trovato {xcfg!r}.",
+                f"(banda in Hz, o in secondi con 'unit: s'), trovato {xcfg!r}.",
                 key=("stack", name),
                 axis=name,
                 hint="un asse assente dal blocco 'stack:' resta 'linear' (n dalla Y).",
             )
-        extra = set(xcfg) - {"base", "range", "seed", "distribution", "drift"}
+        extra = set(xcfg) - {"base", "range", "seed", "unit", "distribution", "drift"}
         if extra:
             raise ctx.err(
                 f"stack: asse '{name}', chiavi non ammesse {sorted(extra)} "
-                "(solo base/range/seed/distribution/drift).",
+                "(solo base/range/seed/unit/distribution/drift).",
                 key=("stack", name),
                 axis=name,
                 hint="'curve' va dentro l'Env di base/range, non come chiave dell'entry.",
             )
-    return raw, seed
+        if "unit" in xcfg and xcfg["unit"] not in X_UNITS:
+            opts = " | ".join(sorted(X_UNITS))
+            raise ctx.err(
+                f"stack: asse '{name}', unit '{xcfg['unit']}' non ammessa ({opts}).",
+                key=("stack", name),
+                axis=name,
+                hint="'hz' = banda in frequenza di generazione, 's' = banda in "
+                "periodo (secondi tra breakpoint).",
+            )
+    return raw, seed, unit
 
 
 def parse_study_spec(
@@ -365,7 +394,7 @@ def parse_study_spec(
             hint="l'accoppiamento degli assi (ex parallel) vive nel processo "
             "stack — stessa strategy-X e stesso n.",
         )
-    stack_axes, stack_seed = _stack_config(data, ctx)
+    stack_axes, stack_seed, stack_unit = _stack_config(data, ctx)
     axes_seed = axes_raw.get("seed")
     sid = study_id or data.get("study_id") or "study"
     seed_key = sweep_cfg.get("stream_id") or sid
@@ -484,6 +513,7 @@ def parse_study_spec(
         stream_id=sweep_cfg.get("stream_id") or None,
         stack=stack_axes,
         stack_seed=stack_seed,
+        stack_unit=stack_unit,
         axes_seed=axes_seed,
     )
     _validate(spec, ctx)

@@ -203,6 +203,44 @@ def test_document_emerging_values_clamped_to_engine_bounds():
     assert all(v == 0.001 for _, v in pts)                # clampati al bound
 
 
+# --- unit della camminata-X alle seam dello stack ---------------------------------
+
+def test_axis_entry_unit_seconds_walks_in_period_space():
+    y = {"band": {"base": 0, "range": 10}}
+    x = {"base": 2, "range": 0, "unit": "s"}
+    env = axis_envelope(y, x, duration=10.0, y_seed=1, x_seed=2)
+    assert [t for t, _ in env] == [0.0, 0.2, 0.4, 0.6, 0.8]
+
+
+def test_global_x_unit_applies_when_entry_has_none():
+    y = {"band": {"base": 0, "range": 10}}
+    x = {"base": 2, "range": 0}
+    env = axis_envelope(y, x, duration=10.0, x_unit="s")
+    assert [t for t, _ in env] == [0.0, 0.2, 0.4, 0.6, 0.8]
+
+
+def test_unit_in_axis_entry_wins_over_global():
+    y = {"band": {"base": 0, "range": 10}}
+    x = {"base": 2, "range": 0, "unit": "hz"}
+    env = axis_envelope(y, x, duration=10.0, x_unit="s")
+    assert len(env) == 20           # 2 Hz x 10 s, non un punto ogni 2 s
+
+
+def test_document_stack_unit_seconds_end_to_end():
+    from granstudies.stack import generate_stack_document
+
+    data = _study_data()
+    data["axes"]["density"] = {
+        "path": "density", "baseline": 20, "base": 5, "range": 45,
+    }
+    data["stack"]["unit"] = "s"
+    data["stack"]["density"] = {"base": 3, "range": 0}
+    doc = generate_stack_document(_specs(data))
+    pts = doc["streams"][0]["density"]["points"]
+    # duration 30, un punto ogni 3 s: t reali 0..27 -> normalizzati 0.0..0.9.
+    assert [t for t, _ in pts] == [pytest.approx(i / 10) for i in range(10)]
+
+
 # --- generatori annidati (plan nested-generators) ---------------------------------
 
 def test_nested_base_in_y_band_follows_generated_floor():
