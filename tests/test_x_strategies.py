@@ -115,6 +115,53 @@ def test_walk_rejects_non_positive_duration():
         walk(duration=0.0, base=5, range=0, seed=0)
 
 
+# --- distribution e drift nella camminata (issue #16) ------------------------------
+
+def test_walk_default_unchanged_with_explicit_uniform():
+    # Retrocompat: distribution uniform esplicita = stessa camminata di sempre.
+    a = walk(duration=10.0, base=3, range=4, seed=7)
+    b = walk(duration=10.0, base=3, range=4, seed=7, distribution="uniform")
+    assert a == b
+
+
+def test_walk_gaussian_deterministic_and_valid():
+    a = walk(duration=10.0, base=3, range=4, seed=7, distribution="gaussian")
+    b = walk(duration=10.0, base=3, range=4, seed=7, distribution="gaussian")
+    assert a == b
+    assert a != walk(duration=10.0, base=3, range=4, seed=7)
+    assert a[0] == 0.0 and a == sorted(a) and all(0 <= t < 1 for t in a)
+
+
+def test_walk_drift_deterministic_and_valid():
+    a = walk(duration=10.0, base=3, range=4, seed=7, drift={"step": 0.1})
+    b = walk(duration=10.0, base=3, range=4, seed=7, drift={"step": 0.1})
+    assert a == b
+    assert a != walk(duration=10.0, base=3, range=4, seed=7)
+    assert a[0] == 0.0 and a == sorted(a) and all(0 <= t < 1 for t in a)
+
+
+def test_walk_drift_intervals_change_gradually():
+    # Deriva a passi piccoli: gli intervalli tra breakpoint variano poco tra
+    # passi adiacenti rispetto al pescaggio indipendente della frequenza.
+    def mean_jump(times):
+        dts = [b - a for a, b in zip(times, times[1:])]
+        return sum(abs(y - x) for x, y in zip(dts, dts[1:])) / (len(dts) - 1)
+
+    ind = walk(duration=60.0, base=2, range=8, seed=7)
+    dri = walk(duration=60.0, base=2, range=8, seed=7, drift={"step": 0.02})
+    assert mean_jump(dri) < mean_jump(ind) / 3
+
+
+def test_walk_unknown_distribution_raises():
+    with pytest.raises(ValueError, match="distribution"):
+        walk(duration=10.0, base=3, range=4, seed=7, distribution="poisson")
+
+
+def test_walk_drift_malformed_raises():
+    with pytest.raises(ValueError, match="step"):
+        walk(duration=10.0, base=3, range=4, seed=7, drift={})
+
+
 # --- n-ownership -----------------------------------------------------------------
 
 def test_x_owns_n_true_when_base_present():
