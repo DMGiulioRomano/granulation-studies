@@ -91,7 +91,7 @@ nodo-expr vale ovunque c'è un `Threshold` senza toccare i consumatori.
 
 ## 4. Unità di implementazione (TDD: test prima, per unità)
 
-- [ ] U1. **`expr.py` — il valutatore puro**
+- [x] U1. **`expr.py` — il valutatore puro**
 
 **Goal:** `eval_expr(text: str, scope: Mapping[str, Any]) -> float | list | dict`,
 nessuna conoscenza di assi/spread.
@@ -129,7 +129,7 @@ da granstudies.
 
 ---
 
-- [ ] U2. **Nodo-expr alla seam `expand_env`/`expand_params`**
+- [x] U2. **Nodo-expr alla seam `expand_env`/`expand_params`**
 
 **Goal:** `{expr: "...", let: {...}}` riconosciuto come forma di `Threshold`
 ovunque (assi base/range, step di ramp/drift, stack X-walk), compilato in
@@ -173,7 +173,7 @@ atteso.
 
 ---
 
-- [ ] U3. **Marcatore `expr` come quarta strategy di `spread.over`**
+- [x] U3. **Marcatore `expr` come quarta strategy di `spread.over`**
 
 **Goal:** nello spread l'espressione è funzione di `i` (e `n`): un valore —
 scalare o Env intero — per stream generato.
@@ -216,7 +216,7 @@ di messaggi d'errore).
 
 ---
 
-- [ ] U4. **Documentazione**
+- [x] U4. **Documentazione**
 
 **Goal:** `docs/study-yml-reference.md` documenta la nuova forma di Env
 (sezione forme, con l'insidia YAML "espressioni sempre quotate") e la strategy
