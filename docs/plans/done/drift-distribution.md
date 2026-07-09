@@ -1,7 +1,7 @@
 # Piano — `distribution` (uniform/gaussian) e `drift` (random walk correlato)
 
 **Repo:** `granulation-studies` (issue #16, branch `claude/skills-download-install-j5thmr`)
-**Stato:** in implementazione (TDD). Lingua: italiano, no emoji.
+**Stato:** implementato (TDD, suite verde). Lingua: italiano, no emoji.
 
 Costruito **sopra** i generatori annidati (`docs/plans/done/nested-generators.md`),
 che risultano gia' implementati (`expand_env`/`expand_params` in
