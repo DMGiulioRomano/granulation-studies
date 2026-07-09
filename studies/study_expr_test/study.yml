@@ -1,10 +1,14 @@
 # TEST EXPR — nodo-expr negli assi e strategy expr nello spread.
 #
-# Copre tre usi:
+# Copre cinque usi:
 #   1. asse con nodo-expr statico: density.base = sagoma * 50 (stream base);
 #   2. spread con strategy expr su Env: stessa sagoma a livelli crescenti
 #      con i (ventaglio: env * a * (i+1) -> 50, 100, 150, 200);
-#   3. spread con expr scalare: volume a gradini di -2 dB per indice.
+#   3. spread con expr scalare: volume a gradini di -2 dB per indice;
+#   4. banda-let: variabile di let pescata random per ogni stream generato
+#      (coro: volume = v - 2*i con v estratto in [-12, -6]);
+#   5. funzioni e operatori interi: griglia di onset da i%3 / i//3, clamp
+#      del volume con max() (griglia).
 #
 #   make stack STUDY=study_expr_test
 #   -> ispeziona generated/study_expr_test/yaml/streams_expanded.yml
@@ -72,6 +76,32 @@ streams:
           expr: "-6 - 2 * i"
         base.onset:
           expr: "4 * i"
+
+  # uso 4 — banda-let: 'v' non e' una forma statica ma una banda, pescata
+  # una volta per stream generato (seed derivato stabile: stessa sequenza a
+  # ogni rigenerazione; 'seed:' esplicito per congelarla a piacere).
+  coro:
+    spread:
+      n: 3
+      over:
+        base.volume:
+          expr: "v - 2 * i"
+          let:
+            v: {base: -12, range: 6}
+        base.onset:
+          expr: "8 + 4 * i"
+
+  # uso 5 — funzioni e operatori interi: l'indice diventa coordinate di
+  # griglia (colonna i%3, riga i//3); il volume scende a gradini ma max()
+  # lo blocca a -14.
+  griglia:
+    spread:
+      n: 6
+      over:
+        base.onset:
+          expr: "4 * (i % 3) + 2 * (i // 3)"
+        base.volume:
+          expr: "max(-6 - 2 * i, -14)"
 
   # patch 1 — path diverso dalla strategy: il volume e' mio, l'Env calcolato
   # dall'expr (density.base = [[0,100],[0.1583,150]]) resta intatto.

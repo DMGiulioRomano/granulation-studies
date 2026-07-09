@@ -23,6 +23,7 @@ from .value_generators import (
     Y_GENERATOR_KEYS,
     band,
     expand_params,
+    is_generator_node,
     ramp,
     stable_seed,
     y_generator,
@@ -31,6 +32,10 @@ from .yaml_loc import Locations
 
 # Chiavi ammesse nel blocco ``spread:``.
 _SPREAD_KEYS = frozenset({"n", "over"})
+
+# Chiavi ammesse in una banda-let della strategy expr: la banda di sempre,
+# senza ``n`` (il conteggio e' dello spread).
+_LET_BAND_KEYS = frozenset({"base", "range", "seed", "distribution", "drift"})
 
 # Default iniettato nei generati quando l'entry non dichiara ``sweep:``: gli
 # stream di uno spread vivono solo nello stack (ascolto verticale), non
@@ -65,6 +70,41 @@ def _deep_set(target: Dict[str, Any], dotted: str, value: Any) -> None:
     node[keys[-1]] = value
 
 
+def _let_band(path: str, var: str, node: Dict[str, Any], ctx: ErrCtx) -> Dict[str, Any]:
+    """Parametri-banda di una variabile random di ``let`` (strategy expr).
+
+    Un nodo-generatore dentro ``let`` e' ammesso solo qui, e solo nella forma
+    banda: un pescaggio per stream generato, che entra nello scope
+    dell'espressione accanto a ``i`` e ``n``. ``values``/``ramp`` restano
+    fuori: una progressione deterministica si scrive con l'aritmetica su i/n.
+    """
+    key = ("spread", "over", path)
+    markers = sorted(Y_GENERATOR_KEYS & set(node))
+    if markers != ["base"]:
+        raise ctx.err(
+            f"spread: expr sul path '{path}', 'let.{var}' usa {markers} — "
+            "in 'let' l'unico generatore ammesso e' la banda ('base').",
+            key=key,
+            hint="la banda pesca un valore per stream; per una progressione "
+            "deterministica usa l'aritmetica su i/n nell'espressione.",
+        )
+    if "n" in node:
+        raise ctx.err(
+            f"spread: expr sul path '{path}', 'let.{var}' dichiara 'n' — "
+            "il conteggio e' dello spread, la banda-let pesca da sola un "
+            "valore per stream.",
+            key=key,
+        )
+    extra = set(node) - _LET_BAND_KEYS
+    if extra:
+        raise ctx.err(
+            f"spread: expr sul path '{path}', 'let.{var}', chiavi non "
+            f"ammesse {sorted(extra)} (solo {sorted(_LET_BAND_KEYS)}).",
+            key=key,
+        )
+    return dict(node)
+
+
 def _strategy(name: str, path: str, cfg: Any, ctx: ErrCtx) -> tuple:
     """(marcatore canonico, params) della strategy di un path di ``over``."""
     key = ("spread", "over", path)
@@ -86,8 +126,22 @@ def _strategy(name: str, path: str, cfg: Any, ctx: ErrCtx) -> tuple:
                 "esattamente una strategy per path.",
                 key=key,
             )
+        # Le bande-let (variabili random per-stream) si estraggono prima del
+        # parse: ``parse_expr_node`` valida solo la parte statica di ``let``.
+        node = cfg
+        rand_let: Dict[str, Dict[str, Any]] = {}
+        if isinstance(cfg.get("let"), dict):
+            rand_let = {
+                var: _let_band(path, var, v, ctx)
+                for var, v in cfg["let"].items()
+                if is_generator_node(v)
+            }
+            if rand_let:
+                static = {k: v for k, v in cfg["let"].items() if k not in rand_let}
+                node = {**cfg, "let": static}
         with ctx.wrapping(key=key):
-            return "expr", parse_expr_node(cfg)
+            text, let = parse_expr_node(node)
+        return "expr", (text, let, rand_let)
     with ctx.wrapping(
         key=key,
         hint="ogni path di 'over' vuole esattamente una strategy tra "
@@ -208,16 +262,39 @@ def _strategy_values(
         return list(params)
     key = ("spread", "over", path)
     if marker == "expr":
-        text, let = params
-        reserved = sorted({"i", "n"} & set(let))
+        text, let, rand_let = params
+        reserved = sorted({"i", "n"} & (set(let) | set(rand_let)))
         if reserved:
             raise ctx.err(
                 f"spread: expr sul path '{path}', 'let' ridefinisce i nomi "
                 f"riservati {reserved} ('i' e 'n' li fornisce lo spread).",
                 key=key,
             )
+        # Bande-let: ``n`` pescaggi per variabile, uno per stream generato;
+        # seed di default derivato per-variabile (come per-path nella banda).
+        draws: Dict[str, List[Any]] = {}
+        for var, band_params in rand_let.items():
+            band_params = dict(band_params)
+            band_params.setdefault(
+                "seed", stable_seed(f"{name}:spread:{path}:let:{var}")
+            )
+            with ctx.wrapping(key=key):
+                draws[var] = band(
+                    n=n, **expand_params(band_params, seed=band_params["seed"])
+                )
         with ctx.wrapping(key=key):
-            return [eval_expr(text, {**let, "i": i, "n": n}) for i in range(n)]
+            return [
+                eval_expr(
+                    text,
+                    {
+                        **let,
+                        **{var: values[i] for var, values in draws.items()},
+                        "i": i,
+                        "n": n,
+                    },
+                )
+                for i in range(n)
+            ]
     if marker == "ramp":
         form = _ramp_form(path, params, ctx)
         if form == "full":

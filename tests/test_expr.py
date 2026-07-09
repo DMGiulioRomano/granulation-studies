@@ -81,6 +81,125 @@ def test_compound_env_expression():
     assert out == [[0, 100], [0.1583, 150]]
 
 
+# --- operatori % e // ----------------------------------------------------------
+
+def test_modulo_and_floordiv():
+    assert eval_expr("10 % 3", {}) == 1
+    assert eval_expr("7 // 2", {}) == 3
+    assert eval_expr("-7 % 3", {}) == 2   # semantica Python: segno del divisore
+
+
+def test_modulo_on_env_elementwise():
+    env = [[0, 5], [1, 7]]
+    assert eval_expr("env % 4", {"env": env}) == [[0, 1], [1, 3]]
+
+
+def test_modulo_by_zero():
+    with pytest.raises(ValueError, match="zero"):
+        eval_expr("10 % 0", {})
+
+
+# --- funzioni primitive e costanti ----------------------------------------------
+
+def test_rounding_functions():
+    assert eval_expr("floor(2.7)", {}) == 2
+    assert eval_expr("ceil(2.1)", {}) == 3
+    assert eval_expr("abs(0 - 3)", {}) == 3
+
+
+def test_sqrt_exp_log():
+    assert eval_expr("sqrt(9)", {}) == 3
+    assert eval_expr("exp(0)", {}) == 1
+    assert eval_expr("log(e)", {}) == 1
+    assert eval_expr("log(8, 2)", {}) == 3
+
+
+def test_trig_and_constants():
+    import math
+
+    assert eval_expr("sin(0)", {}) == 0
+    assert eval_expr("cos(0)", {}) == 1
+    assert eval_expr("tan(0)", {}) == 0
+    assert eval_expr("atan(1)", {}) == round(math.pi / 4, 9)
+    assert eval_expr("pi", {}) == round(math.pi, 9)
+    assert eval_expr("cos(2 * pi)", {}) == 1
+
+
+def test_scope_shadows_constants():
+    assert eval_expr("pi", {"pi": 3}) == 3
+
+
+def test_min_max_scalars():
+    assert eval_expr("min(3, i)", {"i": 1}) == 1
+    assert eval_expr("max(1, 2, 3)", {}) == 3
+
+
+def test_nested_calls():
+    assert eval_expr("floor(sqrt(10))", {}) == 3
+
+
+def test_function_on_env_maps_y():
+    env = [[0, 0], [1, 9]]
+    assert eval_expr("sqrt(env)", {"env": env}) == [[0, 0], [1, 3]]
+
+
+def test_min_clamps_env_y():
+    env = [[0, 5], [1, 20]]
+    assert eval_expr("min(env, 10)", {"env": env}) == [[0, 5], [1, 10]]
+
+
+def test_max_on_env_shorthand():
+    assert eval_expr("max(env, 0)", {"env": [-5, 5]}) == [0, 5]
+
+
+def test_function_preserves_env_dict_form():
+    env = {"type": "linear", "points": [[0, 1.7], [1, 2.2]], "curve": 2}
+    out = eval_expr("floor(env)", {"env": env})
+    assert out == {"type": "linear", "points": [[0, 1], [1, 2]], "curve": 2}
+
+
+def test_unknown_function_lists_available():
+    with pytest.raises(ValueError) as exc:
+        eval_expr("foo(1)", {})
+    assert "foo" in str(exc.value)
+    assert "sin" in str(exc.value)
+
+
+def test_wrong_arity_raises():
+    with pytest.raises(ValueError, match="argoment"):
+        eval_expr("sqrt(1, 2)", {})
+    with pytest.raises(ValueError, match="argoment"):
+        eval_expr("min(1)", {})
+
+
+def test_keyword_args_rejected():
+    with pytest.raises(ValueError, match="keyword"):
+        eval_expr("log(8, base=2)", {})
+
+
+def test_math_domain_error_is_clear():
+    with pytest.raises(ValueError, match="dominio"):
+        eval_expr("sqrt(0 - 1)", {})
+    with pytest.raises(ValueError, match="dominio"):
+        eval_expr("log(0)", {})
+
+
+def test_call_with_two_envs_rejected():
+    envs = {"e1": [[0, 1], [1, 2]], "e2": [[0, 3], [1, 4]]}
+    with pytest.raises(ValueError, match="Env"):
+        eval_expr("min(e1, e2)", envs)
+
+
+def test_starred_args_rejected():
+    with pytest.raises(ValueError):
+        eval_expr("min(*e)", {"e": [[0, 1], [1, 2]]})
+
+
+def test_complex_result_rejected():
+    with pytest.raises(ValueError, match="compless"):
+        eval_expr("(0 - 1) ** 0.5", {})
+
+
 # --- errori ------------------------------------------------------------------
 
 def test_unknown_name_lists_scope():
@@ -96,9 +215,9 @@ def test_env_times_env_rejected():
         eval_expr("e1 * e2", envs)
 
 
-def test_call_rejected():
+def test_call_on_non_name_rejected():
     with pytest.raises(ValueError):
-        eval_expr("abs(x)", {"x": -1})
+        eval_expr("(1)(2)", {})
 
 
 def test_subscript_rejected():
