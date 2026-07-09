@@ -1,8 +1,8 @@
 # Piano — `spread`: stream generati per regola (macro-forma)
 
 **Repo:** `granulation-studies` (branch `claude/stream-param-composition-wn90hi`)
-**Stato:** design deciso in brainstorming con l'utente, implementazione TDD in
-questo branch. Lingua: italiano, no emoji.
+**Stato:** implementato in questo branch (TDD, fette 1-6). Lingua: italiano,
+no emoji.
 
 Decisioni prese dall'utente (2026-07-09):
 
@@ -119,7 +119,10 @@ viene ereditato tale e quale da tutti i generati.
 - Entry esplicita con nome uguale a un generato → deep-merge **sopra** il
   generato, entry consumata. "Genera 8, poi ritocca a mano il quinto."
 - Una patch che contiene a sua volta `spread` → errore (ambigua).
-- Due spread che generano lo stesso nome → errore.
+- Due spread che generano lo stesso nome: **strutturalmente impossibile**
+  (emerso in implementazione) — l'indice è solo cifre e i nomi delle entry
+  sono chiavi uniche del dict, quindi `a_i == b_j` implica `a == b`. L'unico
+  incontro possibile è con una entry esplicita, cioè la patch.
 - L'ordine del dict espanso preserva l'ordine del documento: i generati
   compaiono al posto dell'entry spread.
 

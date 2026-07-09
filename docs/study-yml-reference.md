@@ -96,6 +96,13 @@ streams:
       plateau: 10                # cambia il plateau per questa stream
     stack:                       # override parziale di stack (deep-merge)
       seed: 43                   # es. riseeda solo i tempi di questa stream
+
+  ventaglio:                     # entry-spread: genera n stream con una regola
+    spread:                      # (chiave riservata; vedi la sezione "spread")
+      n: 8
+      over:
+        base.pointer.start:
+          ramp: {start: 0.1, step: 0.1}
 ```
 
 ## Generatori di valori d'asse
@@ -329,6 +336,82 @@ L'auto-derivazione è un hash stabile (CRC32) dell'id dello stream, con salt
 distinti per Y e X: senza seed globali gli stream impilati si **decorrelano da
 soli**, restando riproducibili tra run.
 
+## Il blocco `spread:` (stream generati)
+
+`spread` è il terzo asse del sistema, quello della **macro-forma**: Y
+distribuisce valori nel tempo (micro-forma), la camminata-X distribuisce i
+tempi, `spread` distribuisce valori **nella popolazione di stream**. Una entry
+di `streams:` con la chiave riservata `spread` non descrive un solo stream ma
+ne **genera** `n`, distribuendo i valori di uno o più parametri secondo una
+strategy — con lo stesso vocabolario dei generatori Y.
+
+```yaml
+streams:
+  base: {}
+
+  ventaglio:
+    base:
+      pointer:
+        speed_ratio: 0          # override normale: vale per tutti i generati
+    spread:
+      n: 8                      # opzionale se una strategy possiede il conteggio
+      over:                     # {path puntato nel documento: strategy}
+        base.pointer.start:
+          ramp: {start: 0.1, step: 0.1}    # 0.1, 0.2, ... 0.8
+        base.onset:
+          values: [0, 1, 2.5, 4, 6, 8, 10, 12]
+        base.volume:
+          base: -12             # banda: n estrazioni in [-12, -12+6]
+          range: 6
+          seed: 42              # opzionale (default stabile per-path)
+
+  ventaglio_5:                  # patch: ritocca il quinto generato
+    base:
+      volume: -20
+```
+
+L'espansione avviene **prima** del merge delle stream: `ventaglio` sparisce e
+al suo posto compaiono `ventaglio_1` … `ventaglio_8` (indice 1-based,
+zero-padded alla larghezza di `n`: con `n: 12` si ha `ventaglio_01`), entry
+ordinarie a tutti gli effetti (sotto-cartelle, seed per-stream, override). Lo
+`study.yml` sorgente non viene riscritto: il dict espanso si può ispezionare
+in `generated/<study>/yaml/streams_expanded.yml`, rigenerato da `sweep`/`stack`.
+
+**Strategies e chi possiede `n`.** Una sola chiave-generatore per path, come
+per gli assi:
+
+| Strategy | Forma | Possiede `n`? | Valori |
+|----------|-------|---------------|--------|
+| `values` | lista esplicita | sì (`len`) | così com'è, anche non numerici (es. `sample`) |
+| `ramp` | `{start, stop, step}` | sì (griglia) | il ramp pieno degli assi |
+| `ramp` | `{start, step}` | no | progressione aritmetica `start + i·step` (offset additivo) |
+| `ramp` | `{start, stop}` | no | suddivisione lineare in `n` punti |
+| banda | `base`/`range`/`seed` (+`n` opz.) | solo con `n` proprio | `n` estrazioni nella banda |
+
+`spread.n` esplicito e conteggi posseduti devono **coincidere**; se `n` è
+omesso lo definisce l'unico conteggio posseduto; nessuna fonte → errore. Con
+più path in `over` i valori si appaiano **per indice** (niente prodotto
+cartesiano, come in stack): lo stream i-esimo prende il valore i-esimo di ogni
+strategy. Le forme-Env dentro le strategy (banda che scorre, nodi-generatore
+annidati) valgono anche qui: `frac` corre sulla popolazione di stream.
+
+**Ordine del merge** (il più specifico vince): override comune dell'entry →
+valore della strategy → patch esplicita. Una entry esplicita omonima di un
+generato è una **patch**: deep-merge sopra il generato e viene consumata (non
+diventa uno stream in più), ovunque compaia nel documento. Una patch che è a
+sua volta una spread è un errore (ambigua).
+
+**Sweep spento di default.** Il senso di uno spread è l'ascolto verticale: i
+generati entrano nel documento stack ma, se l'entry non dichiara un proprio
+`sweep:`, ricevono `sweep: {orders: [], orderings: []}` e non moltiplicano le
+varianti di sweep. Un `sweep:` esplicito nell'entry lo riattiva per tutti i
+generati (una patch può riattivarlo per uno solo).
+
+**Seed.** La banda senza `seed` deriva `stable_seed("<entry>:spread:<path>")`:
+deterministico tra run, path diversi decorrelati da soli. I generati hanno poi
+ciascuno il proprio `stream_id`, quindi i seed Y/X per-stream si
+auto-decorrelano col meccanismo esistente.
+
 ## Layout di `generated/`
 
 Primo livello = tipo di artefatto, secondo livello = **processo** (`sweep` /
@@ -340,6 +423,7 @@ Visualiser; il documento stack è uno solo (gli stream vi sono collassati).
 generated/<study_id>/
   yaml/sweep/envelope/<stream_id>/e1__density.yml
   yaml/stack/stack.yml
+  yaml/streams_expanded.yml      # solo per studi con spread: il dict streams espanso
   audio/sweep/envelope/<stream_id>/<stream_id>_e1__density.aif
   audio/stack/stack.aif
   sv/sweep/envelope/<stream_id>/<stream_id>_e1__density.sv
