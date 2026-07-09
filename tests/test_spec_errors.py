@@ -1,0 +1,116 @@
+"""SpecError: gli errori di study.yml portano stream, asse, chiave e riga."""
+import pytest
+
+from granstudies.errors import SpecError
+from granstudies.study_spec import parse_study_spec, resolve_streams
+from granstudies.yaml_loc import loads
+
+
+BASE_TEXT = """\
+study_id: s
+duration: 10
+base:
+  onset: 0
+axes:
+  density:
+    path: density
+    baseline: 20
+    base: 4
+    range: 8
+stack: {}
+"""
+
+
+def test_spec_error_is_value_error():
+    assert issubclass(SpecError, ValueError)
+
+
+def test_band_without_n_no_stream():
+    data, locs = loads(BASE_TEXT, source="study.yml")
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(data, "s", locs=locs)
+    e = exc.value
+    assert e.axis == "density"
+    assert e.key == ("axes", "density")
+    assert e.stream is None
+    assert e.line == 6          # riga di axes.density
+    assert e.source == "study.yml"
+    assert e.hint                # rimedio presente
+    assert "banda senza 'n'" in e.msg
+
+
+def test_error_in_stream_carries_stream_and_base_line():
+    text = BASE_TEXT + """\
+streams:
+  rotta: {}
+"""
+    data, locs = loads(text, source="study.yml")
+    with pytest.raises(SpecError) as exc:
+        resolve_streams(data, "s", locs=locs)
+    e = exc.value
+    assert e.stream == "rotta"
+    assert e.axis == "density"
+    assert e.line == 6          # la chiave vive nel base, non nell'override
+
+
+def test_error_in_override_points_at_override_line():
+    text = BASE_TEXT + """\
+streams:
+  conflitto:
+    axes:
+      density: {n: 6}
+    stack:
+      density: {base: 2}
+"""
+    data, locs = loads(text, source="study.yml")
+    with pytest.raises(SpecError) as exc:
+        resolve_streams(data, "s", locs=locs)
+    e = exc.value
+    assert e.stream == "conflitto"
+    assert e.key == ("stack", "density")
+    assert e.line == 17         # streams.conflitto.stack.density
+    assert "possiede n" in e.msg
+
+
+def test_deep_value_error_wrapped_with_axis_context():
+    text = """\
+study_id: s
+base: {onset: 0}
+axes:
+  a:
+    path: density
+    baseline: 20
+    ramp: {start: 5, stop: 50, step: 0}
+"""
+    data, locs = loads(text, source="study.yml")
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(data, "s", locs=locs)
+    e = exc.value
+    assert e.axis == "a"
+    assert e.key == ("axes", "a")
+    assert e.line == 4
+    assert "step" in e.msg
+
+
+def test_missing_path_is_spec_error():
+    data, locs = loads("study_id: s\nbase: {}\naxes:\n  a: {baseline: 20, values: [1]}\n")
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(data, "s", locs=locs)
+    assert exc.value.axis == "a"
+    assert "path" in exc.value.msg
+
+
+def test_parse_without_locs_still_works():
+    data, _ = loads(BASE_TEXT)
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(data, "s")
+    e = exc.value
+    assert e.line is None
+    assert e.axis == "density"
+
+
+def test_str_keeps_message_for_match():
+    """Retrocompatibilita': str(e) contiene il messaggio originale."""
+    data, locs = loads(BASE_TEXT, source="study.yml")
+    with pytest.raises(ValueError, match="banda senza 'n'"):
+        parse_study_spec(data, "s", locs=locs)

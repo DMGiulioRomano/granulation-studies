@@ -22,6 +22,7 @@ from typing import Any, Dict
 import yaml
 
 from .engine_bridge import REPO_ROOT
+from .errors import SpecError
 
 
 # --- layout dei path -------------------------------------------------------
@@ -41,9 +42,15 @@ def samples_dir(spec_samples: str | None) -> str:
 
 
 def _load_spec(study: str):
-    from .study_spec import load_study_spec
+    """Primo spec dello studio, con le stream risolte.
 
-    return load_study_spec(os.path.join(study_dir(study), "study.yml"))
+    Il documento grezzo di uno studio multi-stream e' incompleto per
+    costruzione (gli override di stream completano le bande): va validato
+    per-stream, mai cosi' com'e'. I campi che i comandi consumano da questo
+    spec (samples_dir, base, seed) sono top-level, identici su ogni stream.
+    """
+    specs = _load_specs(study)
+    return specs[0]
 
 
 def _load_data(study: str) -> Dict[str, Any]:
@@ -54,10 +61,12 @@ def _load_data(study: str) -> Dict[str, Any]:
 
 def _load_specs(study: str, stream: str | None = None) -> list:
     from .study_spec import resolve_streams
+    from .yaml_loc import load as load_with_locations
 
-    data = _load_data(study)
+    path = os.path.join(study_dir(study), "study.yml")
+    data, locs = load_with_locations(path)
     sid = data.get("study_id") or study
-    specs = resolve_streams(data, sid)
+    specs = resolve_streams(data, sid, locs=locs)
     if stream:
         specs = [s for s in specs if s.stream_id == stream]
         if not specs:
@@ -453,6 +462,30 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    try:
+        return _dispatch(args)
+    except (SpecError, yaml.YAMLError):
+        # Con GRANSTUDIES_DEBUG=1 il traceback completo torna utile (sviluppo);
+        # altrimenti l'errore esce come blocco leggibile, senza stack Python.
+        if os.environ.get("GRANSTUDIES_DEBUG"):
+            raise
+        return _report_error(args)
+
+
+def _report_error(args) -> int:
+    """Stampa l'errore corrente in forma leggibile su stderr. Exit code 2."""
+    e = sys.exc_info()[1]
+    study = getattr(args, "study", None)
+    intro = f"[granstudies] errore nello studio '{study}'" if study else "[granstudies] errore"
+    if isinstance(e, SpecError):
+        print(f"{intro}\n\n{e.format_block()}\n", file=sys.stderr)
+    else:  # yaml.YAMLError: i mark di posizione li porta gia' con se'
+        print(f"{intro}: YAML non valido\n\n  {e}\n", file=sys.stderr)
+    print("  (traceback completo con GRANSTUDIES_DEBUG=1)", file=sys.stderr)
+    return 2
+
+
+def _dispatch(args) -> int:
     if args.command == "sweep":
         return cmd_sweep(args.study, args.stream)
     if args.command == "stack":
