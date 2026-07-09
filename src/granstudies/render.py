@@ -209,6 +209,10 @@ def render_variants(
     yaml_files: List[str] = []
     for root, _, files in os.walk(variant_dir):
         for fname in files:
+            # streams_expanded.yml e' un artefatto di sola ispezione (dict
+            # streams espanso da spread), non una variante da renderizzare.
+            if fname == "streams_expanded.yml":
+                continue
             if fname.endswith((".yml", ".yaml")):
                 yaml_files.append(os.path.join(root, fname))
     yaml_files.sort()

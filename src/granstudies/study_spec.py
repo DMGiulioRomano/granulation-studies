@@ -16,6 +16,7 @@ import yaml
 from . import bounds as bounds_mod
 from . import yaml_loc
 from .errors import ErrCtx, SpecError
+from .spread import expand_spreads
 from .value_generators import (
     Y_GENERATOR_KEYS,
     band,
@@ -253,14 +254,17 @@ def resolve_streams(
     """Ritorna una lista di StudySpec, uno per stream.
 
     Se ``streams:`` è assente, ritorna un singolo spec senza stream_id.
-    Con ``locs`` gli errori di parse portano file e riga; la rete di
-    sicurezza sotto etichetta con lo stream anche i ``ValueError`` nudi
-    non ancora migrati a ``SpecError``.
+    Le entry-spread vengono espanse in entry ordinarie prima del merge
+    (``spread.expand_spreads``): da qui in poi ogni stream, generato o
+    scritto a mano, e' un override come gli altri. Con ``locs`` gli errori
+    di parse portano file e riga; la rete di sicurezza sotto etichetta con
+    lo stream anche i ``ValueError`` nudi non ancora migrati a ``SpecError``.
     """
     sid = study_id or data.get("study_id") or "study"
     streams = data.get("streams")
     if not streams:
         return [parse_study_spec(data, sid, locs=locs)]
+    streams = expand_spreads(streams, locs)
     result = []
     for stream_id, override in streams.items():
         merged = _deep_merge(data, override or {})
