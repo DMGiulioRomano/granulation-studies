@@ -1,0 +1,12 @@
+function study {
+  local s="$1"
+  [[ -z "$s" ]] && { echo "uso: study <STUDY>" >&2; return 1 }
+  make all-study STUDY="$s" \
+    && make sv STUDY="$s" \
+    && sonic "generated/$s/sv/stack/${s}_stack_stems.sv"
+}
+
+_study() {
+  [[ ${#words} -eq 2 && -d studies ]] && compadd -- studies/*(/:t)
+}
+compdef _study study

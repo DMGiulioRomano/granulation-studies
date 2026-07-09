@@ -1,4 +1,9 @@
-# TEST STACK 5 — generatori annidati negli envelope di soglia.
+# TEST STACK 5 (10 minuti) — copia di study_stack_test_5 con duration
+# portata da 190s a 600s. Tutti i breakpoint X degli envelope sono stati
+# riscalati di un fattore 190/600 = 0.31667 per preservare il tempo
+# assoluto a cui cade ogni evento (stessa logica di study_stack_test_5,
+# solo "stirata" su una durata più lunga: quello che accadeva a x=1
+# su 190s ora accade a x=0.3167 su 600s).
 #
 # Documenta i punti d'innesto dell'annidamento (docs/plans/done/nested-generators.md):
 #   - Y banda con `base` annidato (pavimento generato) + `range` scalare
@@ -12,12 +17,12 @@
 # Il seed dei nodi senza `seed` proprio deriva dal padre (gerarchico):
 # rigenerare due volte produce lo stesso stack.yml.
 #
-#   make stack STUDY=study_stack_test_5
+#   make stack STUDY=study_stack_test_5_10min
 
-study_id: study_stack_test_5
-title: "Test stack 5 — generatori annidati"
+study_id: study_stack_test_5_10min
+title: "Test stack 5 — generatori annidati (10 min)"
 seed: 5
-duration: 190
+duration: 600
 samples_dir: samples
 
 base:
@@ -30,32 +35,32 @@ base:
   pointer:
     speed_ratio: 0
     start: .3
-  volume_range: [[0,0],[.1,3],[1,6]]
+  volume_range: [[0,0],[0.0317,3],[0.3167,6],[.5,0]]
 
 axes:
   # Nota merge: gli assi qui NON dichiarano `n` (il deep-merge lo
   # conserverebbe anche nello stream rspline, dove n appartiene alla X);
   # ogni stream con X-linear lo aggiunge nel proprio override.
-  interpolation: cubic 
+  interpolation: cubic
   density:
     path: density
     baseline: 20
     base: 100                      # pavimento generato: vaga tra 4 e 12 su 6 quote
-    range: [[.1,0],[.4,.2]] 
+    range: [[0.0317,0],[0.1267,.2],[0.4,.2],[.5,0]]
   grain_duration:
     path: grain.duration
     baseline: .005
-    range: [[0,0],[.4,0.001],[1,0.01]]
-    base: [[.4,.001],[1,0.01]]
+    base: [[0.1267,.001],[0.3167,0.01],[.33,0.01],[.5,0.00005]]
+    range: [[0,0],[0.1267,0.001],[0.3167,0.01],[.5,0.001]]
 
 stack:
   seed: 45
   density:
-    base: [[0,.05],[.4,.15]]
-    range: [[.1,0],[.4,.05]]
+    base: [[0,.05],[0.1267,.15],[0.32,.15],[.5,.03]]
+    range: [[0.0317,0],[0.1267,.05],[.32,0.5],[.5,.03]]
   grain_duration:
-    range: [[.1,0],[.4,.05]]
-    base: [[0,.025],[.4,.08]]
+    base: [[0,.025],[0.1267,.08],[.4,0.08],[.5,0.5]]
+    range: [[0.0317,0],[0.1267,.05],[.4,0.05],[.5,.1]]
 
 streams:
   fermo:
@@ -64,8 +69,7 @@ streams:
       grain_duration: {range: 0}
 
   dens_1: {base: {pan: -50}}
-  dens_1_1: {base: {pan: 64}, axes: {density: {base: [[0,100],[.5,100.5]], range: [[.1,0],[.4,.2],[1,1]]}}}
-  dens_2: {base: {pan: 30}, axes: {density: {base: 200, range: [[.1,0],[.4,2]]}}}
-  dens_2_1: {base: {pan: 30}, axes: {density: {base: 200, range: [[.1,0],[.4,2]]}}}
-
+  dens_1_1: {base: {pan: 64}, axes: {density: {base: [[0,100],[0.1583,100.5]], range: [[0.0317,0],[0.1267,.2],[0.3167,1],[0.4,.2],[.5,0]]}}}
+  dens_2: {base: {pan: 30}, axes: {density: {base: 200, range: [[0.0317,0],[0.1267,2],[0.4,.2],[.5,0]]}}}
+  dens_2_1: {base: {pan: 30}, axes: {density: {base: 200, range: [[0.0317,0],[0.1267,2],[0.4,.2],[.5,0]]}}}
 
