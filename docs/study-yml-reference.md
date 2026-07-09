@@ -71,10 +71,13 @@ sweep:
 # UN documento multi-stream. Vedi la sezione "Il blocco stack" sotto.
 stack:
   seed: 42                       # seed-X globale (chiave riservata; opzionale)
+  unit: s                        # unita' globale della banda (chiave riservata;
+                                 #   hz = frequenza, default | s = periodo in secondi)
   nome_asse:                     # un asse con camminata-X: la X possiede n, la
-    base:  [[0, 3], [1, 10]]     #   sua Y dev'essere una banda senza n. base/range
-    range: [[0, 1], [1, 1]]      #   = frequenza di generazione (Hz, durata reale)
+    base:  [[0, 20], [1, 4]]     #   sua Y dev'essere una banda senza n. base/range
+    range: [[0, 5], [1, 1]]      #   nell'unita' scelta (qui: secondi tra breakpoint)
     seed: 7                      # seed-X per-asse (vince sul globale)
+    unit: s                      # unit per-asse (vince sul globale; opzionale)
   # asse assente dal blocco -> linear (n dai valori Y). Dettagli: sezione "stack".
 
 # Stream: varianti di ascolto con override parziali sul documento sopra.
@@ -171,9 +174,9 @@ density:
 ```
 
 `n` appartiene a chi possiede il conteggio dei punti (*n-ownership*): con la
-camminata-X del processo stack i tempi — e quindi `n` — emergono dalla frequenza,
-e la banda Y va dichiarata **senza** `n` (viene campionata ai tempi reali dei
-breakpoint). Fuori da quel caso `n` è obbligatorio.
+camminata-X del processo stack i tempi — e quindi `n` — emergono dalla frequenza
+(o dal periodo, con `unit: s`), e la banda Y va dichiarata **senza** `n` (viene
+campionata ai tempi reali dei breakpoint). Fuori da quel caso `n` è obbligatorio.
 
 `base` e `range` sono un **envelope di 2° ordine** (una banda che genera
 valori); un `range` negativo in un punto della sequenza è errore. Ognuno dei
@@ -350,25 +353,39 @@ Per escludere uno stream dall'ascolto lo si muta con il suo `base.volume`
 (meccanismo engine); il blocco `stack:` è solo config della camminata-X, non un
 gate di partecipazione.
 
-Schema piatto: `seed` è l'unica chiave riservata (seed-X globale); ogni altra
-chiave è un **nome d'asse**. Non c'è più un nome-strategy: la strategy-X si
-riconosce dalla **presenza** dell'asse nel blocco.
+Schema piatto: `seed` (seed-X globale) e `unit` (unità globale della banda)
+sono le chiavi riservate; ogni altra chiave è un **nome d'asse**. Non c'è più
+un nome-strategy: la strategy-X si riconosce dalla **presenza** dell'asse nel
+blocco.
 
 | Strategy-X | Come si dichiara | Chi possiede `n` |
 |------------|------------------|-------------------|
 | `linear` | asse **assente** dal blocco | la **Y** (`values`/`ramp`/banda con `n`); tempi equispaziati `t_i = i/(n-1)`, estremo `t=1` incluso |
-| camminata (`walk`, alla `rspline`) | asse **presente** con `{base: <env>, range?: <env>, seed?: int, distribution?, drift?}` | la **X**: `n` emerge dalla frequenza integrata sulla durata |
+| camminata (`walk`, alla `rspline`) | asse **presente** con `{base: <env>, range?: <env>, seed?: int, unit?: hz\|s, distribution?, drift?}` | la **X**: `n` emerge dalla banda integrata sulla durata |
 
-Con la camminata la frequenza si pesca a ogni punto nella banda
-`[base(t), base(t)+range(t)]` (Hz sulla durata reale; `base`/`range` accettano
-le stesse forme della banda di Y) e il punto successivo cade a `t + 1/f`. Anche
-`distribution` e `drift` valgono qui, con la stessa semantica della banda di Y
-(il dominio degli `Env` è il tempo reale normalizzato): con `drift` la
-frequenza di generazione deriva invece di saltare — accelerandi/ritardandi
-stocastici ma organici. La Y dev'essere una **banda senza** `n`, campionata ai
-tempi reali dei breakpoint. `range` assente = camminata **deterministica**
-(segue `base`, il seed non influisce sui tempi). Le due direzioni sbagliate (camminata-X con Y che enumera; banda Y
-senza `n` con X lineare) sono errori di parse (*n-ownership*).
+Con la camminata a ogni punto si pesca un valore nella banda
+`[base(t), base(t)+range(t)]` (`base`/`range` accettano le stesse forme della
+banda di Y). Con `unit: hz` (default) il valore è una **frequenza di
+generazione** e il punto successivo cade a `t + 1/f`; con `unit: s` è il
+**periodo** in secondi e il punto cade a `t + p` — comodo quando gli intervalli
+sono nell'ordine delle decine di secondi e le frequenze frazionarie (0.0x Hz)
+diventano scomode. Anche `distribution` e `drift` valgono qui, con la stessa
+semantica della banda di Y (il dominio degli `Env` è il tempo reale
+normalizzato): con `drift` la frequenza (o il periodo) di generazione deriva
+invece di saltare — accelerandi/ritardandi stocastici ma organici. La Y
+dev'essere una **banda senza** `n`, campionata ai tempi reali dei breakpoint.
+`range` assente = camminata **deterministica** (segue `base`, il seed non
+influisce sui tempi). Le due direzioni sbagliate (camminata-X con Y che
+enumera; banda Y senza `n` con X lineare) sono errori di parse (*n-ownership*).
+
+> **`unit` sceglie lo spazio della camminata, non una notazione.** Uniforme in
+> periodo non è uniforme in frequenza: la banda `[10, 30]` s ha intervallo
+> medio 20 s, la "equivalente" `[1/30, 1/10]` Hz produce intervalli sbilanciati
+> verso il corto. E gli `Env` di `base`/`range` si interpolano nello spazio
+> scelto: `base: [20, 2]` con `unit: s` è un accelerando lineare *nel periodo*,
+> `base: [0.05, 0.5]` in Hz è lineare *nel rate* — curve percettive diverse.
+> Anche `drift.step` (frazione della banda corrente) cammina nello spazio
+> scelto.
 
 > **Due equispaziati diversi.** «`base` costante = tempi equispaziati» vale per la
 > **camminata** ed è un equispaziato *per frequenza*: `n` emerge da `durata × f` e
@@ -385,10 +402,12 @@ diventa un envelope indipendente. Due assi con la stessa strategy-X e lo stesso
 solo valore resta **scalare** (stream statici/drone legittimi); l'interpolation
 per-asse (`linear`/`cubic`/`step`) vale anche qui.
 
-**Seed, precedenza (il più specifico vince):**
+**Seed e unit, precedenza (il più specifico vince):**
 
 - Y: `seed` della banda (per-asse) → `axes.seed` globale → auto-derivato per-stream;
-- X: `stack.<asse>.seed` → `stack.seed` globale → auto-derivato per-stream.
+- X: `stack.<asse>.seed` → `stack.seed` globale → auto-derivato per-stream;
+- unit: `stack.<asse>.unit` → `stack.unit` globale (per-stream via il deep-merge
+  di `streams.<id>.stack`) → default `hz` (retrocompatibile).
 
 L'auto-derivazione è un hash stabile (CRC32) dell'id dello stream, con salt
 distinti per Y e X: senza seed globali gli stream impilati si **decorrelano da
