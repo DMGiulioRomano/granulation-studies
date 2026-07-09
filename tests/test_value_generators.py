@@ -391,3 +391,55 @@ def test_ramp_env_step_nested_generator_via_expand():
     assert a == b
     assert a[0] == 1 and a[-1] <= 10
     assert all(y > x for x, y in zip(a, a[1:]))
+
+
+# --- distribution: come si pesca dentro la banda (issue #16) -----------------------
+
+import random  # noqa: E402
+import statistics  # noqa: E402
+
+
+def test_uniform_default_bit_identical_to_manual_rng():
+    # Regressione retrocompat: senza distribution/drift la sequenza e' la stessa
+    # estrazione uniforme di sempre, bit a bit.
+    rng = random.Random(1988)
+    want = [round(rng.uniform(0.001, 0.01), 9) for _ in range(8)]
+    assert band(n=8, base=0.001, range=0.009, seed=1988) == want
+    assert band(n=8, base=0.001, range=0.009, seed=1988,
+                distribution="uniform") == want
+
+
+def test_gaussian_deterministic_within_band():
+    a = band(n=64, base=0.001, range=0.009, seed=7, distribution="gaussian")
+    b = band(n=64, base=0.001, range=0.009, seed=7, distribution="gaussian")
+    assert a == b
+    assert all(0.001 <= v <= 0.01 for v in a)
+
+
+def test_gaussian_differs_from_uniform_and_concentrates_at_center():
+    uni = band(n=400, base=0, range=10, seed=3)
+    gau = band(n=400, base=0, range=10, seed=3, distribution="gaussian")
+    assert uni != gau
+    # Sigma = larghezza/6: la gaussiana sta stretta sul centro banda (5).
+    assert statistics.pstdev(gau) < statistics.pstdev(uni)
+    assert abs(statistics.fmean(gau) - 5.0) < 0.5
+
+
+def test_gaussian_collapsed_band_follows_base():
+    # Larghezza 0: nessuna varianza, il valore e' il centro (== base).
+    assert band(n=3, base=[0.0, 1.0], seed=0, distribution="gaussian") == [0.0, 0.5, 1.0]
+
+
+def test_gaussian_in_band_at_real_fracs():
+    fracs = [0.0, 0.37, 0.81]
+    a = band_at(fracs, base=5, range=2, seed=9, distribution="gaussian")
+    b = band_at(fracs, base=5, range=2, seed=9, distribution="gaussian")
+    assert a == b
+    assert all(5 <= v <= 7 for v in a)
+
+
+def test_unknown_distribution_raises():
+    with pytest.raises(ValueError, match="distribution"):
+        band(n=3, base=0, range=1, seed=0, distribution="poisson")
+    with pytest.raises(ValueError, match="distribution"):
+        band_at([0.0], base=0, range=1, seed=0, distribution="poisson")

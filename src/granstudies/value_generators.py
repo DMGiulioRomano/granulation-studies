@@ -152,44 +152,86 @@ def _band_at(base: Threshold, spread: Threshold, frac: float, where: str) -> tup
     return lo, hi
 
 
-def band(n: int, base: Threshold, range: Threshold = 0.0, seed: int = 0) -> List[float]:
+# Le distribuzioni di pescaggio dentro la banda (issue #16). ``uniform`` e' il
+# comportamento storico; ``gaussian`` concentra sul centro banda.
+_DISTRIBUTIONS = frozenset({"uniform", "gaussian"})
+
+
+def _draw(rng: random.Random, lo: float, hi: float, distribution: str) -> float:
+    """Un pescaggio dentro ``[lo, hi]`` secondo ``distribution``.
+
+    ``uniform``: come sempre. ``gaussian``: media al centro banda, sigma
+    ``(hi - lo) / 6`` (i bordi cadono a 3 sigma), clamp ai bordi — la coda
+    fuori banda (~0.3%) si appiattisce sull'estremo invece di uscire.
+    """
+    if distribution == "uniform":
+        return rng.uniform(lo, hi)
+    mu = (lo + hi) / 2.0
+    sigma = (hi - lo) / 6.0
+    if sigma == 0:
+        return mu
+    return min(max(rng.gauss(mu, sigma), lo), hi)
+
+
+def _check_distribution(distribution: str, where: str) -> None:
+    if distribution not in _DISTRIBUTIONS:
+        opts = " | ".join(sorted(_DISTRIBUTIONS))
+        raise ValueError(
+            f"{where}: distribution '{distribution}' non ammessa ({opts})."
+        )
+
+
+def band(
+    n: int,
+    base: Threshold,
+    range: Threshold = 0.0,
+    seed: int = 0,
+    distribution: str = "uniform",
+) -> List[float]:
     """``n`` valori casuali entro una banda ``[base, base + range]`` mobile.
 
     ``base``/``range`` scalari = banda fissa; ``[a, b]`` = banda che scorre/si
     allarga linearmente lungo la sequenza. Il valore al passo ``i`` e' estratto
-    uniformemente nella banda a quel punto; ``range`` omesso (0) = banda
-    collassata, la sequenza segue ``base`` deterministicamente. Deterministico
-    via ``seed`` (stesso seed -> stessa sequenza), requisito del ciclo
-    rigenera-e-confronta.
+    nella banda a quel punto secondo ``distribution`` (``uniform`` |
+    ``gaussian``, vedi ``_draw``); ``range`` omesso (0) = banda collassata, la
+    sequenza segue ``base`` deterministicamente. Deterministico via ``seed``
+    (stesso seed -> stessa sequenza), requisito del ciclo rigenera-e-confronta.
     """
     if n < 1:
         raise ValueError(f"band: n deve essere >= 1 (ricevuto {n})")
+    _check_distribution(distribution, "band")
     rng = random.Random(seed)
     out: List[float] = []
     for i in _range(n):
         frac = i / (n - 1) if n > 1 else 0.0
         lo, hi = _band_at(base, range, frac, "band")
-        out.append(round(rng.uniform(lo, hi), 9))
+        out.append(round(_draw(rng, lo, hi, distribution), 9))
     return out
 
 
 def band_at(
-    fracs: Sequence[float], base: Threshold, range: Threshold = 0.0, seed: int = 0
+    fracs: Sequence[float],
+    base: Threshold,
+    range: Threshold = 0.0,
+    seed: int = 0,
+    distribution: str = "uniform",
 ) -> List[float]:
     """Un valore casuale nella banda ``[base, base + range]`` per ogni ``frac``.
 
     Variante di ``band`` per il coupling con la X-walk (stack): quando la X
     possiede ``n``, la banda va campionata al tempo *reale* ``t_i`` di ogni
     breakpoint, non all'indice ``i/(n-1)``. La Y non possiede ``n``: pesca un
-    valore per ogni punto che la X ha creato. Deterministico via ``seed``.
+    valore per ogni punto che la X ha creato. Deterministico via ``seed``;
+    ``distribution`` come in ``band``.
     """
     if not fracs:
         raise ValueError("band_at: serve almeno un frac (lista vuota).")
+    _check_distribution(distribution, "band_at")
     rng = random.Random(seed)
     out: List[float] = []
     for frac in fracs:
         lo, hi = _band_at(base, range, frac, "band_at")
-        out.append(round(rng.uniform(lo, hi), 9))
+        out.append(round(_draw(rng, lo, hi, distribution), 9))
     return out
 
 
