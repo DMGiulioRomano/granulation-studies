@@ -22,6 +22,7 @@ from typing import Any, Dict
 import yaml
 
 from .engine_bridge import REPO_ROOT
+from .errors import SpecError
 
 
 # --- layout dei path -------------------------------------------------------
@@ -461,6 +462,30 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    try:
+        return _dispatch(args)
+    except (SpecError, yaml.YAMLError):
+        # Con GRANSTUDIES_DEBUG=1 il traceback completo torna utile (sviluppo);
+        # altrimenti l'errore esce come blocco leggibile, senza stack Python.
+        if os.environ.get("GRANSTUDIES_DEBUG"):
+            raise
+        return _report_error(args)
+
+
+def _report_error(args) -> int:
+    """Stampa l'errore corrente in forma leggibile su stderr. Exit code 2."""
+    e = sys.exc_info()[1]
+    study = getattr(args, "study", None)
+    intro = f"[granstudies] errore nello studio '{study}'" if study else "[granstudies] errore"
+    if isinstance(e, SpecError):
+        print(f"{intro}\n\n{e.format_block()}\n", file=sys.stderr)
+    else:  # yaml.YAMLError: i mark di posizione li porta gia' con se'
+        print(f"{intro}: YAML non valido\n\n  {e}\n", file=sys.stderr)
+    print("  (traceback completo con GRANSTUDIES_DEBUG=1)", file=sys.stderr)
+    return 2
+
+
+def _dispatch(args) -> int:
     if args.command == "sweep":
         return cmd_sweep(args.study, args.stream)
     if args.command == "stack":
