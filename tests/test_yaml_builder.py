@@ -1,3 +1,4 @@
+import pytest
 from granstudies.yaml_builder import deep_set, deep_get, build_stream, build_document
 
 
@@ -145,3 +146,22 @@ def test_build_multi_document_rejects_empty():
 
     with pytest.raises(ValueError):
         build_multi_document([])
+
+
+# --- guardia: nodo-expr non risolto non deve arrivare all'engine -------------------
+
+def test_build_stream_rejects_unresolved_expr_node():
+    base = {"volume": {"expr": "v - 1", "let": {"v": -19}}}
+    with pytest.raises(ValueError, match="volume"):
+        build_stream(base, {})
+
+
+def test_build_stream_rejects_expr_node_nested():
+    base = {"grain": {"duration": {"expr": "1 / 100"}}}
+    with pytest.raises(ValueError, match=r"grain\.duration"):
+        build_stream(base, {})
+
+
+def test_build_stream_rejects_expr_node_in_override():
+    with pytest.raises(ValueError, match="onset"):
+        build_stream({"volume": -6}, {"onset": {"expr": "i"}})

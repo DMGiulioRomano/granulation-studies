@@ -10,6 +10,27 @@ from __future__ import annotations
 import copy
 from typing import Any, Dict, Mapping, Sequence
 
+from .expr import is_expr_node
+
+
+def _reject_unresolved_expr(node: Any, path: str = "") -> None:
+    """Errore chiaro se un nodo-expr e' sopravvissuto fino al documento engine.
+
+    I nodi-expr si risolvono alle seam degli Env (axes/stack); un parametro
+    statico di ``base.*`` non passa da nessuna seam, quindi un expr li' dentro
+    arriverebbe crudo all'engine come dict — YAML rotto in silenzio. Meglio
+    fermarsi qui, nel choke point comune a sweep/stack/compose, col path.
+    """
+    if is_expr_node(node):
+        raise ValueError(
+            f"nodo-expr non supportato in '{path}': le espressioni valgono "
+            "solo nei parametri-Env (dentro 'axes.*' e 'stack.*'), non nei "
+            "parametri statici dello stream."
+        )
+    if isinstance(node, Mapping):
+        for k, v in node.items():
+            _reject_unresolved_expr(v, f"{path}.{k}" if path else str(k))
+
 
 def deep_set(d: Dict[str, Any], dotted_path: str, value: Any) -> None:
     """Imposta ``value`` in ``d`` seguendo un path dotted, creando i dict mancanti.
@@ -66,6 +87,7 @@ def build_stream(
                 "time_mode": envelope_time_mode,
             }
         deep_set(stream, path, value)
+    _reject_unresolved_expr(stream)
     return stream
 
 

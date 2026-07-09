@@ -72,3 +72,33 @@ streams:
           expr: "-6 - 2 * i"
         base.onset:
           expr: "4 * i"
+
+  # patch 1 — path diverso dalla strategy: il volume e' mio, l'Env calcolato
+  # dall'expr (density.base = [[0,100],[0.1583,150]]) resta intatto.
+  ventaglio_2:
+    base:
+      volume: -18
+
+  # patch 2 — sovrascrive proprio il path della strategy: l'Env calcolato
+  # del terzo generato viene rimpiazzato da un Env scritto a mano.
+  ventaglio_3:
+    axes:
+      density:
+        base: [[0, 42], [1, 42]]
+
+  # patch 3 — rimpiazza l'Env calcolato con un ALTRO nodo-expr: axes.* e' un
+  # path-Env, la valutazione avviene alla seam degli assi, non nello spread.
+  # (In base.* un nodo-expr e' errore: i parametri statici non hanno seam.)
+  ventaglio_4:
+    axes:
+      density:
+        base:
+          expr: "env * 10"
+          let:
+            env: [[0, 1], [1, 2]]
+
+  # patch 4 — statica su un path della strategy: vince sul valore calcolato
+  # (-8), il fratello onset calcolato (4) resta.
+  gradino_2:
+    base:
+      volume: -20
