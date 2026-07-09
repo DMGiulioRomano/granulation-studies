@@ -380,6 +380,61 @@ def _dict_no_seeds():
     return d
 
 
+# --- unit della camminata-X (hz | s), stessa catena del seed -----------------------
+
+def test_stack_unit_reserved_key_parsed():
+    d = _stack_dict()
+    d["stack"]["unit"] = "s"
+    spec = parse_study_spec(d)
+    assert spec.stack_unit == "s"
+    assert "unit" not in spec.stack            # chiave riservata, non un asse
+    assert spec.resolved_x_unit() == "s"
+
+
+def test_stack_unit_default_is_hz():
+    spec = parse_study_spec(_stack_dict())
+    assert spec.stack_unit is None
+    assert spec.resolved_x_unit() == "hz"
+
+
+def test_stack_unit_invalid_raises():
+    d = _stack_dict()
+    d["stack"]["unit"] = "ms"
+    with pytest.raises(ValueError, match="unit"):
+        parse_study_spec(d)
+
+
+def test_stack_entry_unit_allowed_and_validated():
+    d = _stack_dict()
+    d["stack"]["density"]["unit"] = "s"
+    spec = parse_study_spec(d)
+    assert spec.stack["density"]["unit"] == "s"
+    d["stack"]["density"]["unit"] = "hertz"
+    with pytest.raises(ValueError, match="unit"):
+        parse_study_spec(d)
+
+
+def test_stack_unit_bpm_accepted_at_both_levels():
+    d = _stack_dict()
+    d["stack"]["unit"] = "bpm"
+    d["stack"]["density"]["unit"] = "bpm"
+    spec = parse_study_spec(d)
+    assert spec.stack_unit == "bpm"
+    assert spec.stack["density"]["unit"] == "bpm"
+
+
+def test_stack_unit_override_per_stream():
+    d = _stack_dict()
+    d["stack"]["unit"] = "s"
+    d["streams"] = {
+        "voce_a": {},
+        "voce_b": {"stack": {"unit": "hz"}},
+    }
+    specs = {s.stream_id: s for s in resolve_streams(d)}
+    assert specs["voce_a"].stack_unit == "s"   # eredita il globale
+    assert specs["voce_b"].stack_unit == "hz"  # override per-stream
+
+
 # --- distribution e drift: plumbing di parse (issue #16) --------------------------
 
 def test_sweep_band_axis_with_gaussian_and_drift():

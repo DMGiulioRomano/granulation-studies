@@ -162,6 +162,84 @@ def test_walk_drift_malformed_raises():
         walk(duration=10.0, base=3, range=4, seed=7, drift={})
 
 
+# --- unit della camminata: hz (default) | s (periodo) ------------------------------
+
+def test_walk_unit_hz_explicit_equals_default():
+    a = walk(duration=10.0, base=3, range=4, seed=7)
+    b = walk(duration=10.0, base=3, range=4, seed=7, unit="hz")
+    assert a == b
+
+
+def test_walk_unit_s_deterministic_period():
+    # Banda collassata: periodo 2 s esatti su 10 s -> punti a 0, 2, 4, 6, 8 s.
+    times = walk(duration=10.0, base=2, range=0, unit="s")
+    assert times == [0.0, 0.2, 0.4, 0.6, 0.8]
+    # Equivalenza col reciproco: 0.5 Hz = un punto ogni 2 s.
+    assert times == walk(duration=10.0, base=0.5, range=0)
+
+
+def test_walk_unit_s_band_draws_periods_in_seconds():
+    # Banda [10, 30] s: ogni intervallo reale tra punti cade nella banda.
+    duration = 300.0
+    times = walk(duration=duration, base=10, range=20, seed=7, unit="s")
+    dts = [(b - a) * duration for a, b in zip(times, times[1:])]
+    assert dts and all(10 - 1e-6 <= dt <= 30 + 1e-6 for dt in dts)
+
+
+def test_walk_unit_s_envelope_interpolated_in_period_space():
+    # Periodo che si stringe nella seconda meta': densifica dove e' corto.
+    base = {"type": "step", "points": [[0, 2], [0.5, 0.25]]}
+    times = walk(duration=10.0, base=base, range=0, unit="s")
+    first = [t for t in times if t < 0.5]
+    second = [t for t in times if t >= 0.5]
+    assert len(second) > len(first)
+
+
+def test_walk_unit_s_is_not_a_relabeled_hz():
+    # Stessa banda numerica, spazio diverso: uniforme in periodo non e'
+    # uniforme in frequenza, le camminate differiscono a parita' di seed.
+    a = walk(duration=10.0, base=0.5, range=0.5, seed=7)
+    b = walk(duration=10.0, base=0.5, range=0.5, seed=7, unit="s")
+    assert a != b
+
+
+def test_walk_unit_s_rejects_non_positive_period():
+    with pytest.raises(ValueError, match="periodo"):
+        walk(duration=10.0, base=0, range=0, unit="s")
+
+
+def test_walk_unit_s_caps_runaway_period():
+    # Periodo minuscolo = milioni di punti: stesso tetto anti-runaway.
+    with pytest.raises(ValueError):
+        walk(duration=10.0, base=1e-9, range=0, unit="s")
+
+
+def test_walk_unknown_unit_raises():
+    with pytest.raises(ValueError, match="unit"):
+        walk(duration=10.0, base=2, range=0, unit="ms")
+
+
+def test_walk_unit_bpm_deterministic_pulse():
+    # Banda collassata: 60 bpm = un punto al secondo su 10 s -> 10 punti.
+    times = walk(duration=10.0, base=60, range=0, unit="bpm")
+    assert times == [round(i / 10, 9) for i in range(10)]
+    # Equivalenza col rate: 60 bpm = 1 Hz.
+    assert times == walk(duration=10.0, base=1, range=0)
+
+
+def test_walk_unit_bpm_is_rescaled_hz_space():
+    # bpm e' lo spazio-rate riscalato (bpm = 60*hz): la banda [60, 120] bpm
+    # produce la stessa camminata della banda [1, 2] Hz, a parita' di seed.
+    a = walk(duration=10.0, base=60, range=60, seed=7, unit="bpm")
+    b = walk(duration=10.0, base=1, range=1, seed=7, unit="hz")
+    assert a == pytest.approx(b)
+
+
+def test_walk_unit_bpm_rejects_non_positive():
+    with pytest.raises(ValueError, match="bpm"):
+        walk(duration=10.0, base=0, range=0, unit="bpm")
+
+
 # --- n-ownership -----------------------------------------------------------------
 
 def test_x_owns_n_true_when_base_present():
