@@ -636,6 +636,187 @@ streams:
     assert "boh" in str(exc.value)
 
 
+# --- strategy expr: banda-let (un pescaggio per stream generato) -------------------
+
+def _rand_let_entry(n=6, **band_spec):
+    spec = {"base": -12, "range": 6}
+    spec.update(band_spec)
+    return {
+        "spread": {
+            "n": n,
+            "over": {"base.volume": {"expr": "v", "let": {"v": spec}}},
+        },
+    }
+
+
+def test_expr_let_band_draws_one_value_per_stream():
+    out = expand_spreads(_streams(v=_rand_let_entry()))
+    vols = [out[k]["base"]["volume"] for k in out]
+    assert len(vols) == 6
+    assert all(-12 <= x <= -6 for x in vols)
+    assert len(set(vols)) > 1  # pescaggi, non una costante
+
+
+def test_expr_let_band_deterministic_between_runs():
+    a = expand_spreads(_streams(v=_rand_let_entry()))
+    b = expand_spreads(_streams(v=_rand_let_entry()))
+    assert [a[k]["base"]["volume"] for k in a] == [b[k]["base"]["volume"] for k in b]
+
+
+def test_expr_let_band_explicit_seed_matches_band_generator():
+    from granstudies.value_generators import band
+
+    out = expand_spreads(_streams(v=_rand_let_entry(n=4, seed=42)))
+    assert [out[k]["base"]["volume"] for k in out] == band(
+        n=4, base=-12, range=6, seed=42
+    )
+
+
+def test_expr_let_band_enters_arithmetic_with_static_let():
+    from granstudies.value_generators import band
+
+    entry = {
+        "spread": {
+            "n": 4,
+            "over": {
+                "base.volume": {
+                    "expr": "a + v * 2",
+                    "let": {"a": -6, "v": {"base": 0, "range": 1, "seed": 7}},
+                },
+            },
+        },
+    }
+    out = expand_spreads(_streams(v=entry))
+    draws = band(n=4, base=0, range=1, seed=7)
+    assert [out[k]["base"]["volume"] for k in out] == [
+        round(-6 + d * 2, 9) for d in draws
+    ]
+
+
+def test_expr_let_band_scales_env_per_stream():
+    from granstudies.value_generators import band
+
+    entry = {
+        "spread": {
+            "n": 3,
+            "over": {
+                "axes.density.base": {
+                    "expr": "env * v",
+                    "let": {
+                        "env": [[0, 1], [1, 2]],
+                        "v": {"base": 10, "range": 5, "seed": 1},
+                    },
+                },
+            },
+        },
+    }
+    out = expand_spreads(_streams(v=entry))
+    draws = band(n=3, base=10, range=5, seed=1)
+    bases = [out[k]["axes"]["density"]["base"] for k in out]
+    assert bases == [[[0, d], [1, round(2 * d, 9)]] for d in draws]
+
+
+def test_expr_let_band_vars_decorrelate_by_default():
+    entry = {
+        "spread": {
+            "n": 5,
+            "over": {
+                "base.volume": {
+                    "expr": "a - b",
+                    "let": {"a": {"base": 0, "range": 1}, "b": {"base": 0, "range": 1}},
+                },
+            },
+        },
+    }
+    out = expand_spreads(_streams(v=entry))
+    diffs = [out[k]["base"]["volume"] for k in out]
+    assert any(d != 0 for d in diffs)
+
+
+def test_expr_let_band_env_base_slides_over_population():
+    # range omesso -> banda collassata: i pescaggi seguono l'Env di base
+    # deterministicamente, frac = i/(n-1) sulla popolazione.
+    entry = {
+        "spread": {
+            "n": 5,
+            "over": {"base.onset": {"expr": "v", "let": {"v": {"base": [0, 10]}}}},
+        },
+    }
+    out = expand_spreads(_streams(v=entry))
+    assert [out[k]["base"]["onset"] for k in out] == [0, 2.5, 5, 7.5, 10]
+
+
+def test_expr_let_band_distribution_and_drift():
+    a = expand_spreads(
+        _streams(v=_rand_let_entry(distribution="gaussian", drift={"step": 0.2}))
+    )
+    b = expand_spreads(
+        _streams(v=_rand_let_entry(distribution="gaussian", drift={"step": 0.2}))
+    )
+    vols = [a[k]["base"]["volume"] for k in a]
+    assert [b[k]["base"]["volume"] for k in b] == vols
+    assert all(-12 <= x <= -6 for x in vols)
+
+
+def test_expr_let_band_with_n_raises():
+    entry = {
+        "spread": {
+            "n": 3,
+            "over": {
+                "base.onset": {"expr": "v", "let": {"v": {"base": 0, "range": 1, "n": 3}}},
+            },
+        },
+    }
+    with pytest.raises(SpecError, match="conteggio"):
+        expand_spreads(_streams(v=entry))
+
+
+def test_expr_let_values_node_raises():
+    entry = {
+        "spread": {
+            "n": 2,
+            "over": {"base.onset": {"expr": "v", "let": {"v": {"values": [1, 2]}}}},
+        },
+    }
+    with pytest.raises(SpecError, match="banda"):
+        expand_spreads(_streams(v=entry))
+
+
+def test_expr_let_ramp_node_raises():
+    entry = {
+        "spread": {
+            "n": 2,
+            "over": {
+                "base.onset": {"expr": "v", "let": {"v": {"ramp": {"start": 0, "step": 1}}}},
+            },
+        },
+    }
+    with pytest.raises(SpecError, match="banda"):
+        expand_spreads(_streams(v=entry))
+
+
+def test_expr_let_band_unknown_key_raises():
+    entry = {
+        "spread": {
+            "n": 2,
+            "over": {"base.onset": {"expr": "v", "let": {"v": {"base": 0, "foo": 1}}}},
+        },
+    }
+    with pytest.raises(SpecError, match="foo"):
+        expand_spreads(_streams(v=entry))
+
+
+def test_expr_let_band_on_reserved_name_raises():
+    entry = {
+        "spread": {
+            "n": 2,
+            "over": {"base.onset": {"expr": "i * 2", "let": {"i": {"base": 0, "range": 1}}}},
+        },
+    }
+    with pytest.raises(SpecError, match="riservat"):
+        expand_spreads(_streams(v=entry))
+
+
 def test_expr_resolve_streams_end_to_end():
     doc = _doc()
     # asse a banda: base scalare di default, rimpiazzata per-stream dall'expr

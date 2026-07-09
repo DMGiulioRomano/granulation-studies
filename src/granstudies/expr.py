@@ -12,8 +12,9 @@ unario ``-``, parentesi. Niente call, subscript, confronti: il parser rifiuta
 ogni altro costrutto col frammento incriminato.
 
 Modulo puro, solo stdlib: chi lo chiama decide lo scope (``expand_env`` passa
-il solo ``let``; la strategy di spread aggiunge ``i`` e ``n``) e avvolge i
-``ValueError`` col proprio contesto (path, stream, riga).
+il solo ``let``; la strategy di spread aggiunge ``i``, ``n`` e i pescaggi
+delle bande-let, estratte a monte del parse) e avvolge i ``ValueError`` col
+proprio contesto (path, stream, riga).
 """
 from __future__ import annotations
 
@@ -44,6 +45,9 @@ def parse_expr_node(spec: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     ``let`` e' opzionale; i suoi valori devono essere scalari o forme statiche
     di Env — un nodo-generatore dentro ``let`` e' un incrocio di meccanismi
     non ammesso (la validazione lo rifiuta come forma non riconosciuta).
+    L'unica eccezione vive nella strategy expr dello spread: le bande-let
+    (variabili random per-stream) vengono estratte *prima* di chiamare questo
+    parse, che vede solo la parte statica di ``let``.
     """
     extra = set(spec) - _NODE_KEYS
     if extra:
