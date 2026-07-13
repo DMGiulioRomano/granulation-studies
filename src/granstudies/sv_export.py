@@ -82,7 +82,7 @@ def _find_envelopes(obj: Any, prefix: str = "") -> List[Tuple[str, List, str]]:
     return []
 
 
-def _plateau_starts(envelopes: List[Tuple[str, List, str]]) -> List[float]:
+def _plateau_starts(envelopes: List[Tuple[str, List, str, float, float]]) -> List[float]:
     """Tempi normalizzati (ordinati, dedup) di inizio di ogni plateau.
 
     I breakpoint envelope arrivano in coppie ``[t_start, v], [t_end, v]`` per
@@ -95,7 +95,7 @@ def _plateau_starts(envelopes: List[Tuple[str, List, str]]) -> List[float]:
     griglia temporale, percio' i ``t_start`` coincidono: li uniamo e dedup.
     """
     starts = set()
-    for _path, points, env_type in envelopes:
+    for _path, points, env_type, _onset, _dur in envelopes:
         # step: un solo punto per valore (nessun doppio punto plateau), ogni
         # punto e' un inizio-gradino. linear/cubic: breakpoint a coppie
         # ``t_start, t_end`` -> gli inizi sono agli indici pari.
@@ -111,7 +111,7 @@ def _sample_rate(audio_path: str) -> int:
 
 
 def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
-                  envelopes: List[Tuple[str, List, str]], layout: Layout,
+                  envelopes: List[Tuple[str, List, str, float, float]], layout: Layout,
                   markers: bool = True,
                   markers_scope: Literal["all", "waveform"] = "waveform") -> bytes:
     root = ET.Element("sv")
@@ -156,7 +156,7 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
     # Modelli + dataset + layer per ogni envelope
     layer_ids: List[Tuple[str, str, str]] = []  # (layer_id, model_id, path)
     next_id = 4
-    for i, (path, points, env_type) in enumerate(envelopes):
+    for i, (path, points, env_type, onset, own_duration) in enumerate(envelopes):
         model_id = str(next_id);    next_id += 1
         dataset_id = str(next_id);  next_id += 1
         layer_id = str(next_id);    next_id += 1
@@ -170,7 +170,7 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
         ds = ET.SubElement(data, "dataset", {"id": dataset_id, "dimensions": "2"})
         for point in points:
             t_norm, value, label = _split_point(point)
-            frame = str(round(t_norm * duration_sec * sample_rate))
+            frame = str(round((onset + t_norm * own_duration) * sample_rate))
             ET.SubElement(ds, "point", {"frame": frame, "value": str(value), "label": label})
 
         colour, colour_name = _COLOURS[i % len(_COLOURS)]
@@ -316,7 +316,8 @@ def variant_to_sv(variant_yaml_path: str, audio_path: str, out_path: str,
 
     duration = float(doc.get("duration", 1.0))
     streams = doc.get("streams", [])
-    envelopes = _find_envelopes(streams[0]) if streams else []
+    envelopes = [(path, points, env_type, 0.0, duration)
+                 for path, points, env_type in (_find_envelopes(streams[0]) if streams else [])]
 
     sr = _sample_rate(audio_path)
     compressed = _build_sv_xml(os.path.abspath(audio_path), sr, duration,
@@ -329,19 +330,27 @@ def variant_to_sv(variant_yaml_path: str, audio_path: str, out_path: str,
     return out_path
 
 
-def _stack_envelopes(doc: Any) -> List[Tuple[str, List, str]]:
+def _stack_envelopes(doc: Any) -> List[Tuple[str, List, str, float, float]]:
     """Envelope di *tutti* gli stream del documento stack, con path prefissato.
 
     A differenza del singolo file sweep (un solo stream), il documento stack
     collassa N stream sommati in un audio: per non confonderli nei pannelli, il
     path di ogni envelope e' prefissato dallo stream_id (``base/density``). Gli
     assi scalari non producono envelope, quindi restano fuori.
+
+    Ogni stream porta il proprio ``onset`` e la propria ``duration`` (diversi
+    dal totale dello stack quando gli stream sono concatenati, es. da
+    ``versions``): i punti normalizzati [0,1] dell'envelope vanno riportati
+    all'asse assoluto dello stack come ``onset + t_norm * duration``, non
+    contro la durata totale del documento.
     """
-    out: List[Tuple[str, List, str]] = []
+    out: List[Tuple[str, List, str, float, float]] = []
     for stream in doc.get("streams", []):
         sid = stream.get("stream_id", "stream")
+        onset = float(stream.get("onset", 0.0))
+        stream_duration = float(stream.get("duration", doc.get("duration", 1.0)))
         for path, points, env_type in _find_envelopes(stream):
-            out.append((f"{sid}/{path}", points, env_type))
+            out.append((f"{sid}/{path}", points, env_type, onset, stream_duration))
     return out
 
 
