@@ -34,15 +34,19 @@ axes:
   density:
     path: density
     baseline: 50
-    n: 12
+    #n: 12
     base:
-      expr: "env + d"
+      expr: "(env * f) + d"
       let:
-        env: [[0, 40], [.5, 60], [1, 45]]
+        env: [[0, 1], [.5, 2], [1, 1]]
         d: 0
+        f: 40
     range: 0
 
-stack: {}
+stack:
+  density:
+    base: .5
+
 
 versions:
   d: {values: [1, 2, 3]}
@@ -53,3 +57,8 @@ streams:
       density:
         base: {expr: "env"}
   mobile: {}
+  ventaglio:
+    spread:
+      n: 8
+      over:
+        axes.density.base.let.f: {expr: "40 * (i+1)"}
