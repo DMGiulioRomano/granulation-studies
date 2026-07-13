@@ -520,6 +520,16 @@ versions:
   una granulazione e ne apre un'altra): nessuna transizione interpolata tra
   versioni. Per ammorbidire il bordo si lavora con gli envelope di volume
   degli stream, come sempre.
+- **Onset in Sonic Visualiser.** Nel `.sv` del **mix** (`stack_to_sv`) l'onset
+  è rispettato: l'audio è un unico file con gli onset già cotti nel buffer, e
+  gli envelope sono ancorati al loro onset reale (`onset + t·durata_stream`,
+  non stirati sulla durata totale). È lì che si legge la concatenazione delle
+  versioni sull'asse dei tempi. Il `.sv` **per-stem** (`stack_stems_to_sv`)
+  invece mostra ogni stream nel suo pane a partire da 0: gli stem sono resi
+  con onset relativo a 0 (`StemsRenderMode`) e un modello audio di SonicVisualiser
+  è ancorato al frame 0 del suo pane — non è un offset che il `.sv` possa
+  spostare. Per ispezionare le versioni sull'asse dei tempi si usa quindi il
+  `.sv` del mix; il per-stem resta la vista locale del singolo stream.
 
 Il caso d'uso fondativo (due stream con inviluppo condiviso e offset che
 cresce di versione in versione) è in `studies/study_versions_test/study.yml`:
