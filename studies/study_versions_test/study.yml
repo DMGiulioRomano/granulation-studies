@@ -35,7 +35,7 @@ axes:
     path: density
     baseline: 50
     #n: 12
-    base:
+    base: 
       expr: "(env * f) + d"
       let:
         env: [[0, 1], [.5, 2], [1, 1]]
