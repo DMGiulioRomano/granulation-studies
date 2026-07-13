@@ -67,6 +67,12 @@ sweep:
     - [density, grain_duration]                # primo = asse lento (outer), ultimo = veloce (inner)
     - [grain_duration, density]                # stessa coppia, ordine invertito
 
+# Processo versions (attivo per presenza; richiede `stack:` e `duration:`):
+# repliche dello stack concatenate nel tempo, una per combinazione delle
+# variabili. Vedi la sezione "Il blocco versions" sotto.
+versions:
+  d: {values: [1, 2, 3]}          # variabile -> generatore Y (values | ramp | banda con n)
+
 # Processo stack (attivo per presenza del blocco): tutti gli stream sommati in
 # UN documento multi-stream. Vedi la sezione "Il blocco stack" sotto.
 stack:
@@ -474,6 +480,53 @@ per-asse (`linear`/`cubic`/`step`) vale anche qui.
 L'auto-derivazione è un hash stabile (CRC32) dell'id dello stream, con salt
 distinti per Y e X: senza seed globali gli stream impilati si **decorrelano da
 soli**, restando riproducibili tra run.
+
+## Il blocco `versions:`
+
+Il processo versions è un **modificatore dello stack**: parte solo se sono
+presenti sia `versions:` sia `stack:` (più `duration:` top-level), e l'output
+resta l'unico `yaml/stack/stack.yml`. Dove lo stack collassa gli stream in un
+documento, versions **replica quel collasso N volte nel tempo**: una replica
+per combinazione delle variabili, concatenate per onset.
+
+```yaml
+versions:
+  f: {values: [50, 100]}          # prima variabile = esterna (lenta)
+  d: {values: [1, 2, 3]}          # ultima = interna (veloce)
+```
+
+- Ogni chiave è un **nome di variabile** (identificatore libero; `i`, `n`,
+  `pi`, `e` sono riservati agli scope expr e vengono rifiutati). Il valore è
+  un generatore del vocabolario Y: `values`, `ramp`, o banda — qui la banda
+  richiede **`n`** (non c'è una camminata-X a possedere il conteggio); senza
+  `seed` deriva `stable_seed("<study>:versions:<nome>")`.
+- Più variabili → **prodotto cartesiano lessicografico** nell'ordine di
+  dichiarazione (come gli `orderings` dello sweep): con l'esempio sopra le
+  versioni sono (50,1) (50,2) (50,3) (100,1) (100,2) (100,3).
+- Per ogni combinazione i valori vengono **iniettati negli scope `let`** dei
+  nodi-expr che *nominano* la variabile, ombreggiando il default dichiarato
+  (`let: {d: 0}`). Il default tiene lo studio valido anche senza il blocco;
+  una variabile che nessuna espressione referenzia è un errore di parse
+  (guardia anti-refuso). L'iniezione vale ovunque un nodo-expr viva: bande di
+  Y, camminate-X, parametri statici dello stream.
+- Ogni versione replica **tutti** gli stream dello stack con l'`onset`
+  scalato di `k * duration` e lo `stream_id` suffissato con l'etichetta della
+  combinazione (`mobile__f=50__d=1`). Envelope, camminate e seed passano per
+  il builder dello stack **identici**: tra una versione e l'altra cambia solo
+  il valore delle variabili — è il confronto pulito del metodo. La durata
+  documento è `N * duration`; l'engine dimensiona comunque il buffer su
+  `max(onset + duration)`.
+- Il confine tra versioni è un confine naturale di stream (l'engine chiude
+  una granulazione e ne apre un'altra): nessuna transizione interpolata tra
+  versioni. Per ammorbidire il bordo si lavora con gli envelope di volume
+  degli stream, come sempre.
+
+Il caso d'uso fondativo (due stream con inviluppo condiviso e offset che
+cresce di versione in versione) è in `studies/study_versions_test/study.yml`:
+l'inviluppo si scrive una volta nel default di `axes:` (`expr: "env + d"`,
+`let: {env: ..., d: 0}`), lo stream fermo ridefinisce solo `expr: "env"`
+(il `let` si eredita via deep-merge), e `versions: {d: {values: [1, 2, 3]}}`
+genera le tre coppie concatenate.
 
 ## Il blocco `spread:` (stream generati)
 

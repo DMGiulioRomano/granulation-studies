@@ -1,0 +1,55 @@
+# gl-ls
+# TEST VERSIONS — coppia di stream con inviluppo condiviso e offset crescente.
+#
+# Il caso d'uso fondativo del blocco `versions:`: due stream simultanei, il
+# fermo campiona l'inviluppo `env` cosi' com'e', il mobile lo stesso inviluppo
+# traslato di `d`. Le versioni (d = 1, 2, 3) si concatenano nel tempo dentro
+# l'unico documento stack: onset scalati di k*duration, stessi seed -> tra una
+# versione e l'altra cambia SOLO d. L'inviluppo e' scritto una volta sola nel
+# default di axes; `fermo` ridefinisce solo l'expr (il let si eredita via
+# deep-merge); il default `d: 0` tiene lo studio valido anche senza versions.
+#
+#   make stack STUDY=study_versions_test
+#   make render STUDY=study_versions_test
+
+study_id: study_versions_test
+title: "Test versions — env condiviso, offset d crescente"
+seed: 7
+duration: 20
+samples_dir: samples
+
+base:
+  onset: 0
+  sample: corpus.wav
+  time_mode: normalized
+  grain:
+    envelope: hanning
+  volume: -6
+  pointer:
+    speed_ratio: 0
+    start: .3
+
+axes:
+  interpolation: linear
+  density:
+    path: density
+    baseline: 50
+    n: 12
+    base:
+      expr: "env + d"
+      let:
+        env: [[0, 40], [.5, 60], [1, 45]]
+        d: 0
+    range: 0
+
+stack: {}
+
+versions:
+  d: {values: [1, 2, 3]}
+
+streams:
+  fermo:
+    axes:
+      density:
+        base: {expr: "env"}
+  mobile: {}
