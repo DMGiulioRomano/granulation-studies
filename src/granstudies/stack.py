@@ -105,65 +105,69 @@ def axis_envelope(
     return [[t, v] for t, v in zip(times, values)]
 
 
+def build_stack_stream(
+    spec: StudySpec, *, output_sr: Optional[int] = 48000
+) -> Dict[str, Any]:
+    """Costruisce il dict engine di *uno* stream del processo stack.
+
+    Per ogni asse l'envelope si assembla con ``axis_envelope`` (X della
+    strategy per-stream, seed per precedenza) e i valori si clampano ai bounds
+    engine — i valori *espliciti* fuori bounds falliscono gia' al parse, qui
+    si proteggono quelli che emergono (Y-rand). ``output_sr`` attiva il floor
+    dinamico di ``grain.duration`` (1 campione invece del fallback statico di
+    1ms, issue #17): deve combaciare col sample rate usato in render.
+
+    Regola scalare (stream statici legittimi): sequenza di un solo punto ->
+    valore secco via ``deep_set``, non envelope costante.
+    """
+    if spec.duration is None:
+        raise ValueError(
+            f"stack [{spec.stream_id or spec.study_id}]: manca 'duration:' "
+            "top-level (durata condivisa)."
+        )
+    base = dict(spec.base)
+    base["stream_id"] = spec.stream_id or "stream"
+    base["time_mode"] = "normalized"
+    base["duration"] = spec.duration
+    overrides: Dict[str, Any] = {}
+    types: Dict[str, str] = {}
+    for ax in spec.axes:
+        env = axis_envelope(
+            ax.generator,
+            (spec.stack or {}).get(ax.name),
+            spec.duration,
+            y_seed=spec.resolved_y_seed(),
+            x_seed=spec.resolved_x_seed(),
+            x_unit=spec.resolved_x_unit(),
+        )
+        env = [
+            [t, bounds_mod.clamp(ax.path, v, output_sr=output_sr)]
+            for t, v in env
+        ]
+        if len(env) == 1:
+            overrides[ax.path] = env[0][1]
+        else:
+            overrides[ax.path] = env
+            types[ax.path] = ax.interpolation
+    return build_stream(
+        base,
+        overrides,
+        envelope_time_mode="normalized",
+        envelope_types=types,
+    )
+
+
 def generate_stack_document(
     specs: List[StudySpec], *, output_sr: Optional[int] = 48000
 ) -> Dict[str, Any]:
     """Collassa gli stream di uno studio in un documento engine multi-stream.
 
     Un elemento di ``streams:`` per ogni spec (una per stream, da
-    ``resolve_streams``). Per ogni asse di ogni stream l'envelope si assembla
-    con ``axis_envelope`` (X della strategy per-stream, seed per precedenza) e i
-    valori si clampano ai bounds engine — i valori *espliciti* fuori bounds
-    falliscono gia' al parse, qui si proteggono quelli che emergono (Y-rand).
-    ``output_sr`` attiva il floor dinamico di ``grain.duration`` (1 campione
-    invece del fallback statico di 1ms, issue #17): deve combaciare col
-    sample rate usato in render, altrimenti il clamp qui puo' essere piu'
-    permissivo (o piu' stretto) di quanto l'engine applichera' davvero.
-
-    Regola scalare (stream statici legittimi): sequenza di un solo punto ->
-    valore secco via ``deep_set``, non envelope costante.
+    ``resolve_streams``), costruito da ``build_stack_stream``.
     """
     if not specs:
         raise ValueError("generate_stack_document: serve almeno uno spec.")
-    built: List[Dict[str, Any]] = []
-    for spec in specs:
-        if spec.duration is None:
-            raise ValueError(
-                f"stack [{spec.stream_id or spec.study_id}]: manca 'duration:' "
-                "top-level (durata condivisa)."
-            )
-        base = dict(spec.base)
-        base["stream_id"] = spec.stream_id or "stream"
-        base["time_mode"] = "normalized"
-        base["duration"] = spec.duration
-        overrides: Dict[str, Any] = {}
-        types: Dict[str, str] = {}
-        for ax in spec.axes:
-            env = axis_envelope(
-                ax.generator,
-                (spec.stack or {}).get(ax.name),
-                spec.duration,
-                y_seed=spec.resolved_y_seed(),
-                x_seed=spec.resolved_x_seed(),
-                x_unit=spec.resolved_x_unit(),
-            )
-            env = [
-                [t, bounds_mod.clamp(ax.path, v, output_sr=output_sr)]
-                for t, v in env
-            ]
-            if len(env) == 1:
-                overrides[ax.path] = env[0][1]
-            else:
-                overrides[ax.path] = env
-                types[ax.path] = ax.interpolation
-        built.append(
-            build_stream(
-                base,
-                overrides,
-                envelope_time_mode="normalized",
-                envelope_types=types,
-            )
-        )
+    built = [build_stack_stream(spec, output_sr=output_sr) for spec in specs]
     first = specs[0]
     return build_multi_document(
         built,
