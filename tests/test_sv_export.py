@@ -110,7 +110,7 @@ def test_stems_builder_handles_per_breakpoint_points():
 
     pts = [[0.0, 5, "step"], [1.0, 50]]
     with tempfile.NamedTemporaryFile(suffix=".aif") as fh:
-        stems = [("base", fh.name, 1000, 10.0, [("density", pts, "linear")])]
+        stems = [("base", fh.name, 1000, 0.0, 10.0, [("density", pts, "linear")])]
         xml = _parse(_build_sv_xml_stems(stems))
 
     tv = [l for l in xml.findall("./data/layer") if l.get("type") == "timevalues"]
@@ -266,3 +266,88 @@ def test_multi_without_prefix_is_one_pane_per_envelope():
     xml = _parse(_build_sv_xml("/x.wav", 1000, 10.0, envs, "multi", markers=False))
     env_panes = xml.findall("./display/view")[1:]
     assert len(env_panes) == 2
+
+
+# --- per-stem: padding dell'onset come silenzio iniziale -----------------------
+
+def _write_aif(path, seconds, sr=1000, value=0.5):
+    import numpy as np
+    import soundfile as sf
+    data = np.full(round(seconds * sr), value, dtype="float64")
+    sf.write(path, data, sr, format="AIFF")
+
+
+def test_padded_stem_prepends_onset_silence(tmp_path):
+    import numpy as np
+    import soundfile as sf
+    from granstudies.sv_export import _padded_stem
+
+    src = str(tmp_path / "stack__mobile.aif")
+    _write_aif(src, seconds=2.0, sr=1000)
+    out = _padded_stem(src, onset=1.5, padded_dir=str(tmp_path / "padded"))
+
+    data, sr = sf.read(out)
+    assert sr == 1000
+    assert len(data) == 3500                      # 1.5s silenzio + 2s contenuto
+    assert np.all(data[:1500] == 0)               # silenzio iniziale
+    assert np.allclose(data[1500:], 0.5, atol=1e-3)
+
+
+def test_padded_stem_incremental(tmp_path):
+    import os
+    from granstudies.sv_export import _padded_stem
+
+    src = str(tmp_path / "stack__mobile.aif")
+    _write_aif(src, seconds=1.0)
+    out = _padded_stem(src, onset=0.5, padded_dir=str(tmp_path / "padded"))
+    first = os.path.getmtime(out)
+    out2 = _padded_stem(src, onset=0.5, padded_dir=str(tmp_path / "padded"))
+    assert out2 == out
+    assert os.path.getmtime(out) == first         # originale invariato -> skip
+    # originale piu' nuovo -> rigenera
+    os.utime(src, (first + 10, first + 10))
+    _padded_stem(src, onset=0.5, padded_dir=str(tmp_path / "padded"))
+    assert os.path.getmtime(out) > first
+
+
+def test_stems_sv_uses_padded_audio_and_offsets_envelopes(tmp_path):
+    import yaml
+    from granstudies.sv_export import stack_stems_to_sv
+
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    _write_aif(str(audio_dir / "stack__fermo.aif"), seconds=2.0, sr=1000)
+    _write_aif(str(audio_dir / "stack__mobile.aif"), seconds=2.0, sr=1000)
+
+    doc = {"duration": 4, "streams": [
+        {"stream_id": "fermo", "onset": 0, "duration": 2,
+         "density": {"type": "linear", "points": [[0.0, 10], [1.0, 20]],
+                     "time_mode": "normalized"}},
+        {"stream_id": "mobile", "onset": 2, "duration": 2,
+         "density": {"type": "linear", "points": [[0.0, 10], [1.0, 20]],
+                     "time_mode": "normalized"}},
+    ]}
+    stack_yml = tmp_path / "stack.yml"
+    stack_yml.write_text(yaml.safe_dump(doc))
+    out = stack_stems_to_sv(str(stack_yml), str(audio_dir), str(tmp_path / "s.sv"))
+    assert out is not None
+
+    xml = _parse((tmp_path / "s.sv").read_bytes())
+    models = {m.get("id"): m for m in xml.findall("./data/model")
+              if m.get("type") == "wavefile"}
+    files = [m.get("file") for m in models.values()]
+    # onset 0 -> stem originale; onset 2 -> copia paddata in padded/
+    assert any(f.endswith("audio/stack__fermo.aif") or f.endswith("stack__fermo.aif")
+               and "padded" not in f for f in files)
+    assert any("padded" in f and f.endswith("stack__mobile.aif") for f in files)
+
+    # envelope di mobile offsettati di onset: 2s..4s a 1000 Hz -> 2000..4000
+    sparse = {m.get("dataset"): m.get("name") for m in xml.findall("./data/model")
+              if m.get("type") == "sparse"}
+    for ds in xml.findall("./data/dataset"):
+        name = sparse.get(ds.get("id"), "")
+        frames = [int(p.get("frame")) for p in ds.findall("point")]
+        if name.startswith("mobile/"):
+            assert frames == [2000, 4000]
+        elif name.startswith("fermo/"):
+            assert frames == [0, 2000]

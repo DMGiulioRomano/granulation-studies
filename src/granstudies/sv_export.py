@@ -354,13 +354,44 @@ def _stack_envelopes(doc: Any) -> List[Tuple[str, List, str, float, float]]:
     return out
 
 
-def _build_sv_xml_stems(stems: List[Tuple[str, str, int, float, List[Tuple[str, List, str]]]]) -> bytes:
+def _padded_stem(audio_path: str, onset: float, padded_dir: str) -> str:
+    """Copia dello stem con ``onset`` secondi di silenzio prepesi.
+
+    Sonic Visualiser ancora ogni modello wavefile al frame 0 della sessione
+    (``SVFileReader`` legge solo ``file`` e ``sampleRate``, nessun attributo
+    di offset): l'unico modo di mostrare uno stem al suo onset e' cuocere
+    l'offset *dentro* l'audio. Gli originali non si toccano: la copia paddata
+    vive in ``padded_dir`` con lo stesso basename, rigenerata solo se
+    l'originale e' piu' nuovo (stessa incrementalita' del resto della
+    pipeline). Il padding rispetta canali e sample rate dell'originale.
+    """
+    import numpy as np
+    import soundfile as sf
+
+    out_path = os.path.join(padded_dir, os.path.basename(audio_path))
+    if (os.path.exists(out_path)
+            and os.path.getmtime(out_path) >= os.path.getmtime(audio_path)):
+        return out_path
+    data, sr = sf.read(audio_path)
+    pad_frames = round(onset * sr)
+    pad_shape = (pad_frames,) + data.shape[1:]
+    padded = np.concatenate([np.zeros(pad_shape, dtype=data.dtype), data])
+    os.makedirs(padded_dir, exist_ok=True)
+    sf.write(out_path, padded, sr, format="AIFF")
+    return out_path
+
+
+def _build_sv_xml_stems(stems: List[Tuple[str, str, int, float, float, List[Tuple[str, List, str]]]]) -> bytes:
     """Un pane per stem: waveform + spectrogram + tutti i suoi envelope insieme.
 
-    ``stems``: lista di (stream_id, audio_path_assoluto, sample_rate, duration_sec, envelopes).
-    Ogni stem ha il proprio model audio (i file stem sono resi con onset
-    relativo a 0, v. ``StemsRenderMode``), cosi' ognuno mantiene la propria
-    durata e sample rate.
+    ``stems``: lista di (stream_id, audio_path_assoluto, sample_rate,
+    onset_sec, duration_sec, envelopes). Ogni stem ha il proprio model audio,
+    cosi' ognuno mantiene la propria durata e sample rate.
+
+    L'``onset`` NON sposta il modello audio (SV ancora ogni wavefile al frame
+    0, limite del formato .sv): l'audio arriva gia' paddato col silenzio
+    iniziale (``_padded_stem``), e qui l'onset offsetta solo i breakpoint
+    degli envelope, cosi' inviluppo e contenuto restano allineati.
     """
     root = ET.Element("sv")
     data = ET.SubElement(root, "data")
@@ -379,11 +410,11 @@ def _build_sv_xml_stems(stems: List[Tuple[str, str, int, float, List[Tuple[str, 
         })
 
     next_id = 0
-    for stream_index, (stream_id, audio_path, sr, duration, envelopes) in enumerate(stems):
+    for stream_index, (stream_id, audio_path, sr, onset, duration, envelopes) in enumerate(stems):
         wave_model_id = str(next_id); next_id += 1
         spec_layer_id = str(next_id); next_id += 1
         wave_layer_id = str(next_id); next_id += 1
-        end_frame = round(duration * sr)
+        end_frame = round((onset + duration) * sr)
 
         # SV usa il mainModel come riferimento del transport (durata, sample
         # rate, play/pausa): senza uno, la barra spaziatrice non ha nulla da
@@ -445,7 +476,7 @@ def _build_sv_xml_stems(stems: List[Tuple[str, str, int, float, List[Tuple[str, 
             ds = ET.SubElement(data, "dataset", {"id": env_dataset_id, "dimensions": "2"})
             for point in points:
                 t_norm, value, label = _split_point(point)
-                frame = str(round(t_norm * duration * sr))
+                frame = str(round((onset + t_norm * duration) * sr))
                 ET.SubElement(ds, "point", {"frame": frame, "value": str(value), "label": label})
 
             colour, colour_name = _COLOURS[i % len(_COLOURS)]
@@ -489,9 +520,16 @@ def stack_stems_to_sv(stack_yaml_path: str, audio_dir: str, out_path: str) -> st
         if not os.path.exists(audio_path):
             print(f"[sv] stem mancante per '{stream_id}': {audio_path} (esegui 'render --stem')")
             return None
+        onset = float(stream.get("onset", 0) or 0)
         duration = float(stream.get("duration", doc.get("duration", 1.0)))
+        if onset > 0:
+            # SV non sa offsettare un wavefile nel .sv: l'onset si cuoce come
+            # silenzio iniziale in una copia (gli stem originali non si toccano).
+            audio_path = _padded_stem(
+                audio_path, onset, os.path.join(audio_dir, "padded")
+            )
         envelopes = _find_envelopes(stream)
-        stems.append((stream_id, os.path.abspath(audio_path), _sample_rate(audio_path), duration, envelopes))
+        stems.append((stream_id, os.path.abspath(audio_path), _sample_rate(audio_path), onset, duration, envelopes))
 
     compressed = _build_sv_xml_stems(stems)
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
