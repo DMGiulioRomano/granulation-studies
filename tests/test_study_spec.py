@@ -585,3 +585,85 @@ def test_stream_override_merges_nested_env_dict():
     spec = [s for s in resolve_streams(data) if s.stream_id == "prova"][0]
     # type: step ereditato dal merge -> plateau: [1, 1, 1, 8]
     assert spec.axis("a").values == pytest.approx([1.0, 1.0, 1.0, 8.0])
+
+
+# --- duration/onset per-stream (issue #26) ---------------------------------------
+
+def _streams_dict():
+    d = _stack_dict()
+    d["streams"] = {
+        "lunga": {"duration": 60, "onset": 5},
+        "eredita": {},
+    }
+    return d
+
+
+def test_stream_duration_overrides_top_level():
+    specs = {s.stream_id: s for s in resolve_streams(_streams_dict())}
+    assert specs["lunga"].duration == 60      # override locale
+    assert specs["eredita"].duration == 30    # eredita il default top-level
+
+
+def test_stream_onset_parsed_and_absent_is_none():
+    specs = {s.stream_id: s for s in resolve_streams(_streams_dict())}
+    assert specs["lunga"].onset == 5
+    assert specs["eredita"].onset is None     # assente, non 0 esplicito
+
+
+def test_top_level_onset_rejected_with_streams():
+    d = _streams_dict()
+    d["onset"] = 3
+    with pytest.raises(ValueError, match="onset"):
+        resolve_streams(d)
+
+
+def test_top_level_onset_rejected_without_streams():
+    d = _stack_dict()
+    d["onset"] = 3
+    with pytest.raises(ValueError, match="onset"):
+        resolve_streams(d)
+
+
+def test_stream_onset_negative_raises():
+    d = _streams_dict()
+    d["streams"]["lunga"]["onset"] = -1
+    with pytest.raises(ValueError, match="onset"):
+        resolve_streams(d)
+
+
+def test_stream_onset_non_numeric_raises():
+    d = _streams_dict()
+    d["streams"]["lunga"]["onset"] = "dopo"
+    with pytest.raises(ValueError, match="onset"):
+        resolve_streams(d)
+
+
+def test_duration_non_positive_raises():
+    d = _stack_dict()
+    d["duration"] = 0
+    with pytest.raises(ValueError, match="duration"):
+        parse_study_spec(d)
+
+
+def test_duration_non_numeric_raises():
+    d = _stack_dict()
+    d["duration"] = "trenta"
+    with pytest.raises(ValueError, match="duration"):
+        parse_study_spec(d)
+
+
+def test_stack_without_top_level_duration_ok_if_every_stream_has_own():
+    d = _stack_dict()
+    del d["duration"]
+    d["streams"] = {"a": {"duration": 10}, "b": {"duration": 20}}
+    specs = {s.stream_id: s for s in resolve_streams(d)}
+    assert specs["a"].duration == 10
+    assert specs["b"].duration == 20
+
+
+def test_stack_stream_without_any_duration_raises():
+    d = _stack_dict()
+    del d["duration"]
+    d["streams"] = {"a": {"duration": 10}, "b": {}}
+    with pytest.raises(ValueError, match="duration"):
+        resolve_streams(d)
