@@ -165,6 +165,84 @@ def write_variants(spec: StudySpec, out_dir: str, *, output_sr: int = 48000) -> 
     return written
 
 
+def merge_stems_by_base(
+    yaml_path: str, mix_path: str, stem_paths: List[str]
+) -> List[str]:
+    """Post-merge degli stem per nome-base (issue #24).
+
+    ``versions`` genera uno stream per combinazione (``fermo__d=1``,
+    ``fermo__d=2``, ...): in STEMS mode l'engine scrive un file per ognuno e
+    Sonic Visualiser finirebbe con un pane per combinazione. Qui gli stem che
+    condividono il nome-base (lo ``stream_id`` prima del primo ``__``) vengono
+    sommati in un unico file per voce logica: le versioni non si sovrappongono
+    mai nel tempo (onset scalato di ``k * duration``), quindi l'overlay-add
+    equivale a una concatenazione.
+
+    Gli stem dell'engine hanno onset RELATIVO (il buffer parte dall'onset
+    dello stream, vedi ``_relative_n_total`` nel renderer NumPy): ogni stem
+    viene posizionato al proprio ``onset`` letto dal documento, e il file
+    accorpato risulta ancorato al tempo 0 dello stack — niente padding a valle.
+
+    Solo i gruppi con almeno 2 stem vengono accorpati (uno stream suffissato
+    ma solo nel suo gruppo resta consumabile com'e'); gli stream senza ``__``
+    nello ``stream_id`` non sono versioni e restano fuori. Incrementale: il
+    file accorpato si rigenera solo se uno dei suoi stem e' piu' recente.
+
+    Returns: lista dei path accorpati (``{mix}__{base}.aif``), anche se gia'
+    aggiornati; vuota se non c'e' nessun gruppo da accorpare.
+    """
+    with open(yaml_path, "r", encoding="utf-8") as fh:
+        doc = yaml.safe_load(fh)
+    onsets = {
+        s.get("stream_id", "stream"): float(s.get("onset", 0) or 0)
+        for s in doc.get("streams", [])
+    }
+    prefix = os.path.splitext(os.path.basename(mix_path))[0] + "__"
+    groups: Dict[str, List[tuple]] = {}
+    for path in stem_paths:
+        name = os.path.splitext(os.path.basename(path))[0]
+        if not name.startswith(prefix):
+            continue
+        stream_id = name[len(prefix):]
+        if "__" not in stream_id:
+            continue
+        base_name = stream_id.split("__", 1)[0]
+        groups.setdefault(base_name, []).append((onsets.get(stream_id, 0.0), path))
+
+    merged: List[str] = []
+    for base_name, members in groups.items():
+        if len(members) < 2:
+            continue
+        out_path = os.path.join(
+            os.path.dirname(members[0][1]), f"{prefix}{base_name}.aif"
+        )
+        merged.append(out_path)
+        if os.path.exists(out_path) and all(
+            os.path.getmtime(out_path) >= os.path.getmtime(p) for _o, p in members
+        ):
+            continue
+        import numpy as np
+        import soundfile as sf
+
+        buffers = []
+        sr = None
+        for onset, path in members:
+            data, this_sr = sf.read(path, always_2d=True)
+            sr = sr or this_sr
+            buffers.append((round(onset * this_sr), data))
+        n_total = max(start + len(data) for start, data in buffers)
+        out = np.zeros((n_total, buffers[0][1].shape[1]), dtype=np.float64)
+        for start, data in buffers:
+            out[start:start + len(data)] += data
+        # Le versioni non si sovrappongono, ma il clip protegge da input gia'
+        # a fondo scala; il subtype degli stem sorgente si conserva (stessa
+        # risoluzione dell'engine, niente quantizzazione aggiuntiva).
+        np.clip(out, -1.0, 1.0, out=out)
+        subtype = sf.info(members[0][1]).subtype
+        sf.write(out_path, out, sr, format="AIFF", subtype=subtype)
+    return merged
+
+
 def _render_one(
     yaml_path: str,
     audio_path: str,
@@ -188,10 +266,17 @@ def _render_one(
         engine_bridge.score_pdf(yaml_path, pdf_path, samples_dir=samples_dir)
     result: Dict[str, Any] = {"audio": mix[0] if mix else audio_path}
     if per_stream:
-        result["stems"] = engine_bridge.render(
+        stems = engine_bridge.render(
             yaml_path, audio_path, samples_dir=samples_dir, output_sr=output_sr,
             per_stream=True, use_cache=use_cache, cache_dir=cache_dir,
         )
+        result["stems"] = stems
+        # Post-merge per nome-base (issue #24): le versioni di una stessa voce
+        # logica vengono accorpate in un unico file, cosi' l'export SV apre un
+        # pane per voce e non uno per combinazione. Gli stem originali restano.
+        merged = merge_stems_by_base(yaml_path, audio_path, stems)
+        if merged:
+            result["stems_merged"] = merged
     return result
 
 

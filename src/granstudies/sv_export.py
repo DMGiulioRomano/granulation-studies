@@ -388,17 +388,21 @@ def _padded_stem(audio_path: str, onset: float, padded_dir: str) -> str:
     return out_path
 
 
-def _build_sv_xml_stems(stems: List[Tuple[str, str, int, float, float, List[Tuple[str, List, str]]]]) -> bytes:
+def _build_sv_xml_stems(stems: List[Tuple[str, str, int, float, float, List[Tuple[str, List, str, float, float]]]]) -> bytes:
     """Un pane per stem: waveform + spectrogram + tutti i suoi envelope insieme.
 
     ``stems``: lista di (stream_id, audio_path_assoluto, sample_rate,
     onset_sec, duration_sec, envelopes). Ogni stem ha il proprio model audio,
-    cosi' ognuno mantiene la propria durata e sample rate.
+    cosi' ognuno mantiene la propria durata e sample rate. Ogni envelope e'
+    (nome, points, type, onset_sec, duration_sec): l'onset/durata sono SUOI,
+    non del pane — in un pane accorpato per nome-base (issue #24) convivono
+    gli envelope di piu' versioni, ognuna nella propria finestra temporale.
 
-    L'``onset`` NON sposta il modello audio (SV ancora ogni wavefile al frame
+    L'onset NON sposta il modello audio (SV ancora ogni wavefile al frame
     0, limite del formato .sv): l'audio arriva gia' paddato col silenzio
-    iniziale (``_padded_stem``), e qui l'onset offsetta solo i breakpoint
-    degli envelope, cosi' inviluppo e contenuto restano allineati.
+    iniziale (``_padded_stem``) o accorpato ancorato a 0, e qui l'onset
+    offsetta solo i breakpoint degli envelope, cosi' inviluppo e contenuto
+    restano allineati.
     """
     root = ET.Element("sv")
     data = ET.SubElement(root, "data")
@@ -473,13 +477,13 @@ def _build_sv_xml_stems(stems: List[Tuple[str, str, int, float, float, List[Tupl
             "model": wave_model_id, "visible": "true",
         })
 
-        for i, (path, points, env_type) in enumerate(envelopes):
+        for i, (name, points, env_type, env_onset, env_duration) in enumerate(envelopes):
             env_model_id = str(next_id); next_id += 1
             env_dataset_id = str(next_id); next_id += 1
             env_layer_id = str(next_id); next_id += 1
 
             ET.SubElement(data, "model", {
-                "id": env_model_id, "name": f"{stream_id}/{path}",
+                "id": env_model_id, "name": name,
                 "sampleRate": str(sr), "type": "sparse",
                 "dimensions": "2", "resolution": "1",
                 "notifyOnAdd": "true", "dataset": env_dataset_id,
@@ -487,18 +491,18 @@ def _build_sv_xml_stems(stems: List[Tuple[str, str, int, float, float, List[Tupl
             ds = ET.SubElement(data, "dataset", {"id": env_dataset_id, "dimensions": "2"})
             for point in points:
                 t_norm, value, label = _split_point(point)
-                frame = str(round((onset + t_norm * duration) * sr))
+                frame = str(round((env_onset + t_norm * env_duration) * sr))
                 ET.SubElement(ds, "point", {"frame": frame, "value": str(value), "label": label})
 
             colour, colour_name = _COLOURS[i % len(_COLOURS)]
             plot_style = _layer_plot_style(points, env_type)
             ET.SubElement(data, "layer", {
-                "id": env_layer_id, "type": "timevalues", "name": f"{stream_id}/{path}",
+                "id": env_layer_id, "type": "timevalues", "name": name,
                 "model": env_model_id, "plotStyle": plot_style, "verticalScale": "0",
                 "colourName": colour_name, "colour": colour, "darkBackground": "true",
             })
             ET.SubElement(pane, "layer", {
-                "id": env_layer_id, "type": "timevalues", "name": f"{stream_id}/{path}",
+                "id": env_layer_id, "type": "timevalues", "name": name,
                 "model": env_model_id, "visible": "true",
             })
 
@@ -513,19 +517,50 @@ def stack_stems_to_sv(stack_yaml_path: str, audio_dir: str, out_path: str) -> st
     """.sv con un pane per stem audio (un file audio per stream), non per il mix.
 
     A differenza di ``stack_to_sv`` (un solo pane waveform contro l'audio
-    sommato), qui ogni stream ha il proprio pane con la propria waveform +
+    sommato), qui ogni voce ha il proprio pane con la propria waveform +
     spectrogram + tutti i suoi envelope insieme. Richiede gli stem gia'
     renderizzati (``render --stem``, attivo di default): ``{base}__{stream_id}.aif``
     accanto al mix in ``audio_dir`` (v. ``DefaultNamingStrategy``). Ritorna
     ``None`` (senza scrivere nulla) se manca anche un solo stem.
+
+    Gli stream vengono raggruppati per nome-base (lo ``stream_id`` prima del
+    primo ``__``): un gruppo con piu' stream e' una voce logica moltiplicata
+    da ``versions`` e consuma il file accorpato ``stack__{base}.aif`` prodotto
+    dal post-merge del render (issue #24) — un pane per voce, non uno per
+    combinazione. Il file accorpato e' gia' ancorato al tempo 0 dello stack,
+    quindi niente padding; gli envelope di ogni versione restano distinti nel
+    pane, offsettati al proprio onset. I gruppi singoli consumano lo stem
+    grezzo come sempre (con l'onset cotto come silenzio iniziale).
     """
     import yaml
 
     with open(stack_yaml_path, "r", encoding="utf-8") as fh:
         doc = yaml.safe_load(fh)
 
-    stems = []
+    groups: dict = {}
     for stream in doc.get("streams", []):
+        base_name = stream.get("stream_id", "stream").split("__", 1)[0]
+        groups.setdefault(base_name, []).append(stream)
+
+    stems = []
+    for base_name, group in groups.items():
+        if len(group) > 1:
+            audio_path = os.path.join(audio_dir, f"stack__{base_name}.aif")
+            if not os.path.exists(audio_path):
+                print(f"[sv] stem accorpato mancante per '{base_name}': {audio_path} (esegui 'render --stem')")
+                return None
+            envelopes = []
+            end = 0.0
+            for stream in group:
+                stream_id = stream.get("stream_id", "stream")
+                onset = float(stream.get("onset", 0) or 0)
+                duration = float(stream.get("duration", doc.get("duration", 1.0)))
+                end = max(end, onset + duration)
+                for path, points, env_type in _find_envelopes(stream):
+                    envelopes.append((f"{stream_id}/{path}", points, env_type, onset, duration))
+            stems.append((base_name, os.path.abspath(audio_path), _sample_rate(audio_path), 0.0, end, envelopes))
+            continue
+        stream = group[0]
         stream_id = stream.get("stream_id", "stream")
         audio_path = os.path.join(audio_dir, f"stack__{stream_id}.aif")
         if not os.path.exists(audio_path):
@@ -539,7 +574,8 @@ def stack_stems_to_sv(stack_yaml_path: str, audio_dir: str, out_path: str) -> st
             audio_path = _padded_stem(
                 audio_path, onset, os.path.join(audio_dir, "padded")
             )
-        envelopes = _find_envelopes(stream)
+        envelopes = [(f"{stream_id}/{path}", points, env_type, onset, duration)
+                     for path, points, env_type in _find_envelopes(stream)]
         stems.append((stream_id, os.path.abspath(audio_path), _sample_rate(audio_path), onset, duration, envelopes))
 
     compressed = _build_sv_xml_stems(stems)

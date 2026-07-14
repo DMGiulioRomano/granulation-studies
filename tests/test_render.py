@@ -341,6 +341,181 @@ def test_render_picks_up_stack_document(tmp_path, monkeypatch):
     assert os.path.exists(manifest[0]["audio"])
 
 
+# --- issue #24: post-merge degli stem di versions per nome-base -------------------
+
+def _write_stem(path, seconds, sr=1000, value=0.5):
+    import numpy as np
+    import soundfile as sf
+
+    data = np.full((round(seconds * sr), 2), value, dtype="float64")
+    sf.write(str(path), data, sr, format="AIFF")
+
+
+def _versions_doc(tmp_path):
+    """Documento stack in stile versions: 2 voci logiche x 2 combinazioni."""
+    doc = {
+        "duration": 4,
+        "streams": [
+            {"stream_id": "fermo__d=1", "onset": 0, "duration": 2},
+            {"stream_id": "fermo__d=2", "onset": 2, "duration": 2},
+            {"stream_id": "mobile__d=1", "onset": 0, "duration": 2},
+            {"stream_id": "mobile__d=2", "onset": 2, "duration": 2},
+        ],
+    }
+    yaml_path = tmp_path / "stack.yml"
+    yaml_path.write_text(yaml.safe_dump(doc))
+    return str(yaml_path)
+
+
+def test_merge_stems_by_base_overlay_adds_at_onset(tmp_path):
+    import numpy as np
+    import soundfile as sf
+    from granstudies.render import merge_stems_by_base
+
+    yaml_path = _versions_doc(tmp_path)
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    # Gli stem dell'engine hanno onset RELATIVO (partono dal proprio onset,
+    # lunghi quanto la durata dello stream): il merge li posiziona all'onset.
+    stems = []
+    for sid, value in [("fermo__d=1", 0.25), ("fermo__d=2", 0.5),
+                       ("mobile__d=1", 0.1), ("mobile__d=2", 0.2)]:
+        p = audio_dir / f"stack__{sid}.aif"
+        _write_stem(p, seconds=2.0, value=value)
+        stems.append(str(p))
+
+    merged = merge_stems_by_base(yaml_path, str(audio_dir / "stack.aif"), stems)
+    assert sorted(os.path.basename(p) for p in merged) == [
+        "stack__fermo.aif", "stack__mobile.aif",
+    ]
+    data, sr = sf.read(str(audio_dir / "stack__fermo.aif"), always_2d=True)
+    assert sr == 1000
+    assert len(data) == 4000                       # max(onset + len) = 4s
+    assert np.allclose(data[:2000], 0.25, atol=1e-3)
+    assert np.allclose(data[2000:], 0.5, atol=1e-3)
+    data, _sr = sf.read(str(audio_dir / "stack__mobile.aif"), always_2d=True)
+    assert np.allclose(data[:2000], 0.1, atol=1e-3)
+    assert np.allclose(data[2000:], 0.2, atol=1e-3)
+
+
+def test_merge_stems_by_base_skips_streams_without_suffix(tmp_path):
+    from granstudies.render import merge_stems_by_base
+
+    doc = {"duration": 2, "streams": [
+        {"stream_id": "voce_a", "onset": 0, "duration": 2},
+        {"stream_id": "voce_b", "onset": 0, "duration": 2},
+    ]}
+    yaml_path = tmp_path / "stack.yml"
+    yaml_path.write_text(yaml.safe_dump(doc))
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    stems = []
+    for sid in ("voce_a", "voce_b"):
+        p = audio_dir / f"stack__{sid}.aif"
+        _write_stem(p, seconds=2.0)
+        stems.append(str(p))
+    merged = merge_stems_by_base(str(yaml_path), str(audio_dir / "stack.aif"), stems)
+    assert merged == []
+    assert sorted(os.listdir(audio_dir)) == [
+        "stack__voce_a.aif", "stack__voce_b.aif",
+    ]
+
+
+def test_merge_stems_by_base_singleton_group_not_merged(tmp_path):
+    # Un solo stem per nome-base (anche se suffissato): niente file accorpato,
+    # stack_stems_to_sv continuera' a consumare lo stem grezzo.
+    from granstudies.render import merge_stems_by_base
+
+    doc = {"duration": 2, "streams": [
+        {"stream_id": "fermo__d=1", "onset": 0, "duration": 2},
+    ]}
+    yaml_path = tmp_path / "stack.yml"
+    yaml_path.write_text(yaml.safe_dump(doc))
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    p = audio_dir / "stack__fermo__d=1.aif"
+    _write_stem(p, seconds=2.0)
+    merged = merge_stems_by_base(str(yaml_path), str(audio_dir / "stack.aif"), [str(p)])
+    assert merged == []
+    assert not os.path.exists(audio_dir / "stack__fermo.aif")
+
+
+def test_merge_stems_by_base_incremental(tmp_path):
+    from granstudies.render import merge_stems_by_base
+
+    yaml_path = _versions_doc(tmp_path)
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    stems = []
+    for sid in ("fermo__d=1", "fermo__d=2", "mobile__d=1", "mobile__d=2"):
+        p = audio_dir / f"stack__{sid}.aif"
+        _write_stem(p, seconds=2.0)
+        stems.append(str(p))
+    mix = str(audio_dir / "stack.aif")
+    merged = merge_stems_by_base(yaml_path, mix, stems)
+    first = {p: os.path.getmtime(p) for p in merged}
+    # niente stem cambiato -> nessuna riscrittura
+    merged2 = merge_stems_by_base(yaml_path, mix, stems)
+    assert sorted(merged2) == sorted(merged)
+    assert all(os.path.getmtime(p) == first[p] for p in merged)
+    # uno stem di fermo piu' nuovo -> si rigenera solo stack__fermo.aif
+    later = max(first.values()) + 10
+    os.utime(stems[0], (later, later))
+    merge_stems_by_base(yaml_path, mix, stems)
+    fermo = str(audio_dir / "stack__fermo.aif")
+    mobile = str(audio_dir / "stack__mobile.aif")
+    assert os.path.getmtime(fermo) > first[fermo]
+    assert os.path.getmtime(mobile) == first[mobile]
+
+
+def test_render_variants_per_stream_merges_version_stems(tmp_path, monkeypatch):
+    # La pass STEMS di _render_one deve produrre anche i file accorpati per
+    # nome-base, senza toccare gli stem originali.
+    import soundfile as sf
+
+    yaml_dir = tmp_path / "yaml" / "stack"
+    yaml_dir.mkdir(parents=True)
+    doc = {"duration": 4, "streams": [
+        {"stream_id": "fermo__d=1", "onset": 0, "duration": 2},
+        {"stream_id": "fermo__d=2", "onset": 2, "duration": 2},
+    ]}
+    (yaml_dir / "stack.yml").write_text(yaml.safe_dump(doc))
+
+    def fake(yaml_path, output_path, samples_dir, output_sr=48000,
+             per_stream=False, use_cache=False, cache_dir=None):
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+        if not per_stream:
+            with open(output_path, "w") as fh:
+                fh.write("x")
+            return [output_path]
+        base, ext = os.path.splitext(output_path)
+        out = []
+        with open(yaml_path, "r", encoding="utf-8") as fh:
+            for stream in yaml.safe_load(fh)["streams"]:
+                p = f"{base}__{stream['stream_id']}{ext}"
+                _write_stem(p, seconds=2.0)
+                out.append(p)
+        return out
+
+    monkeypatch.setattr(render_mod.engine_bridge, "render", fake)
+    manifest = render_variants(
+        variant_dir=str(tmp_path / "yaml"),
+        audio_dir=str(tmp_path / "audio"),
+        score_dir=None,
+        samples_dir="unused",
+        per_stream=True,
+        cache_dir=str(tmp_path / "cache"),
+        jobs=1,
+    )
+    assert len(manifest) == 1
+    merged = manifest[0]["stems_merged"]
+    assert [os.path.basename(p) for p in merged] == ["stack__fermo.aif"]
+    data, sr = sf.read(merged[0], always_2d=True)
+    assert len(data) == 4000
+    # gli stem originali restano al loro posto
+    assert os.path.exists(str(tmp_path / "audio" / "stack" / "stack__fermo__d=1.aif"))
+
+
 def test_render_stream_prefix_relative_to_mode_dir(tmp_path, monkeypatch):
     # Nuovo layout: yaml/sweep/envelope/<stream>/<nome>.yml — il basename audio
     # va prefissato col nome dello stream anche con la cartella sweep/ in mezzo.
