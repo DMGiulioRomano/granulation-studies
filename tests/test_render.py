@@ -468,6 +468,70 @@ def test_merge_stems_by_base_incremental(tmp_path):
     assert os.path.getmtime(mobile) == first[mobile]
 
 
+def test_merge_stems_by_base_regenerates_when_document_changes(tmp_path):
+    # Gruppo che si riduce (5 -> 3 combinazioni in study.yml): gli stem correnti
+    # sono piu' vecchi del file accorpato, ma il documento e' stato riscritto.
+    # La composizione del gruppo deriva SOLO dal documento, quindi il check
+    # incrementale deve includere anche l'mtime dello YAML — altrimenti il file
+    # accorpato resterebbe con l'audio delle combinazioni rimosse.
+    import soundfile as sf
+    from granstudies.render import merge_stems_by_base
+
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    stems = []
+    for k in (1, 2, 3):
+        p = audio_dir / f"stack__fermo__d={k}.aif"
+        _write_stem(p, seconds=2.0)
+        stems.append(str(p))
+
+    def _write_doc(n):
+        doc = {"duration": 2 * n, "streams": [
+            {"stream_id": f"fermo__d={k}", "onset": 2 * (k - 1), "duration": 2}
+            for k in range(1, n + 1)
+        ]}
+        (tmp_path / "stack.yml").write_text(yaml.safe_dump(doc))
+
+    yaml_path = str(tmp_path / "stack.yml")
+    mix = str(audio_dir / "stack.aif")
+    _write_doc(3)
+    merged = merge_stems_by_base(yaml_path, mix, stems)
+    data, _sr = sf.read(merged[0], always_2d=True)
+    assert len(data) == 6000
+
+    # il documento si riduce a 2 combinazioni; gli stem restanti non cambiano
+    _write_doc(2)
+    later = os.path.getmtime(merged[0]) + 10
+    os.utime(yaml_path, (later, later))
+    merged = merge_stems_by_base(yaml_path, mix, stems[:2])
+    data, _sr = sf.read(merged[0], always_2d=True)
+    assert len(data) == 4000
+
+
+def test_merge_stems_by_base_unknown_stream_id_raises(tmp_path):
+    # Uno stem suffissato il cui stream_id non esiste nel documento e' un
+    # disallineamento tra naming dell'engine e YAML: default silenzioso a
+    # onset 0 sommerebbe audio che non devono coesistere. Errore esplicito.
+    import pytest
+    from granstudies.render import merge_stems_by_base
+
+    doc = {"duration": 4, "streams": [
+        {"stream_id": "fermo__d=1", "onset": 0, "duration": 2},
+        {"stream_id": "fermo__d=2", "onset": 2, "duration": 2},
+    ]}
+    yaml_path = tmp_path / "stack.yml"
+    yaml_path.write_text(yaml.safe_dump(doc))
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    stems = []
+    for sid in ("fermo__d=1", "fermo__d=9"):   # d=9 non esiste nel documento
+        p = audio_dir / f"stack__{sid}.aif"
+        _write_stem(p, seconds=2.0)
+        stems.append(str(p))
+    with pytest.raises(ValueError, match="fermo__d=9"):
+        merge_stems_by_base(str(yaml_path), str(audio_dir / "stack.aif"), stems)
+
+
 def test_render_variants_per_stream_merges_version_stems(tmp_path, monkeypatch):
     # La pass STEMS di _render_one deve produrre anche i file accorpati per
     # nome-base, senza toccare gli stem originali.

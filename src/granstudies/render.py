@@ -185,8 +185,16 @@ def merge_stems_by_base(
 
     Solo i gruppi con almeno 2 stem vengono accorpati (uno stream suffissato
     ma solo nel suo gruppo resta consumabile com'e'); gli stream senza ``__``
-    nello ``stream_id`` non sono versioni e restano fuori. Incrementale: il
-    file accorpato si rigenera solo se uno dei suoi stem e' piu' recente.
+    nello ``stream_id`` non sono versioni e restano fuori. Uno stem suffissato
+    il cui ``stream_id`` non esiste nel documento e' un errore (``ValueError``):
+    un default silenzioso a onset 0 lo sommerebbe sopra audio che non deve
+    coesistere nello stesso istante.
+
+    Incrementale: il file accorpato si rigenera se uno dei suoi stem — o il
+    documento stesso — e' piu' recente. Il documento fa parte del check perche'
+    la composizione del gruppo deriva solo da li' (un gruppo che si riduce non
+    tocca gli stem superstiti, ma riscrive lo YAML: ``_dump`` ne muove l'mtime
+    a ogni cambio di contenuto).
 
     Returns: lista dei path accorpati (``{mix}__{base}.aif``), anche se gia'
     aggiornati; vuota se non c'e' nessun gruppo da accorpare.
@@ -207,7 +215,12 @@ def merge_stems_by_base(
         if "__" not in stream_id:
             continue
         base_name = stream_id.split("__", 1)[0]
-        groups.setdefault(base_name, []).append((onsets.get(stream_id, 0.0), path))
+        if stream_id not in onsets:
+            raise ValueError(
+                f"merge stem: lo stream_id '{stream_id}' (da {os.path.basename(path)}) "
+                f"non esiste in {yaml_path} — naming engine/YAML disallineato?"
+            )
+        groups.setdefault(base_name, []).append((onsets[stream_id], path))
 
     merged: List[str] = []
     for base_name, members in groups.items():
@@ -217,8 +230,9 @@ def merge_stems_by_base(
             os.path.dirname(members[0][1]), f"{prefix}{base_name}.aif"
         )
         merged.append(out_path)
+        sources = [p for _o, p in members] + [yaml_path]
         if os.path.exists(out_path) and all(
-            os.path.getmtime(out_path) >= os.path.getmtime(p) for _o, p in members
+            os.path.getmtime(out_path) >= os.path.getmtime(p) for p in sources
         ):
             continue
         import numpy as np
