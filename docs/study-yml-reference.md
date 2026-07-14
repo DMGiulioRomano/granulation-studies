@@ -530,6 +530,17 @@ versions:
   paddata** dello stem — `onset` secondi di silenzio prepesi — in
   `audio/stack/padded/`, e ancora lì gli envelope. Gli stem originali non
   vengono toccati; le copie si rigenerano solo se l'originale è più nuovo.
+- **Stem accorpati per voce logica.** In STEMS mode ogni combinazione produce
+  il proprio stem (`stack__fermo__d=1.aif`, `stack__fermo__d=2.aif`, ...): con
+  molte combinazioni il `.sv` per-stem avrebbe un pane per file. Dopo la pass
+  STEMS il render fa quindi un **post-merge per nome-base** (lo `stream_id`
+  prima del primo `__`): le versioni di una stessa voce logica — che non si
+  sovrappongono mai nel tempo — vengono sommate al proprio onset in un unico
+  file `stack__{voce}.aif`, ancorato al tempo 0 dello stack. `stack_stems_to_sv`
+  consuma i file accorpati: **un pane per voce logica**, con gli envelope di
+  ogni versione offsettati al proprio onset dentro il pane. Gli stem per
+  combinazione restano su disco intatti; i file accorpati si rigenerano solo
+  se uno stem sorgente è più nuovo.
 
 Il caso d'uso fondativo (due stream con inviluppo condiviso e offset che
 cresce di versione in versione) è in `studies/study_versions_test/study.yml`:

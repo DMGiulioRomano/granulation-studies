@@ -1,4 +1,5 @@
 import bz2
+import os
 import xml.etree.ElementTree as ET
 
 from granstudies.envelope_sweep import envelope_breakpoints
@@ -110,7 +111,8 @@ def test_stems_builder_handles_per_breakpoint_points():
 
     pts = [[0.0, 5, "step"], [1.0, 50]]
     with tempfile.NamedTemporaryFile(suffix=".aif") as fh:
-        stems = [("base", fh.name, 1000, 0.0, 10.0, [("density", pts, "linear")])]
+        stems = [("base", fh.name, 1000, 0.0, 10.0,
+                  [("base/density", pts, "linear", 0.0, 10.0)])]
         xml = _parse(_build_sv_xml_stems(stems))
 
     tv = [l for l in xml.findall("./data/layer") if l.get("type") == "timevalues"]
@@ -351,3 +353,94 @@ def test_stems_sv_uses_padded_audio_and_offsets_envelopes(tmp_path):
             assert frames == [2000, 4000]
         elif name.startswith("fermo/"):
             assert frames == [0, 2000]
+
+
+# --- issue #24: gruppi di versioni accorpati per nome-base ----------------------
+
+def test_stack_stems_to_sv_merged_versions_one_pane_per_base(tmp_path):
+    # Documento versions: 2 voci logiche x 2 combinazioni. Il render ha gia'
+    # prodotto i file accorpati stack__{base}.aif: un pane per voce logica,
+    # non uno per combinazione, con gli envelope di ogni versione offsettati
+    # al proprio onset. Nessun padding: il file accorpato e' ancorato a 0.
+    import yaml
+    from granstudies.sv_export import stack_stems_to_sv
+
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    _write_aif(str(audio_dir / "stack__fermo.aif"), seconds=4.0, sr=1000)
+    _write_aif(str(audio_dir / "stack__mobile.aif"), seconds=4.0, sr=1000)
+
+    env = {"type": "linear", "points": [[0.0, 10], [1.0, 20]],
+           "time_mode": "normalized"}
+    doc = {"duration": 4, "streams": [
+        {"stream_id": "fermo__d=1", "onset": 0, "duration": 2, "density": dict(env)},
+        {"stream_id": "fermo__d=2", "onset": 2, "duration": 2, "density": dict(env)},
+        {"stream_id": "mobile__d=1", "onset": 0, "duration": 2, "density": dict(env)},
+        {"stream_id": "mobile__d=2", "onset": 2, "duration": 2, "density": dict(env)},
+    ]}
+    stack_yml = tmp_path / "stack.yml"
+    stack_yml.write_text(yaml.safe_dump(doc))
+    out = stack_stems_to_sv(str(stack_yml), str(audio_dir), str(tmp_path / "s.sv"))
+    assert out is not None
+
+    xml = _parse((tmp_path / "s.sv").read_bytes())
+    wave_models = [m for m in xml.findall("./data/model") if m.get("type") == "wavefile"]
+    files = sorted(os.path.basename(m.get("file")) for m in wave_models)
+    assert files == ["stack__fermo.aif", "stack__mobile.aif"]
+    assert all("padded" not in m.get("file") for m in wave_models)
+    # 2 pane (uno per voce logica), non 4
+    assert len(xml.findall("./display/view")) == 2
+
+    # envelope per versione, offsettati sull'asse assoluto dello stack
+    sparse = {m.get("dataset"): m.get("name") for m in xml.findall("./data/model")
+              if m.get("type") == "sparse"}
+    frames_by_name = {}
+    for ds in xml.findall("./data/dataset"):
+        name = sparse.get(ds.get("id"), "")
+        frames_by_name[name] = [int(p.get("frame")) for p in ds.findall("point")]
+    assert frames_by_name["fermo__d=1/density"] == [0, 2000]
+    assert frames_by_name["fermo__d=2/density"] == [2000, 4000]
+    assert frames_by_name["mobile__d=1/density"] == [0, 2000]
+    assert frames_by_name["mobile__d=2/density"] == [2000, 4000]
+
+
+def test_stack_stems_to_sv_merged_group_missing_file_aborts(tmp_path):
+    import yaml
+    from granstudies.sv_export import stack_stems_to_sv
+
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    # esistono solo gli stem per combinazione, non il file accorpato
+    _write_aif(str(audio_dir / "stack__fermo__d=1.aif"), seconds=2.0, sr=1000)
+    _write_aif(str(audio_dir / "stack__fermo__d=2.aif"), seconds=2.0, sr=1000)
+    doc = {"duration": 4, "streams": [
+        {"stream_id": "fermo__d=1", "onset": 0, "duration": 2},
+        {"stream_id": "fermo__d=2", "onset": 2, "duration": 2},
+    ]}
+    stack_yml = tmp_path / "stack.yml"
+    stack_yml.write_text(yaml.safe_dump(doc))
+    assert stack_stems_to_sv(str(stack_yml), str(audio_dir), str(tmp_path / "s.sv")) is None
+    assert not os.path.exists(tmp_path / "s.sv")
+
+
+def test_stack_stems_to_sv_singleton_suffixed_stream_keeps_raw_stem(tmp_path):
+    # Un solo stream per nome-base, anche se suffissato: nessun file accorpato
+    # da attendersi, si consuma lo stem grezzo come prima (con padding onset).
+    import yaml
+    from granstudies.sv_export import stack_stems_to_sv
+
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    _write_aif(str(audio_dir / "stack__fermo__d=1.aif"), seconds=2.0, sr=1000)
+    doc = {"duration": 4, "streams": [
+        {"stream_id": "fermo__d=1", "onset": 2, "duration": 2},
+    ]}
+    stack_yml = tmp_path / "stack.yml"
+    stack_yml.write_text(yaml.safe_dump(doc))
+    out = stack_stems_to_sv(str(stack_yml), str(audio_dir), str(tmp_path / "s.sv"))
+    assert out is not None
+    xml = _parse((tmp_path / "s.sv").read_bytes())
+    files = [m.get("file") for m in xml.findall("./data/model")
+             if m.get("type") == "wavefile"]
+    assert len(files) == 1
+    assert "padded" in files[0] and files[0].endswith("stack__fermo__d=1.aif")
