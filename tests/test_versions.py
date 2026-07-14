@@ -210,3 +210,130 @@ def test_stream_own_onset_preserved_inside_version():
     by_id = {s["stream_id"]: s for s in doc["streams"]}
     assert by_id["mobile__d=1"]["onset"] == 2
     assert by_id["mobile__d=2"]["onset"] == 22
+
+
+# --- chiavi riservate onset/duration del blocco versions (issue #26) -----------
+
+def test_reserved_keys_are_not_variables():
+    data = _study({
+        "d": {"values": [1, 2]},
+        "onset": {"values": [0, 30]},
+        "duration": {"values": [10, 10]},
+    })
+    # niente errore "non referenziata": onset/duration non sono variabili di
+    # scope, e non compaiono tra i valori risolti.
+    assert parse_versions(data) == {"d": [1, 2]}
+
+
+def test_only_reserved_keys_errors():
+    data = _study({"onset": {"values": [0, 30]}})
+    with pytest.raises(SpecError, match="variabil"):
+        parse_versions(data)
+
+
+def test_onset_values_wrong_length_errors():
+    data = _study({"d": {"values": [1, 2, 3]}, "onset": {"values": [0, 10]}})
+    with pytest.raises(SpecError, match="onset"):
+        generate_versions_document(data, "vtest", output_sr=None)
+
+
+def test_onset_band_with_explicit_n_mismatch_errors():
+    data = _study({
+        "d": {"values": [1, 2, 3]},
+        "onset": {"base": 0, "range": 10, "n": 2},
+    })
+    with pytest.raises(SpecError, match="n"):
+        generate_versions_document(data, "vtest", output_sr=None)
+
+
+def test_onset_negative_errors():
+    data = _study({"d": {"values": [1, 2]}, "onset": {"values": [-1, 5]}})
+    with pytest.raises(SpecError, match="onset"):
+        generate_versions_document(data, "vtest", output_sr=None)
+
+
+def test_reserved_duration_non_positive_errors():
+    data = _study({"d": {"values": [1, 2]}, "duration": {"values": [0, 10]}})
+    with pytest.raises(SpecError, match="duration"):
+        generate_versions_document(data, "vtest", output_sr=None)
+
+
+def test_onset_key_positions_versions_absolutely():
+    data = _study({"d": {"values": [1, 2]}, "onset": {"values": [3, 7]}})
+    doc = generate_versions_document(data, "vtest", output_sr=None)
+    onsets = [s["onset"] for s in doc["streams"]]
+    assert onsets == [3, 3, 7, 7]             # sovrapposte: legittimo
+    assert doc["duration"] == 27              # max(onset + duration) = 7 + 20
+
+
+def test_onset_ramp_without_step_spreads_over_versions():
+    data = _study({"d": {"values": [1, 2, 3]}, "onset": {"ramp": {"start": 0, "stop": 100}}})
+    doc = generate_versions_document(data, "vtest", output_sr=None)
+    onsets = sorted({s["onset"] for s in doc["streams"]})
+    assert onsets == [0, 50, 100]             # linspace: n = numero versioni
+
+
+def test_onset_ramp_with_step_wrong_count_errors():
+    data = _study({"d": {"values": [1, 2, 3]}, "onset": {"ramp": {"start": 0, "stop": 10, "step": 10}}})
+    with pytest.raises(SpecError, match="onset"):
+        generate_versions_document(data, "vtest", output_sr=None)
+
+
+def test_onset_band_deterministic_with_derived_seed():
+    data = _study({"d": {"values": [1, 2, 3]}, "onset": {"base": 0, "range": 50}})
+    a = generate_versions_document(data, "vtest", output_sr=None)
+    b = generate_versions_document(data, "vtest", output_sr=None)
+    assert [s["onset"] for s in a["streams"]] == [s["onset"] for s in b["streams"]]
+    assert all(0 <= s["onset"] <= 50 for s in a["streams"])
+
+
+def test_stream_onset_relative_to_version_onset():
+    data = _study({"d": {"values": [1, 2]}, "onset": {"values": [3, 7]}})
+    data["streams"]["mobile"] = {"onset": 2}  # onset per-stream (issue #26)
+    doc = generate_versions_document(data, "vtest", output_sr=None)
+    by_id = {s["stream_id"]: s for s in doc["streams"]}
+    assert by_id["mobile__d=1"]["onset"] == 5     # 3 + 2
+    assert by_id["mobile__d=2"]["onset"] == 9     # 7 + 2
+
+
+def test_duration_key_is_version_default_stream_wins():
+    data = _study({"d": {"values": [1, 2]}, "duration": {"values": [5, 8]}})
+    data["streams"]["fermo"] = {
+        "duration": 4,                        # la duration propria vince
+        "axes": {"density": {"base": {"expr": "env"}}},
+    }
+    doc = generate_versions_document(data, "vtest", output_sr=None)
+    by_id = {s["stream_id"]: s for s in doc["streams"]}
+    assert by_id["fermo__d=1"]["duration"] == 4
+    assert by_id["fermo__d=2"]["duration"] == 4
+    assert by_id["mobile__d=1"]["duration"] == 5   # default di versione
+    assert by_id["mobile__d=2"]["duration"] == 8
+
+
+def test_duration_key_without_onset_concatenates_on_generated_durations():
+    data = _study({"d": {"values": [1, 2, 3]}, "duration": {"values": [5, 8, 2]}})
+    doc = generate_versions_document(data, "vtest", output_sr=None)
+    onsets = sorted({s["onset"] for s in doc["streams"]})
+    assert onsets == [0, 5, 13]               # cumsum delle durate generate
+    assert doc["duration"] == 15              # 13 + 2
+
+
+def test_reserved_duration_works_without_top_level_duration():
+    data = _study({"d": {"values": [1, 2]}, "duration": {"values": [5, 8]}})
+    del data["duration"]
+    doc = generate_versions_document(data, "vtest", output_sr=None)
+    onsets = [s["onset"] for s in doc["streams"]]
+    assert onsets == [0, 0, 5, 5]
+    assert doc["duration"] == 13
+
+
+def test_onset_key_with_per_stream_durations_no_top_level():
+    data = _study({"d": {"values": [1, 2]}, "onset": {"values": [0, 30]}})
+    del data["duration"]
+    data["streams"]["fermo"] = {
+        "duration": 10,
+        "axes": {"density": {"base": {"expr": "env"}}},
+    }
+    data["streams"]["mobile"] = {"duration": 6}
+    doc = generate_versions_document(data, "vtest", output_sr=None)
+    assert doc["duration"] == 40              # 30 + 10

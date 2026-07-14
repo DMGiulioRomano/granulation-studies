@@ -1,19 +1,27 @@
-"""Processo ``versions``: repliche dello stack concatenate nel tempo.
+"""Processo ``versions``: repliche dello stack distribuite nel tempo.
 
 Il quarto blocco accanto ad ``axes``/``stack``/``sweep``: dichiara variabili
 (vocabolario dei generatori Y: ``values`` / ``ramp`` / banda con ``n``) i cui
 valori vengono iniettati negli scope ``let`` dei nodi-expr del documento. Ogni
 combinazione (prodotto cartesiano lessicografico nell'ordine di dichiarazione,
 prima variabile esterna/lenta) genera una *versione*: la replica completa
-degli stream dello stack — envelope, camminate e seed identici — con l'onset
-scalato di ``k * duration`` e lo ``stream_id`` suffissato con i valori della
-combinazione. Le versioni si ascoltano cosi' in cascata dentro un unico
-documento engine, senza rimappare nessun envelope: ogni stream conserva il
-proprio ``time_mode: normalized`` sulla propria durata, e l'engine dimensiona
-il buffer su ``max(onset + duration)``.
+degli stream dello stack — envelope, camminate e seed identici — con lo
+``stream_id`` suffissato con i valori della combinazione. Le versioni si
+ascoltano cosi' dentro un unico documento engine, senza rimappare nessun
+envelope: ogni stream conserva il proprio ``time_mode: normalized`` sulla
+propria durata, e l'engine dimensiona il buffer su ``max(onset + duration)``.
+
+Sulla timeline le versioni si posizionano con le chiavi riservate ``onset``/
+``duration`` del blocco (issue #26): sequenze lunghe N (numero di combo),
+fuori dal prodotto cartesiano, mappate 1:1 sulle versioni — ``onset[k]``
+assoluto, ``duration[k]`` default di versione (una duration per-stream vince).
+Chiavi assenti -> le versioni si concatenano sulle durate di versione (col
+solo ``duration:`` top-level e' il classico ``onset = k * duration``).
+Sovrapposizioni e buchi sono legittimi: il merge degli stem fa overlay-add.
 
 Il blocco richiede ``stack:`` (versions e' un modificatore del processo
-stack, l'output resta ``yaml/stack/stack.yml``) e ``duration:`` top-level.
+stack, l'output resta ``yaml/stack/stack.yml``); ``duration:`` top-level e' un
+default, serve solo quando nessun'altra fonte risolve durate e posizioni.
 Una variabile deve essere referenziata da almeno un'espressione del documento
 (guardia anti-refuso); il default dichiarato nel ``let`` (es. ``d: 0``) tiene
 lo studio valido anche senza il blocco, e viene ombreggiato dall'iniezione.
@@ -37,6 +45,12 @@ from .yaml_loc import Locations
 # Nomi che il sistema fornisce gia' agli scope expr (``i``/``n`` dello spread,
 # le costanti): una variabile di versions con questi nomi sarebbe ambigua.
 _RESERVED_NAMES = frozenset({"i", "n", "pi", "e"})
+
+# Chiavi riservate del blocco ``versions:`` (issue #26): non sono variabili di
+# scope — non entrano nel prodotto cartesiano ne' nella guardia "referenziata"
+# — ma generatori della timeline: sequenze lunghe N (numero di combinazioni)
+# mappate 1:1 sull'ordine lessicografico delle versioni.
+_TIMELINE_KEYS = ("onset", "duration")
 
 
 def _expr_names(text: Any) -> frozenset:
@@ -76,7 +90,8 @@ def parse_versions(
     e' un generatore Y (``values``/``ramp``/banda **con** ``n``: qui non c'e'
     coupling con una X, il conteggio va dichiarato). Una banda senza ``seed``
     deriva ``stable_seed("<study>:versions:<nome>")``: deterministico tra run,
-    variabili diverse decorrelate da sole.
+    variabili diverse decorrelate da sole. Le chiavi riservate ``onset``/
+    ``duration`` non sono variabili: le legge ``parse_version_timeline``.
     """
     ctx = ErrCtx(locs=locs)
     raw = data.get("versions")
@@ -85,6 +100,14 @@ def parse_versions(
             "versions: serve un dict non vuoto {variabile: generatore}.",
             key=("versions",),
             hint="es. 'versions: {d: {values: [1, 2, 3]}}'.",
+        )
+    raw = {k: v for k, v in raw.items() if k not in _TIMELINE_KEYS}
+    if not raw:
+        raise ctx.err(
+            "versions: servono variabili oltre alle chiavi riservate "
+            "'onset'/'duration' (sono loro a decidere quante versioni esistono).",
+            key=("versions",),
+            hint="dichiara almeno una variabile, es. 'd: {values: [1, 2, 3]}'.",
         )
     sid = data.get("study_id") or "study"
     referenced = _referenced_names(
@@ -145,6 +168,106 @@ def parse_versions(
     return out
 
 
+def _timeline_sequence(
+    name: str, cfg: Any, n: int, sid: str, ctx: ErrCtx
+) -> List[float]:
+    """Risolve una chiave riservata (``onset``/``duration``) in N valori.
+
+    Stesso vocabolario delle variabili (``values``/``ramp``/banda), ma il
+    conteggio lo possiede il prodotto cartesiano: ``values`` deve avere
+    esattamente N elementi; la banda deduce ``n = N`` (unico punto del
+    progetto dove n e' deducibile) e un ``n`` esplicito diverso e' errore;
+    ``ramp`` senza ``step`` distribuisce N valori equispaziati start -> stop,
+    con ``step`` la griglia generata deve contare esattamente N. Una banda
+    senza ``seed`` deriva ``stable_seed("<study>:versions:<nome>")``.
+    """
+    key = ("versions", name)
+    if not isinstance(cfg, dict):
+        raise ctx.err(
+            f"versions: '{name}' deve avere un generatore (dict), "
+            f"trovato {cfg!r}.",
+            key=key,
+            hint="dichiara 'values', 'ramp' o una banda ('base'/'range').",
+        )
+    with ctx.wrapping(key=key):
+        gen_key, params = y_generator(cfg)
+    seed = stable_seed(f"{sid}:versions:{name}")
+    with ctx.wrapping(key=key):
+        if gen_key == "values":
+            values: List[Any] = list(params)
+        elif gen_key == "ramp":
+            if "step" in params:
+                values = ramp(**expand_params(params, seed=seed))
+            else:
+                if "start" not in params or "stop" not in params:
+                    raise ctx.err(
+                        f"versions: '{name}', la rampa richiede 'start' e "
+                        "'stop'.",
+                        key=key,
+                    )
+                start, stop = params["start"], params["stop"]
+                values = [
+                    start + (stop - start) * k / (n - 1) for k in range(n)
+                ] if n > 1 else [start]
+        else:  # band
+            band_params = dict(params)
+            if band_params.setdefault("n", n) != n:
+                raise ctx.err(
+                    f"versions: '{name}', 'n' e' {band_params['n']} ma le "
+                    f"versioni sono {n} — il conteggio lo possiede il "
+                    "prodotto cartesiano delle variabili.",
+                    key=key,
+                    hint="ometti 'n': per le chiavi riservate e' dedotto.",
+                )
+            band_params.setdefault("seed", seed)
+            values = band(
+                **expand_params(band_params, seed=band_params["seed"])
+            )
+    if len(values) != n:
+        raise ctx.err(
+            f"versions: '{name}' genera {len(values)} valori ma le versioni "
+            f"sono {n} (la sequenza si mappa 1:1 sulle combinazioni).",
+            key=key,
+        )
+    for v in values:
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            raise ctx.err(
+                f"versions: '{name}', valore non numerico {v!r}.", key=key
+            )
+        if name == "onset" and v < 0:
+            raise ctx.err(
+                f"versions: onset deve essere >= 0 (generato {v}).", key=key
+            )
+        if name == "duration" and v <= 0:
+            raise ctx.err(
+                f"versions: duration deve essere > 0 (generato {v}).", key=key
+            )
+    return [float(v) for v in values]
+
+
+def parse_version_timeline(
+    data: Dict[str, Any], n: int, locs: Locations | None = None
+) -> tuple[List[float] | None, List[float] | None]:
+    """Risolve le chiavi riservate ``onset``/``duration`` di ``versions:``.
+
+    Ritorna ``(onsets, durations)``, ognuno una lista lunga ``n`` o ``None``
+    se la chiave e' assente. ``onset[k]`` e' la posizione **assoluta** della
+    versione k sulla timeline (non monotono legittimo: sovrapposizioni e
+    buchi emergono dai valori); ``duration[k]`` fa da default di ``duration:``
+    per gli stream della versione k.
+    """
+    ctx = ErrCtx(locs=locs)
+    raw = data.get("versions") or {}
+    sid = data.get("study_id") or "study"
+    out = {}
+    for name in _TIMELINE_KEYS:
+        cfg = raw.get(name)
+        out[name] = (
+            None if cfg is None else _timeline_sequence(name, cfg, n, sid, ctx)
+        )
+    return out["onset"], out["duration"]
+
+
 def version_combos(vars: Dict[str, List[Any]]) -> List[Dict[str, Any]]:
     """Prodotto cartesiano lessicografico delle variabili.
 
@@ -196,13 +319,24 @@ def generate_versions_document(
     *,
     output_sr: Optional[int] = 48000,
 ) -> Dict[str, Any]:
-    """Il documento engine multi-stream con le versioni concatenate.
+    """Il documento engine multi-stream con le versioni sulla timeline.
 
     Per ogni combinazione: iniezione nello scope, risoluzione degli stream
     (``resolve_streams``, il parse di sempre), costruzione via
-    ``build_stack_stream`` — identica allo stack — poi onset scalato di
-    ``k * duration`` e ``stream_id`` suffissato con l'etichetta della
-    combinazione (``fermo__d=1``). La durata documento e' ``N * duration``.
+    ``build_stack_stream`` — identica allo stack — poi ``stream_id``
+    suffissato con l'etichetta della combinazione (``fermo__d=1``) e onset
+    spostato sulla posizione della versione.
+
+    Le chiavi riservate ``onset``/``duration`` del blocco (issue #26)
+    posizionano le versioni: ``onset[k]`` e' assoluto (l'onset per-stream
+    resta relativo alla propria versione: ``onset_finale = onset_versione +
+    onset_stream``); ``duration[k]`` viene iniettata come ``duration:`` del
+    documento della combo k *prima* di ``resolve_streams``, quindi fa da
+    default e una duration per-stream vince comunque. Chiavi assenti ->
+    concatenazione: ``onset_versione[k]`` e' la somma delle durate delle
+    versioni precedenti (col solo ``duration:`` top-level, il classico
+    ``k * duration``). La durata documento e' ``max(onset + duration)`` sugli
+    stream costruiti: versioni sovrapposte o bucate sono legittime.
     """
     sid = study_id or data.get("study_id") or "study"
     ctx = ErrCtx(locs=locs)
@@ -213,31 +347,45 @@ def generate_versions_document(
             key=("versions",),
             hint="aggiungi 'stack: {}' (anche vuoto) al documento.",
         )
-    duration = data.get("duration")
-    if duration is None:
-        raise ctx.err(
-            "versions: serve 'duration:' top-level (la durata di ogni "
-            "versione, su cui gli onset vengono scalati).",
-            key=("versions",),
-            hint="aggiungi 'duration: <secondi>' al livello top del documento.",
-        )
     vars = parse_versions(data, locs=locs)
     combos = version_combos(vars)
+    onsets, durations = parse_version_timeline(data, len(combos), locs=locs)
+    if onsets is None:
+        # Concatenazione: servono le durate di versione per posizionare.
+        top = data.get("duration")
+        per_version = durations if durations is not None else (
+            [float(top)] * len(combos) if top is not None else None
+        )
+        if per_version is None:
+            raise ctx.err(
+                "versions: senza 'versions.onset' serve una durata di "
+                "versione per concatenare — 'versions.duration' oppure "
+                "'duration:' top-level.",
+                key=("versions",),
+                hint="aggiungi 'duration: <secondi>' al top del documento, "
+                "o le chiavi riservate 'duration'/'onset' nel blocco.",
+            )
+        onsets = []
+        acc = 0.0
+        for d in per_version:
+            onsets.append(acc)
+            acc += d
     base_data = {k: v for k, v in data.items() if k != "versions"}
 
     built: List[Dict[str, Any]] = []
     for k, combo in enumerate(combos):
         label = "__".join(f"{name}={_fmt(v)}" for name, v in combo.items())
         data_k = inject_combo(base_data, combo)
+        if durations is not None:
+            data_k["duration"] = durations[k]
         for spec in resolve_streams(data_k, sid, locs=locs):
             s = build_stack_stream(spec, output_sr=output_sr)
             s["stream_id"] = f"{s['stream_id']}__{label}"
-            onset = s.get("onset") or 0
-            s["onset"] = onset + k * duration
+            s["onset"] = (s.get("onset") or 0) + onsets[k]
             built.append(s)
     return build_multi_document(
         built,
         title=f"{sid} :: stack :: versions",
         seed=data.get("seed"),
-        duration=len(combos) * duration,
+        duration=max(s["onset"] + s["duration"] for s in built),
     )
