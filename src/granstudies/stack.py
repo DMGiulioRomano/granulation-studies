@@ -4,8 +4,10 @@ Il gemello verticale dello sweep. Dove sweep *esplode* gli stream in N file
 (varianti enumerate, prodotto cartesiano), stack li *collassa* in un solo YAML
 multi-stream. L'invariante: ``axes`` conosce solo Y (valori + interpolation);
 il processo possiede X — sweep via plateau/transition (durata derivata), stack
-via le strategy-X (``x_strategies``) normalizzate sulla durata condivisa letta
-da ``duration:``.
+via le strategy-X (``x_strategies``) normalizzate sulla durata dello stream.
+``duration:`` top-level e' il default che ogni stream puo' sovrascrivere
+(issue #26): camminate-X ed envelope ``time_mode: normalized`` si normalizzano
+sulla duration *propria* dello stream, non su quella del documento.
 
 In stack gli assi NON si combinano: niente prodotto cartesiano, niente zip.
 Ogni asse di uno stream diventa un envelope indipendente sulla stessa durata,
