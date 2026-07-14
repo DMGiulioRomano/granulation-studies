@@ -4,8 +4,10 @@ Il gemello verticale dello sweep. Dove sweep *esplode* gli stream in N file
 (varianti enumerate, prodotto cartesiano), stack li *collassa* in un solo YAML
 multi-stream. L'invariante: ``axes`` conosce solo Y (valori + interpolation);
 il processo possiede X — sweep via plateau/transition (durata derivata), stack
-via le strategy-X (``x_strategies``) normalizzate sulla durata condivisa letta
-da ``duration:``.
+via le strategy-X (``x_strategies``) normalizzate sulla durata dello stream.
+``duration:`` top-level e' il default che ogni stream puo' sovrascrivere
+(issue #26): camminate-X ed envelope ``time_mode: normalized`` si normalizzano
+sulla duration *propria* dello stream, non su quella del documento.
 
 In stack gli assi NON si combinano: niente prodotto cartesiano, niente zip.
 Ogni asse di uno stream diventa un envelope indipendente sulla stessa durata,
@@ -122,13 +124,17 @@ def build_stack_stream(
     """
     if spec.duration is None:
         raise ValueError(
-            f"stack [{spec.stream_id or spec.study_id}]: manca 'duration:' "
-            "top-level (durata condivisa)."
+            f"stack [{spec.stream_id or spec.study_id}]: nessuna 'duration' "
+            "risolta (ne' propria dello stream ne' ereditata dal top-level)."
         )
     base = dict(spec.base)
     base["stream_id"] = spec.stream_id or "stream"
     base["time_mode"] = "normalized"
     base["duration"] = spec.duration
+    # L'onset per-stream (issue #26) vince su un eventuale ``base.onset``
+    # ereditato; non dichiarato (None) lo lascia intatto.
+    if spec.onset is not None:
+        base["onset"] = spec.onset
     overrides: Dict[str, Any] = {}
     types: Dict[str, str] = {}
     for ax in spec.axes:
@@ -173,5 +179,9 @@ def generate_stack_document(
         built,
         title=f"{first.study_id} :: stack",
         seed=first.seed,
-        duration=max(s.duration for s in specs),
+        # La durata documento copre anche gli stream spostati in avanti
+        # (onset per-stream o base.onset): sv_export la usa per l'end frame.
+        duration=max(
+            float(s.get("onset", 0) or 0) + s["duration"] for s in built
+        ),
     )

@@ -69,6 +69,11 @@ class StudySpec:
     title: str | None
     seed: int | None
     duration: float | None
+    # Onset dello stream sulla timeline (s). ``None`` = non dichiarato: lo
+    # distingue da un esplicito ``onset: 0`` cosi' il processo stack non
+    # schiaccia un eventuale ``base.onset`` ereditato. E' una chiave solo
+    # per-stream: al top-level del documento e' rifiutata (``resolve_streams``).
+    onset: float | None
     samples_dir: str | None
     base: Dict[str, Any]
     axes: List[Axis]
@@ -272,6 +277,18 @@ def resolve_streams(
     """
     sid = study_id or data.get("study_id") or "study"
     streams = data.get("streams")
+    # ``onset`` e' solo per-stream: qui, sul documento ORIGINALE (prima del
+    # merge), la chiave top-level viene rifiutata. Dopo il merge l'onset di
+    # uno stream *diventa* top-level del documento merged, ed e' per questo
+    # che ``parse_study_spec`` la legge senza obiettare.
+    if "onset" in data:
+        raise ErrCtx(locs=locs).err(
+            "'onset' non e' una chiave top-level dello studio: si dichiara "
+            "per-stream (dentro 'streams:').",
+            key=("onset",),
+            hint="un onset globale che sposta tutti gli stream insieme e' "
+            "ambiguo; ogni stream si posiziona col proprio 'onset'.",
+        )
     if not streams:
         return [parse_study_spec(data, sid, locs=locs)]
     streams = expand_spreads(streams, locs)
@@ -395,6 +412,24 @@ def parse_study_spec(
             hint="l'accoppiamento degli assi (ex parallel) vive nel processo "
             "stack — stessa strategy-X e stesso n.",
         )
+    duration = data.get("duration")
+    if duration is not None and (
+        not isinstance(duration, (int, float)) or isinstance(duration, bool)
+        or duration <= 0
+    ):
+        raise ctx.err(
+            f"'duration' deve essere un numero > 0 (ricevuto {duration!r}).",
+            key=("duration",),
+        )
+    onset = data.get("onset")
+    if onset is not None and (
+        not isinstance(onset, (int, float)) or isinstance(onset, bool)
+        or onset < 0
+    ):
+        raise ctx.err(
+            f"'onset' deve essere un numero >= 0 (ricevuto {onset!r}).",
+            key=("onset",),
+        )
     stack_axes, stack_seed, stack_unit = _stack_config(data, ctx)
     axes_seed = axes_raw.get("seed")
     sid = study_id or data.get("study_id") or "study"
@@ -488,12 +523,16 @@ def parse_study_spec(
                 key=("stack",),
                 hint=f"gli assi dichiarati in 'axes:' sono {sorted(axis_names)}.",
             )
-    if stack_axes is not None and data.get("duration") is None:
+    # Il documento qui puo' essere il merge di uno stream: ``duration`` e'
+    # assente solo se lo stream non ne risolve nessuna (ne' propria ne'
+    # ereditata dal top-level, che e' un default, non un vincolo).
+    if stack_axes is not None and duration is None:
         raise ctx.err(
-            "stack: serve 'duration:' top-level (la durata condivisa su cui "
-            "il processo normalizza i tempi).",
+            "stack: lo stream non risolve nessuna 'duration' (ne' propria "
+            "ne' ereditata dal top-level).",
             key=("stack",),
-            hint="aggiungi 'duration: <secondi>' al livello top del documento.",
+            hint="dichiara 'duration: <secondi>' al top del documento "
+            "(default per tutti gli stream) oppure nello stream.",
         )
     orders = list(sweep_cfg.get("orders", list(range(1, len(axes) + 1))))
     orderings = [list(o) for o in sweep_cfg.get("orderings", [])]
@@ -501,7 +540,8 @@ def parse_study_spec(
         study_id=sid,
         title=data.get("title"),
         seed=data.get("seed"),
-        duration=data.get("duration"),
+        duration=duration,
+        onset=onset,
         samples_dir=data.get("samples_dir"),
         base=dict(data.get("base") or {}),
         axes=axes,

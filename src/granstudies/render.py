@@ -174,9 +174,10 @@ def merge_stems_by_base(
     ``fermo__d=2``, ...): in STEMS mode l'engine scrive un file per ognuno e
     Sonic Visualiser finirebbe con un pane per combinazione. Qui gli stem che
     condividono il nome-base (lo ``stream_id`` prima del primo ``__``) vengono
-    sommati in un unico file per voce logica: le versioni non si sovrappongono
-    mai nel tempo (onset scalato di ``k * duration``), quindi l'overlay-add
-    equivale a una concatenazione.
+    sommati in un unico file per voce logica via overlay-add (con clip di
+    protezione): con le versioni concatenate equivale a una concatenazione,
+    e con le chiavi riservate ``onset``/``duration`` di ``versions`` (issue
+    #26) gestisce anche versioni sovrapposte o distanziate.
 
     Gli stem dell'engine hanno onset RELATIVO (il buffer parte dall'onset
     dello stream, vedi ``_relative_n_total`` nel renderer NumPy): ogni stem
@@ -248,9 +249,10 @@ def merge_stems_by_base(
         out = np.zeros((n_total, buffers[0][1].shape[1]), dtype=np.float64)
         for start, data in buffers:
             out[start:start + len(data)] += data
-        # Le versioni non si sovrappongono, ma il clip protegge da input gia'
-        # a fondo scala; il subtype degli stem sorgente si conserva (stessa
-        # risoluzione dell'engine, niente quantizzazione aggiuntiva).
+        # Le versioni possono sovrapporsi (onset liberi, issue #26): il clip
+        # protegge la somma dal fuori scala; il subtype degli stem sorgente si
+        # conserva (stessa risoluzione dell'engine, niente quantizzazione
+        # aggiuntiva).
         np.clip(out, -1.0, 1.0, out=out)
         subtype = sf.info(members[0][1]).subtype
         sf.write(out_path, out, sr, format="AIFF", subtype=subtype)

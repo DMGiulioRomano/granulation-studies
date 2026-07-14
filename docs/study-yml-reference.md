@@ -6,7 +6,10 @@ Sintassi completa con tutti i campi. I campi marcati `*` sono obbligatori.
 study_id: study01_grain_density   # * identificatore, usato come nome cartella
 title: "Studio 01 — ..."          # libero, finisce nell'header dei file generati
 seed: 1988                        # seed globale engine (finisce nei documenti generati)
-duration: 30                      # durata condivisa (s): obbligatoria se c'è `stack:`
+duration: 30                      # durata di default (s) degli stream: ogni stream può
+                                  #   dichiararne una propria (override, vedi `streams:`).
+                                  #   Con `stack:` ogni stream deve risolverne una,
+                                  #   propria o ereditata da qui.
 samples_dir: samples              # path relativo alla root del repo (default: samples/)
 
 # Parametri fissi dello stream: tutto ciò che non è un asse.
@@ -67,11 +70,14 @@ sweep:
     - [density, grain_duration]                # primo = asse lento (outer), ultimo = veloce (inner)
     - [grain_duration, density]                # stessa coppia, ordine invertito
 
-# Processo versions (attivo per presenza; richiede `stack:` e `duration:`):
-# repliche dello stack concatenate nel tempo, una per combinazione delle
-# variabili. Vedi la sezione "Il blocco versions" sotto.
+# Processo versions (attivo per presenza; richiede `stack:`): repliche dello
+# stack distribuite nel tempo, una per combinazione delle variabili — di
+# default concatenate, con le chiavi riservate `onset`/`duration` posizionate
+# liberamente. Vedi la sezione "Il blocco versions" sotto.
 versions:
   d: {values: [1, 2, 3]}          # variabile -> generatore Y (values | ramp | banda con n)
+  onset: {values: [0, 10, 40]}    # chiave riservata (opzionale): posizioni assolute
+  duration: {values: [8, 8, 20]}  # chiave riservata (opzionale): durate per versione
 
 # Processo stack (attivo per presenza del blocco): tutti gli stream sommati in
 # UN documento multi-stream. Vedi la sezione "Il blocco stack" sotto.
@@ -94,6 +100,10 @@ streams:
   base: {}                       # nessun override — identica alla base
 
   nome_stream:                   # chiave libera → diventa la sotto-cartella dell'output
+    duration: 60                 # durata propria (s): vince sul default top-level
+    onset: 5                     # posizione (s) dello stream nella timeline (default 0).
+                                 # SOLO per-stream: `onset:` al top-level del documento
+                                 # è rifiutato. Con `versions:` è relativo alla versione.
     base:                        # override parziale di base (deep-merge)
       volume: -3
       pointer:
@@ -409,7 +419,12 @@ Design completo: `docs/plans/expr-env-arithmetic.md`.
 Il processo stack è il gemello verticale dello sweep: **collassa** tutti gli
 stream di `streams:` in un solo documento engine (`yaml/stack/stack.yml`),
 sommati. Parte solo se il blocco `stack:` è presente (anche vuoto: `stack: {}`);
-richiede `duration:` top-level (la durata condivisa su cui normalizza i tempi).
+ogni stream deve **risolvere una `duration`** — propria (override nello stream)
+o ereditata dal default `duration:` top-level, che diventa opzionale se ogni
+stream dichiara la sua. Camminate-X ed envelope `time_mode: normalized` si
+normalizzano sulla duration *propria* dello stream; uno stream con `onset:`
+proprio parte spostato nella timeline, e la durata documento copre tutto
+(`max(onset + duration)`).
 Per escludere uno stream dall'ascolto lo si muta con il suo `base.volume`
 (meccanismo engine); il blocco `stack:` è solo config della camminata-X, non un
 gate di partecipazione.
@@ -484,15 +499,18 @@ soli**, restando riproducibili tra run.
 ## Il blocco `versions:`
 
 Il processo versions è un **modificatore dello stack**: parte solo se sono
-presenti sia `versions:` sia `stack:` (più `duration:` top-level), e l'output
-resta l'unico `yaml/stack/stack.yml`. Dove lo stack collassa gli stream in un
-documento, versions **replica quel collasso N volte nel tempo**: una replica
-per combinazione delle variabili, concatenate per onset.
+presenti sia `versions:` sia `stack:`, e l'output resta l'unico
+`yaml/stack/stack.yml`. Dove lo stack collassa gli stream in un documento,
+versions **replica quel collasso N volte nel tempo**: una replica per
+combinazione delle variabili. Di default le versioni si concatenano; con le
+chiavi riservate `onset`/`duration` si distanziano o sovrappongono liberamente.
 
 ```yaml
 versions:
   f: {values: [50, 100]}          # prima variabile = esterna (lenta)
   d: {values: [1, 2, 3]}          # ultima = interna (veloce)
+  onset:    {ramp: {start: 0, stop: 100}}   # riservata: 6 posizioni assolute
+  duration: {base: 15, range: 10}           # riservata: 6 durate in [15, 25]
 ```
 
 - Ogni chiave è un **nome di variabile** (identificatore libero; `i`, `n`,
@@ -509,13 +527,35 @@ versions:
   una variabile che nessuna espressione referenzia è un errore di parse
   (guardia anti-refuso). L'iniezione vale ovunque un nodo-expr viva: bande di
   Y, camminate-X, parametri statici dello stream.
-- Ogni versione replica **tutti** gli stream dello stack con l'`onset`
-  scalato di `k * duration` e lo `stream_id` suffissato con l'etichetta della
-  combinazione (`mobile__f=50__d=1`). Envelope, camminate e seed passano per
-  il builder dello stack **identici**: tra una versione e l'altra cambia solo
-  il valore delle variabili — è il confronto pulito del metodo. La durata
-  documento è `N * duration`; l'engine dimensiona comunque il buffer su
-  `max(onset + duration)`.
+- Ogni versione replica **tutti** gli stream dello stack, spostati sulla
+  posizione della versione e con lo `stream_id` suffissato con l'etichetta
+  della combinazione (`mobile__f=50__d=1`). Envelope, camminate e seed passano
+  per il builder dello stack **identici**: tra una versione e l'altra cambia
+  solo il valore delle variabili — è il confronto pulito del metodo. La durata
+  documento è `max(onset + duration)` su tutti gli stream (nel caso classico
+  concatenato coincide con `N * duration`).
+- **`onset` e `duration` come chiavi riservate** (issue #26): non sono
+  variabili — non entrano nel prodotto cartesiano né negli scope `let` — ma
+  generatori della **timeline**: producono una sequenza lunga N (numero di
+  combinazioni) mappata **1:1** sull'ordine lessicografico delle versioni
+  (funzioni di k). Il conteggio lo possiede il prodotto cartesiano: `values`
+  deve avere esattamente N elementi; la banda deduce `n = N` (un `n` esplicito
+  diverso è errore); `ramp` senza `step` distribuisce N valori equispaziati
+  `start → stop`, con `step` la griglia deve contare esattamente N. Una banda
+  senza `seed` deriva `stable_seed("<study>:versions:onset")` /
+  `"...:duration"`.
+  - `onset[k]` è la posizione **assoluta** della versione k. Non monotono è
+    legittimo: sovrapposizioni e buchi emergono dai valori (il merge degli
+    stem fa overlay-add con clip). L'`onset` per-stream resta **relativo alla
+    propria versione**: `onset_finale = onset_versione + onset_stream`.
+  - `duration[k]` fa da **default** di `duration:` per gli stream della
+    versione k (iniettata prima del parse): una `duration` propria dello
+    stream vince comunque.
+  - Chiavi assenti → le versioni si **concatenano** sulle durate di versione
+    (col solo `duration:` top-level è il classico `onset = k * duration`,
+    retrocompatibile). `duration:` top-level serve solo quando nessun'altra
+    fonte posiziona le versioni: con `versions.onset` (e durate risolte
+    per-stream) o `versions.duration` può mancare.
 - Il confine tra versioni è un confine naturale di stream (l'engine chiude
   una granulazione e ne apre un'altra): nessuna transizione interpolata tra
   versioni. Per ammorbidire il bordo si lavora con gli envelope di volume
@@ -534,9 +574,9 @@ versions:
   il proprio stem (`stack__fermo__d=1.aif`, `stack__fermo__d=2.aif`, ...): con
   molte combinazioni il `.sv` per-stem avrebbe un pane per file. Dopo la pass
   STEMS il render fa quindi un **post-merge per nome-base** (lo `stream_id`
-  prima del primo `__`): le versioni di una stessa voce logica — che non si
-  sovrappongono mai nel tempo — vengono sommate al proprio onset in un unico
-  file `stack__{voce}.aif`, ancorato al tempo 0 dello stack. `stack_stems_to_sv`
+  prima del primo `__`): le versioni di una stessa voce logica vengono sommate
+  al proprio onset (overlay-add con clip: regge anche versioni sovrapposte) in
+  un unico file `stack__{voce}.aif`, ancorato al tempo 0 dello stack. `stack_stems_to_sv`
   consuma i file accorpati: **un pane per voce logica**, con gli envelope di
   ogni versione offsettati al proprio onset dentro il pane. Gli stem per
   combinazione restano su disco intatti; i file accorpati si rigenerano solo
