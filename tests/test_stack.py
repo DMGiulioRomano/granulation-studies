@@ -342,3 +342,70 @@ def test_drift_step_nested_node_at_stack_seam():
     b = axis_envelope(y, x, duration=10.0, y_seed=1, x_seed=2)
     assert a == b
     assert all(0 <= v <= 10 for _, v in a)
+
+
+# --- duration/onset per-stream (issue #26) ----------------------------------------
+
+def test_stream_onset_written_into_engine_stream():
+    from granstudies.stack import generate_stack_document
+
+    data = _study_data()
+    data["streams"]["voce_b"]["onset"] = 5
+    doc = generate_stack_document(_specs(data))
+    by_id = {s["stream_id"]: s for s in doc["streams"]}
+    assert by_id["voce_b"]["onset"] == 5
+    assert "onset" not in by_id["voce_a"]     # non dichiarato: nessuna chiave
+
+
+def test_stream_onset_wins_over_inherited_base_onset():
+    from granstudies.stack import generate_stack_document
+
+    data = _study_data()
+    data["base"]["onset"] = 2                 # ereditato da tutti gli stream
+    data["streams"]["voce_b"]["onset"] = 5    # l'onset per-stream vince
+    doc = generate_stack_document(_specs(data))
+    by_id = {s["stream_id"]: s for s in doc["streams"]}
+    assert by_id["voce_a"]["onset"] == 2      # base.onset resta intatto
+    assert by_id["voce_b"]["onset"] == 5
+
+
+def test_stream_duration_written_into_engine_stream():
+    from granstudies.stack import generate_stack_document
+
+    data = _study_data()
+    data["streams"]["voce_b"]["duration"] = 12
+    doc = generate_stack_document(_specs(data))
+    by_id = {s["stream_id"]: s for s in doc["streams"]}
+    assert by_id["voce_a"]["duration"] == 30  # eredita il default
+    assert by_id["voce_b"]["duration"] == 12  # override locale
+
+
+def test_document_duration_covers_shifted_stream():
+    from granstudies.stack import generate_stack_document
+
+    data = _study_data()
+    data["streams"]["voce_b"]["onset"] = 10   # 10 + 30 > 30: il documento copre
+    doc = generate_stack_document(_specs(data))
+    assert doc["duration"] == 40
+
+
+def test_document_duration_covers_base_onset_too():
+    from granstudies.stack import generate_stack_document
+
+    data = _study_data()
+    data["streams"]["voce_b"]["base"] = {"onset": 4}
+    doc = generate_stack_document(_specs(data))
+    assert doc["duration"] == 34
+
+
+def test_document_without_top_level_duration():
+    from granstudies.stack import generate_stack_document
+
+    data = _study_data()
+    del data["duration"]
+    data["streams"]["voce_a"]["duration"] = 10
+    data["streams"]["voce_b"] = {"duration": 25, "onset": 10}
+    doc = generate_stack_document(_specs(data))
+    by_id = {s["stream_id"]: s for s in doc["streams"]}
+    assert by_id["voce_a"]["duration"] == 10
+    assert doc["duration"] == 35              # max(onset + duration)
