@@ -35,6 +35,13 @@ _PLOT_STYLE_BY_TYPE = {
 _PLOT_STYLE_DEFAULT = "3"  # fallback prudente: segmenti retti
 _PLOT_STYLE_PER_BREAKPOINT = "9"
 
+# ponytail: toggle temporaneo per testare l'offset nativo del fork svcore
+# (commit 9ae4debd, ReadOnlyWaveFileModel rispetta "start" come offset e
+# pada gli zeri in memoria). Con GRANSTUDIES_SV_NATIVE_ONSET=1 lo stem non
+# viene piu' paddato su disco: l'onset va nell'attributo "start" del <model>.
+# Rimuovere questo toggle (e _padded_stem) quando il fork sara' la baseline.
+_NATIVE_ONSET_OFFSET = os.environ.get("GRANSTUDIES_SV_NATIVE_ONSET") == "1"
+
 _COLOURS = [
     ("#ff8800", "Orange"),
     ("#00ccff", "Bright Blue"),
@@ -414,7 +421,11 @@ def _build_sv_xml_stems(stems: List[Tuple[str, str, int, float, float, List[Tupl
         wave_model_id = str(next_id); next_id += 1
         spec_layer_id = str(next_id); next_id += 1
         wave_layer_id = str(next_id); next_id += 1
-        end_frame = round((onset + duration) * sr)
+
+        # Con _NATIVE_ONSET_OFFSET l'audio non e' paddato su disco: l'onset
+        # e' l'attributo "start" del model, sul fork svcore che lo rispetta.
+        model_start_frame = round(onset * sr) if _NATIVE_ONSET_OFFSET else 0
+        end_frame = model_start_frame + round(duration * sr)
 
         # SV usa il mainModel come riferimento del transport (durata, sample
         # rate, play/pausa): senza uno, la barra spaziatrice non ha nulla da
@@ -422,7 +433,7 @@ def _build_sv_xml_stems(stems: List[Tuple[str, str, int, float, float, List[Tupl
         # non mutati, cosi' vengono comunque mixati in playback.
         ET.SubElement(data, "model", {
             "id": wave_model_id, "name": os.path.basename(audio_path),
-            "sampleRate": str(sr), "start": "0", "end": str(end_frame),
+            "sampleRate": str(sr), "start": str(model_start_frame), "end": str(end_frame),
             "type": "wavefile", "file": audio_path,
             "mainModel": "true" if stream_index == 0 else "false",
         })
@@ -522,7 +533,7 @@ def stack_stems_to_sv(stack_yaml_path: str, audio_dir: str, out_path: str) -> st
             return None
         onset = float(stream.get("onset", 0) or 0)
         duration = float(stream.get("duration", doc.get("duration", 1.0)))
-        if onset > 0:
+        if onset > 0 and not _NATIVE_ONSET_OFFSET:
             # SV non sa offsettare un wavefile nel .sv: l'onset si cuoce come
             # silenzio iniziale in una copia (gli stem originali non si toccano).
             audio_path = _padded_stem(
