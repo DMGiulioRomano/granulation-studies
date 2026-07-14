@@ -66,3 +66,41 @@ def test_load_spec_invalid_stream_still_raises(tmp_path, monkeypatch):
     study = _write_study(tmp_path, monkeypatch, doc)
     with pytest.raises(ValueError):
         cli._load_spec(study)
+
+
+# --- cmd_stack con blocco versions ------------------------------------------
+
+VERSIONS_DOC = {
+    "study_id": "s_versions",
+    "seed": 7,
+    "duration": 10,
+    "samples_dir": "samples",
+    "base": {"onset": 0, "sample": "corpus.wav"},
+    "axes": {
+        # Nessun default per 'd' nel let: il documento e' completo SOLO dopo
+        # l'iniezione di versions — cmd_stack deve branchare prima del parse.
+        "density": {
+            "path": "density",
+            "baseline": 50,
+            "n": 4,
+            "base": {"expr": "env + d", "let": {"env": [[0, 40], [1, 60]]}},
+            "range": 0,
+        },
+    },
+    "stack": {},
+    "streams": {"fermo": {"axes": {"density": {"base": {"expr": "env"}}}}, "mobile": {}},
+    "versions": {"d": {"values": [1, 2]}},
+}
+
+
+def test_cmd_stack_versions_writes_concatenated_document(tmp_path, monkeypatch):
+    study = _write_study(tmp_path, monkeypatch, VERSIONS_DOC)
+    monkeypatch.setattr(cli, "gen_dir", lambda s: os.path.join(str(tmp_path), "generated", s))
+    assert cli.cmd_stack(study) == 0
+    out = os.path.join(str(tmp_path), "generated", study, "yaml", "stack", "stack.yml")
+    with open(out) as fh:
+        doc = yaml.safe_load(fh)
+    ids = [s["stream_id"] for s in doc["streams"]]
+    assert ids == ["fermo__d=1", "mobile__d=1", "fermo__d=2", "mobile__d=2"]
+    assert [s["onset"] for s in doc["streams"]] == [0, 0, 10, 10]
+    assert doc["duration"] == 20

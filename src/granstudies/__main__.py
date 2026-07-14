@@ -179,11 +179,29 @@ def _warn_orphans(variants_dir: str, written: set[str], scoped: bool) -> None:
 
 
 def cmd_stack(study: str) -> int:
-    from .render import write_stack
+    from .render import write_stack, write_versions_stack
 
     data = _load_data(study)
     if "stack" not in data:
         print(f"[stack] nessun blocco 'stack:' in {study}/study.yml — niente da fare.")
+        return 0
+    if "versions" in data:
+        # Il parse per-versione avviene DOPO l'iniezione delle variabili nei
+        # let: il documento grezzo puo' essere incompleto per costruzione
+        # (variabile senza default nel let), quindi niente _load_specs qui.
+        from .yaml_loc import load as load_with_locations
+
+        path = os.path.join(study_dir(study), "study.yml")
+        raw, locs = load_with_locations(path)
+        sid = raw.get("study_id") or study
+        _write_expanded_streams(study, raw)
+        out = os.path.join(gen_dir(study), "yaml")
+        target = os.path.join(out, "stack", "stack.yml")
+        before = os.path.getmtime(target) if os.path.exists(target) else None
+        written = write_versions_stack(raw, sid, out, locs=locs)
+        changed = before != os.path.getmtime(written[0])
+        stato = "aggiornato" if changed else "invariato"
+        print(f"[stack] documento versions ({stato}) -> {written[0]}")
         return 0
     specs = _load_specs(study)
     if not specs:
