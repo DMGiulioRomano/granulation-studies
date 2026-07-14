@@ -29,6 +29,23 @@ Una voce = un file yaml. Accordi e polimetrie nascono impilando più stream con 
 in rapporto tra loro (in banda audio → accordi, in sub-audio → polimetrie);
 l'orchestratore li riunisce in un unico yaml per l'engine.
 
+**stack**:
+L'unione verticale di più stream: un solo documento engine in cui le voci suonano
+insieme. È l'unità che il percorso dispone nel tempo.
+_Evita_: usare "stack" per una singola voce → quella è **stream**
+
+**percorso**:
+Il processo compositivo (issue #29): più istanze dello stack disposte nel tempo, dove
+di istanza in istanza i valori di axes e stack cambiano **insieme**, secondo un processo
+formale dichiarato — nessun prodotto cartesiano. È il gemello compositivo di `versions`,
+che resta lo strumento d'analisi (una variabile si muove, le altre ferme, per osservare).
+_Evita_: usare il percorso per generare varianti da confrontare → quello è `versions`
+
+**istanza**:
+Una singola apparizione dello stack dentro il percorso, con onset e durata propri e i
+valori che il processo le assegna. È un passo di un processo, non l'esito di una
+combinazione (quella è una *versione* di `versions`).
+
 ## Lo sweep nel tempo
 
 Termini che vivono sull'asse **tempo**: sono le leve dell'envelope nello sweep, non
