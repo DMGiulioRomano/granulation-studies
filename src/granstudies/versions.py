@@ -19,8 +19,10 @@ Chiavi assenti -> le versioni si concatenano sulle durate di versione (col
 solo ``duration:`` top-level e' il classico ``onset = k * duration``).
 Sovrapposizioni e buchi sono legittimi: il merge degli stem fa overlay-add.
 
-Il blocco richiede ``stack:`` (versions e' un modificatore del processo
-stack, l'output resta ``yaml/stack/stack.yml``); ``duration:`` top-level e' un
+Il blocco richiede ``stack:`` (le versioni sono repliche dello stack), ma e'
+un processo indipendente con output proprio (``yaml/versions/versions.yml``:
+``yaml/stack/stack.yml`` resta il materiale com'e' scritto, senza repliche —
+e' l'istanza di partenza del percorso); ``duration:`` top-level e' un
 default, serve solo quando nessun'altra fonte risolve durate e posizioni.
 Una variabile deve essere referenziata da almeno un'espressione del documento
 (guardia anti-refuso); il default dichiarato nel ``let`` (es. ``d: 0``) tiene
@@ -342,8 +344,8 @@ def generate_versions_document(
     ctx = ErrCtx(locs=locs)
     if "stack" not in data:
         raise ctx.err(
-            "versions: richiede il blocco 'stack:' (versions e' un "
-            "modificatore del processo stack).",
+            "versions: richiede il blocco 'stack:' (le versioni sono "
+            "repliche dello stack).",
             key=("versions",),
             hint="aggiungi 'stack: {}' (anche vuoto) al documento.",
         )

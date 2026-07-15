@@ -8,6 +8,10 @@ sweep: _require-study $(MARKER)
 stack: _require-study $(MARKER)
 	$(PY) -m granstudies stack $(STUDY)
 
+.PHONY: versions
+versions: _require-study $(MARKER)
+	$(PY) -m granstudies versions $(STUDY)
+
 .PHONY: describe
 describe: _require-study $(MARKER)
 	$(PY) -m granstudies describe $(STUDY)

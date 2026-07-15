@@ -498,12 +498,16 @@ soli**, restando riproducibili tra run.
 
 ## Il blocco `versions:`
 
-Il processo versions è un **modificatore dello stack**: parte solo se sono
-presenti sia `versions:` sia `stack:`, e l'output resta l'unico
-`yaml/stack/stack.yml`. Dove lo stack collassa gli stream in un documento,
-versions **replica quel collasso N volte nel tempo**: una replica per
-combinazione delle variabili. Di default le versioni si concatenano; con le
-chiavi riservate `onset`/`duration` si distanziano o sovrappongono liberamente.
+Il processo versions è un **processo indipendente** come sweep e stack:
+richiede il blocco `stack:` (le versioni sono repliche dello stack) ma ha
+sottocomando (`make versions`) e output propri, `yaml/versions/versions.yml`.
+`make stack` resta **puro**: produce il materiale com'è scritto in
+`yaml/stack/stack.yml`, ignorando il blocco `versions:` — è l'ascolto
+dell'istanza di partenza (vedi `percorso`, issue #29). Dove lo stack collassa
+gli stream in un documento, versions **replica quel collasso N volte nel
+tempo**: una replica per combinazione delle variabili. Di default le versioni
+si concatenano; con le chiavi riservate `onset`/`duration` si distanziano o
+sovrappongono liberamente.
 
 ```yaml
 versions:
@@ -568,15 +572,15 @@ versions:
   (il parser `.sv` ancora ogni wavefile al frame 0, nessun attributo di
   offset): per gli stream con `onset > 0` l'export genera quindi una **copia
   paddata** dello stem — `onset` secondi di silenzio prepesi — in
-  `audio/stack/padded/`, e ancora lì gli envelope. Gli stem originali non
+  `audio/versions/padded/`, e ancora lì gli envelope. Gli stem originali non
   vengono toccati; le copie si rigenerano solo se l'originale è più nuovo.
 - **Stem accorpati per voce logica.** In STEMS mode ogni combinazione produce
-  il proprio stem (`stack__fermo__d=1.aif`, `stack__fermo__d=2.aif`, ...): con
-  molte combinazioni il `.sv` per-stem avrebbe un pane per file. Dopo la pass
+  il proprio stem (`versions__fermo__d=1.aif`, `versions__fermo__d=2.aif`, ...):
+  con molte combinazioni il `.sv` per-stem avrebbe un pane per file. Dopo la pass
   STEMS il render fa quindi un **post-merge per nome-base** (lo `stream_id`
   prima del primo `__`): le versioni di una stessa voce logica vengono sommate
   al proprio onset (overlay-add con clip: regge anche versioni sovrapposte) in
-  un unico file `stack__{voce}.aif`, ancorato al tempo 0 dello stack. `stack_stems_to_sv`
+  un unico file `versions__{voce}.aif`, ancorato al tempo 0 del documento. `stack_stems_to_sv`
   consuma i file accorpati: **un pane per voce logica**, con gli envelope di
   ogni versione offsettati al proprio onset dentro il pane. Gli stem per
   combinazione restano su disco intatti; i file accorpati si rigenerano solo
@@ -716,29 +720,33 @@ auto-decorrelano col meccanismo esistente.
 ## Layout di `generated/`
 
 Primo livello = tipo di artefatto, secondo livello = **processo** (`sweep` /
-`stack`). Il nome della stream è incorporato nel basename dei file sweep (non
-solo nella sotto-cartella) per facilitare l'identificazione in Sonic
-Visualiser; il documento stack è uno solo (gli stream vi sono collassati).
+`stack` / `versions`). Il nome della stream è incorporato nel basename dei
+file sweep (non solo nella sotto-cartella) per facilitare l'identificazione
+in Sonic Visualiser; i documenti stack e versions sono uno per processo (gli
+stream vi sono collassati).
 
 ```
 generated/<study_id>/
   yaml/sweep/envelope/<stream_id>/e1__density.yml
   yaml/stack/stack.yml
+  yaml/versions/versions.yml     # solo per studi con blocco versions
   yaml/streams_expanded.yml      # solo per studi con spread: il dict streams espanso
   audio/sweep/envelope/<stream_id>/<stream_id>_e1__density.aif
   audio/stack/stack.aif
+  audio/versions/versions.aif
   sv/sweep/envelope/<stream_id>/<stream_id>_e1__density.sv
 ```
 
 `generated/` è rigenerabile: dopo un aggiornamento basta rilanciare
-`make sweep` / `make stack`.
+`make sweep` / `make stack` / `make versions`.
 
 ## Comandi Make
 
 ```bash
 make sweep  STUDY=<id>                    # genera tutte le stream
 make sweep  STUDY=<id> STREAM=nome        # genera solo quella stream
-make stack  STUDY=<id>                    # genera il documento multi-stream (stack)
+make stack  STUDY=<id>                    # genera il documento multi-stream (stack, puro)
+make versions STUDY=<id>                  # genera il documento delle versioni (prodotto cartesiano)
 make render STUDY=<id>                    # renderizza gli YAML cambiati (incrementale, in parallelo)
 make render STUDY=<id> FORCE=1            # rirenderizza tutto (es. dopo update engine o sample)
 make render STUDY=<id> JOBS=4             # limita i worker paralleli (default: min(8, cpu))

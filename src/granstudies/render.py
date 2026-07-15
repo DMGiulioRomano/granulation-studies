@@ -121,7 +121,7 @@ def write_stack(specs: List[StudySpec], out_dir: str, *, output_sr: int = 48000)
     return [path]
 
 
-def write_versions_stack(
+def write_versions(
     data: dict,
     study_id: str,
     out_dir: str,
@@ -129,19 +129,20 @@ def write_versions_stack(
     locs=None,
     output_sr: int = 48000,
 ) -> List[str]:
-    """Scrive il documento stack con le versioni concatenate (blocco ``versions:``).
+    """Scrive il documento delle versioni concatenate (blocco ``versions:``).
 
-    Stesso file del processo stack (``out_dir/stack/stack.yml``): versions e'
-    un modificatore dello stack, render e sv export non cambiano. Riceve il
-    documento *grezzo* (non gli spec): il parse per-versione avviene dopo
-    l'iniezione delle variabili negli scope let.
+    File proprio del processo (``out_dir/versions/versions.yml``): versions e'
+    un processo indipendente come sweep e stack — ``yaml/stack/stack.yml``
+    resta il materiale com'e' scritto, senza repliche. Riceve il documento
+    *grezzo* (non gli spec): il parse per-versione avviene dopo l'iniezione
+    delle variabili negli scope let.
     """
     from .versions import generate_versions_document
 
     doc = generate_versions_document(data, study_id, locs, output_sr=output_sr)
-    d = os.path.join(out_dir, "stack")
+    d = os.path.join(out_dir, "versions")
     os.makedirs(d, exist_ok=True)
-    path = os.path.join(d, "stack.yml")
+    path = os.path.join(d, "versions.yml")
     _dump(path, doc)
     return [path]
 
