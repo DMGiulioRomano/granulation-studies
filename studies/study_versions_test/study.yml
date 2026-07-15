@@ -26,7 +26,7 @@ base:
     envelope: hanning
   volume: -6
   pointer:
-    speed_ratio: 0
+    #speed_ratio: 0
     start: .3
 
 axes:
@@ -49,10 +49,10 @@ stack:
 
 
 versions:
-  f:  {ramp: {start: 30, stop: 50, step: 10}}
+  f:  {ramp: {start: 10, stop: 30, step: 5}}
   d: {ramp: {start: 0.1, stop: .5, step: 0.1}}
-  duration: {base: 3, range: 1}
-  onset: {ramp: {start: 0, stop: 100}}
+  #duration: {base: 3, range: 1}
+  #onset: {ramp: {start: 0, stop: 100}}
 
 streams:
   fermo:
