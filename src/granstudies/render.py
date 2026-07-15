@@ -147,6 +147,31 @@ def write_versions(
     return [path]
 
 
+def write_percorso(
+    data: dict,
+    study_id: str,
+    out_dir: str,
+    *,
+    locs=None,
+    output_sr: int = 48000,
+) -> List[str]:
+    """Scrive il documento delle istanze del percorso (blocco ``percorso:``).
+
+    File proprio del processo (``out_dir/percorso/percorso.yml``), quarto
+    accanto a sweep/stack/versions. Riceve il documento *grezzo* come
+    ``write_versions``: il parse per-istanza avviene dopo l'iniezione delle
+    traiettorie negli scope let.
+    """
+    from .percorso import generate_percorso_document
+
+    doc = generate_percorso_document(data, study_id, locs, output_sr=output_sr)
+    d = os.path.join(out_dir, "percorso")
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, "percorso.yml")
+    _dump(path, doc)
+    return [path]
+
+
 def write_variants(spec: StudySpec, out_dir: str, *, output_sr: int = 48000) -> List[str]:
     """Genera lo sweep e scrive i file YAML in sotto-cartelle per modalita'.
 

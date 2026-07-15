@@ -1,0 +1,62 @@
+# TEST PERCORSO — il coro cresce mentre la forma Y sfuma da formaA a formaB.
+#
+# Il caso bersaglio del design (issue #29): una sola manopola `w` che sale
+# 0 -> 1 lungo il percorso e pilota, nominata negli scope:
+#   - la forma Y (`mix(formaA, formaB, w)`: il morphing tra due forme);
+#   - `spread.n` (il coro cresce da 2 a 5 voci, padding stabile).
+# Strategy camminata: arco 60s, passo in accelerando 20 -> 10; duration
+# factor 1.2 = crossfade proporzionale. Il default `w: 0` nei let tiene lo
+# studio valido anche senza percorso: `make stack` suona l'istanza di
+# partenza. Per la strategy enumerata equivalente, commenta arco/passo e
+# scommenta onset.
+#
+#   make percorso STUDY=study_percorso_test
+#   make render STUDY=study_percorso_test
+
+study_id: study_percorso_test
+title: "Test percorso — coro che cresce, forma che sfuma"
+seed: 7
+duration: 2
+samples_dir: samples
+
+base:
+  onset: 0
+  sample: corpus.wav
+  time_mode: normalized
+  grain:
+    envelope: hanning
+  volume: -6
+  pointer:
+    speed_ratio: 0
+    start: .3
+
+axes:
+  interpolation: linear
+  density:
+    path: density
+    baseline: 50
+    n: 8
+    base:
+      expr: "mix(formaA, formaB, w)"
+      let:
+        formaA: [[0, 60], [.6, 20], [1, 10]]   # comportamento all'inizio
+        formaB: [[0, 20], [1, 20]]             # comportamento alla fine
+        w: 0                                   # senza percorso suona la partenza
+    range: 0
+
+stack: {}
+
+percorso:
+  arco: 60
+  passo: {base: [20, 10]}          # accelerando: IOI da 20s a 10s
+  duration: 1.2                    # factor: crossfade proporzionale costante
+  w: {base: [[0, 0], [1, 1]]}      # la manopola: 0 -> 1 sul percorso
+  # strategy enumerata equivalente (XOR con arco/passo):
+  # onset: {values: [0, 20, 36.7, 50.6]}
+
+streams:
+  coro:
+    spread:
+      n: {expr: "floor(2 + 3 * w)", let: {w: 0}}          # il coro cresce: 2 -> 5
+      over:
+        base.pointer.start: {ramp: {start: .1, stop: .5}}  # ventaglio: si ridistribuisce su n

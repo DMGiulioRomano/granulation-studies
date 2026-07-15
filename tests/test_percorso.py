@@ -9,7 +9,12 @@ cartesiano: i valori cambiano insieme, appaiati sul tempo.
 import pytest
 
 from granstudies.errors import SpecError
-from granstudies.percorso import build_timeline, parse_percorso, resolve_durations
+from granstudies.percorso import (
+    build_timeline,
+    generate_percorso_document,
+    parse_percorso,
+    resolve_durations,
+)
 
 
 # --- documento base condiviso dai test ---------------------------------------
@@ -485,3 +490,133 @@ def test_duration_not_positive_errors():
 def test_legato_non_monotone_onsets_errors():
     with pytest.raises(SpecError, match="duration"):
         _durations({"onset": {"values": [0, 20, 10]}, "w": 1})
+
+
+# --- documento generato (integrazione, stile test_versions) ----------------------
+
+def _pdoc(percorso, **over):
+    data = _study(percorso, **over)
+    return generate_percorso_document(data, "ptest", output_sr=None)
+
+
+def _by_id(doc):
+    return {s["stream_id"]: s for s in doc["streams"]}
+
+
+def _ys(doc, sid):
+    return [v for _, v in _by_id(doc)[sid]["density"]["points"]]
+
+
+def test_document_instances_and_naming():
+    doc = _pdoc({"onset": {"values": [0, 10, 25]}, "w": 1})
+    ids = [s["stream_id"] for s in doc["streams"]]
+    assert ids == ["fermo__k=1", "fermo__k=2", "fermo__k=3"]
+
+
+def test_document_k_padded_on_final_width():
+    doc = _pdoc({"arco": 100, "passo": 10, "w": 1})
+    ids = [s["stream_id"] for s in doc["streams"]]
+    assert len(ids) == 10
+    assert ids[0] == "fermo__k=01"
+    assert ids[-1] == "fermo__k=10"
+
+
+def test_document_onset_is_instance_plus_stream():
+    data = _study({"onset": {"values": [0, 10]}, "w": 1})
+    data["streams"]["mobile"] = {"base": {"onset": 2}}
+    doc = generate_percorso_document(data, "ptest", output_sr=None)
+    by_id = _by_id(doc)
+    assert by_id["fermo__k=1"]["onset"] == 0
+    assert by_id["mobile__k=1"]["onset"] == 2
+    assert by_id["fermo__k=2"]["onset"] == 10
+    assert by_id["mobile__k=2"]["onset"] == 12
+
+
+def test_document_duration_instance_default_stream_wins():
+    data = _study({"onset": {"values": [0, 10]},
+                   "duration": {"base": 8, "unit": "s"}, "w": 1})
+    data["streams"]["mobile"] = {"duration": 5}
+    doc = generate_percorso_document(data, "ptest", output_sr=None)
+    by_id = _by_id(doc)
+    assert by_id["fermo__k=1"]["duration"] == 8
+    assert by_id["mobile__k=1"]["duration"] == 5
+    # durata documento = max(onset + duration)
+    assert doc["duration"] == 18
+
+
+def test_document_injected_values_reach_envelopes():
+    # w sale 0 -> 1 sul percorso: l'istanza 2 (frac 1) suona env + 10
+    doc = _pdoc({"onset": {"values": [0, 10]},
+                 "w": {"base": [[0, 0], [1, 1]]}})
+    base = _ys(doc, "fermo__k=1")
+    assert _ys(doc, "fermo__k=2") == [pytest.approx(v + 10) for v in base]
+
+
+def test_document_seed_unchanged_across_instances():
+    # il gesto che ritorna: con variabili costanti ogni istanza ripete la
+    # stessa camminata/pescaggio (seed invariato se non toccato)
+    data = _study({"onset": {"values": [0, 10, 20]}, "w": 1})
+    data["axes"]["density"]["range"] = 5
+    doc = generate_percorso_document(data, "ptest", output_sr=None)
+    a = _ys(doc, "fermo__k=1")
+    assert _ys(doc, "fermo__k=2") == a
+    assert _ys(doc, "fermo__k=3") == a
+
+
+def _coro_study(percorso, patches=None):
+    data = _study(percorso)
+    data["streams"] = {
+        "coro": {"spread": {
+            "n": {"expr": "floor(2 + 8 * w)", "let": {"w": 0}},
+            "over": {"base.volume": {"expr": "0 - i"}},
+        }},
+    }
+    data["streams"].update(patches or {})
+    return data
+
+
+def test_document_spread_n_expr_per_instance_with_stable_padding():
+    # w: 0 -> 0.5 -> 1 => n: 2, 6, 10; padding sulla larghezza del massimo n
+    data = _coro_study({"onset": {"values": [0, 10, 20]},
+                        "w": {"base": [[0, 0], [1, 1]]}})
+    doc = generate_percorso_document(data, "ptest", output_sr=None)
+    ids = [s["stream_id"] for s in doc["streams"]]
+    k1 = [i for i in ids if i.endswith("__k=1")]
+    k3 = [i for i in ids if i.endswith("__k=3")]
+    assert k1 == ["coro_01__k=1", "coro_02__k=1"]
+    assert len(k3) == 10
+    assert k3[-1] == "coro_10__k=3"
+
+
+def test_document_spread_patch_applies_where_voice_exists():
+    # la patch di coro_09 tocca solo le istanze dove la voce esiste; puo'
+    # contenere expr con variabili del percorso (l'eccezione evolve)
+    data = _coro_study(
+        {"onset": {"values": [0, 10, 20]}, "w": {"base": [[0, 0], [1, 1]]}},
+        patches={
+            "coro_02": {"base": {"volume": {"expr": "0 - 20 * w", "let": {"w": 0}}}},
+            "coro_09": {"base": {"volume": -90}},
+        },
+    )
+    doc = generate_percorso_document(data, "ptest", output_sr=None)
+    by_id = _by_id(doc)
+    # coro_09 esiste solo nell'istanza 3 (n=10): niente stream orfani prima
+    assert "coro_09__k=1" not in by_id
+    assert "coro_09__k=2" not in by_id
+    assert by_id["coro_09__k=3"]["volume"] == -90
+    # la patch-expr di coro_02 evolve con w
+    assert by_id["coro_02__k=1"]["volume"] == 0
+    assert by_id["coro_02__k=3"]["volume"] == -20
+
+
+def test_document_spread_n_expr_below_one_errors():
+    data = _coro_study({"onset": {"values": [0, 10]},
+                        "w": {"base": [[0, -0.2], [1, 0]]}})
+    with pytest.raises(SpecError, match="inter"):
+        generate_percorso_document(data, "ptest", output_sr=None)
+
+
+def test_document_title_and_seed():
+    doc = _pdoc({"onset": {"values": [0, 10]}, "w": 1})
+    assert doc["title"] == "ptest :: stack :: percorso"
+    assert doc["seed"] == 7

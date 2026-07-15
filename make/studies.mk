@@ -12,6 +12,10 @@ stack: _require-study $(MARKER)
 versions: _require-study $(MARKER)
 	$(PY) -m granstudies versions $(STUDY)
 
+.PHONY: percorso
+percorso: _require-study $(MARKER)
+	$(PY) -m granstudies percorso $(STUDY)
+
 .PHONY: describe
 describe: _require-study $(MARKER)
 	$(PY) -m granstudies describe $(STUDY)

@@ -265,6 +265,8 @@ def resolve_streams(
     data: Dict[str, Any],
     study_id: str | None = None,
     locs: yaml_loc.Locations | None = None,
+    *,
+    spread_pad: Dict[str, int] | None = None,
 ) -> List["StudySpec"]:
     """Ritorna una lista di StudySpec, uno per stream.
 
@@ -274,6 +276,8 @@ def resolve_streams(
     scritto a mano, e' un override come gli altri. Con ``locs`` gli errori
     di parse portano file e riga; la rete di sicurezza sotto etichetta con
     lo stream anche i ``ValueError`` nudi non ancora migrati a ``SpecError``.
+    ``spread_pad`` (percorso-v1) stabilizza il padding dei nomi generati sul
+    massimo ``n`` lungo le istanze — vedi ``expand_spreads``.
     """
     sid = study_id or data.get("study_id") or "study"
     streams = data.get("streams")
@@ -291,7 +295,7 @@ def resolve_streams(
         )
     if not streams:
         return [parse_study_spec(data, sid, locs=locs)]
-    streams = expand_spreads(streams, locs)
+    streams = expand_spreads(streams, locs, pad_n=spread_pad)
     result = []
     for stream_id, override in streams.items():
         merged = _deep_merge(data, override or {})

@@ -136,3 +136,93 @@ def test_cmd_sv_exports_versions_document(tmp_path, monkeypatch):
     assert any(os.path.join("yaml", "versions", "versions.yml") in v for v in variants)
     outs = [c[2] for c in calls]
     assert any(os.path.join("sv", "versions", f"{study}_versions.sv") in o for o in outs)
+
+
+# --- cmd_percorso (percorso-v1, fase 4) -------------------------------------------
+
+DOC_WITH_PERCORSO = {
+    "study_id": "s_percorso",
+    "seed": 7,
+    "samples_dir": "samples",
+    "base": {"onset": 0, "sample": "corpus.wav"},
+    "axes": {
+        "density": {
+            "path": "density",
+            "baseline": 50,
+            "n": 4,
+            "base": {"expr": "env + w * 10", "let": {"env": [[0, 40], [1, 60]], "w": 0}},
+            "range": 0,
+        },
+    },
+    "stack": {},
+    "duration": 10,
+    "streams": {"fermo": {}, "mobile": {}},
+    "percorso": {"arco": 20, "passo": 10, "w": {"base": [[0, 0], [1, 1]]}},
+}
+
+
+def test_cmd_percorso_writes_document_in_own_dir(tmp_path, monkeypatch):
+    study = _write_study(tmp_path, monkeypatch, DOC_WITH_PERCORSO)
+    assert cli.cmd_percorso(study) == 0
+    out = os.path.join(str(tmp_path), "generated", study, "yaml", "percorso", "percorso.yml")
+    with open(out) as fh:
+        doc = yaml.safe_load(fh)
+    ids = [s["stream_id"] for s in doc["streams"]]
+    assert ids == ["fermo__k=1", "mobile__k=1", "fermo__k=2", "mobile__k=2"]
+    assert [s["onset"] for s in doc["streams"]] == [0, 0, 10, 10]
+    assert doc["duration"] == 20
+    # lo stack non viene scritto dal processo percorso
+    stack_out = os.path.join(str(tmp_path), "generated", study, "yaml", "stack", "stack.yml")
+    assert not os.path.exists(stack_out)
+
+
+def test_cmd_percorso_without_block_is_noop(tmp_path, monkeypatch):
+    doc = yaml.safe_load(yaml.safe_dump(DOC_WITH_PERCORSO))
+    doc["study_id"] = "s_nopercorso"
+    del doc["percorso"]
+    study = _write_study(tmp_path, monkeypatch, doc)
+    assert cli.cmd_percorso(study) == 0
+    out = os.path.join(str(tmp_path), "generated", study, "yaml", "percorso", "percorso.yml")
+    assert not os.path.exists(out)
+
+
+def test_cmd_stack_ignores_percorso_block(tmp_path, monkeypatch):
+    doc = yaml.safe_load(yaml.safe_dump(DOC_WITH_PERCORSO))
+    doc["study_id"] = "s_stack_puro"
+    study = _write_study(tmp_path, monkeypatch, doc)
+    assert cli.cmd_stack(study) == 0
+    out = os.path.join(str(tmp_path), "generated", study, "yaml", "stack", "stack.yml")
+    with open(out) as fh:
+        stack_doc = yaml.safe_load(fh)
+    assert [s["stream_id"] for s in stack_doc["streams"]] == ["fermo", "mobile"]
+
+
+def test_parser_has_percorso_subcommand():
+    args = cli.build_parser().parse_args(["percorso", "s_x"])
+    assert args.command == "percorso"
+    assert args.study == "s_x"
+
+
+def test_cmd_sv_exports_percorso_document(tmp_path, monkeypatch):
+    study = _write_study(tmp_path, monkeypatch, DOC_WITH_PERCORSO)
+    g = os.path.join(str(tmp_path), "generated", study)
+    for sub, name in (("stack", "stack"), ("percorso", "percorso")):
+        os.makedirs(os.path.join(g, "yaml", sub), exist_ok=True)
+        os.makedirs(os.path.join(g, "audio", sub), exist_ok=True)
+        with open(os.path.join(g, "yaml", sub, f"{name}.yml"), "w") as fh:
+            fh.write("streams: []\n")
+        with open(os.path.join(g, "audio", sub, f"{name}.aif"), "wb") as fh:
+            fh.write(b"")
+
+    calls = []
+    import granstudies.sv_export as sv_export
+    monkeypatch.setattr(sv_export, "stack_to_sv",
+                        lambda variant, audio, out, layout: calls.append(("doc", variant, out)))
+    monkeypatch.setattr(sv_export, "stack_stems_to_sv",
+                        lambda variant, audio_dir, out: False)
+
+    assert cli.cmd_sv(study, layout="multi") == 0
+    variants = [c[1] for c in calls]
+    assert any(os.path.join("yaml", "percorso", "percorso.yml") in v for v in variants)
+    outs = [c[2] for c in calls]
+    assert any(os.path.join("sv", "percorso", f"{study}_percorso.sv") in o for o in outs)

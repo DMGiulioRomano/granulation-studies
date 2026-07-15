@@ -633,3 +633,86 @@ def resolve_durations(
                 "onset.",
             )
     return durations
+
+
+# --- generazione del documento ---------------------------------------------------
+
+def generate_percorso_document(
+    data: Dict[str, Any],
+    study_id: str | None = None,
+    locs: Locations | None = None,
+    *,
+    output_sr: Optional[int] = 48000,
+) -> Dict[str, Any]:
+    """Il documento engine multi-stream con le istanze del percorso.
+
+    Ordine a due fasi: prima la timeline (onset e durate d'istanza), poi per
+    ogni istanza le traiettorie campionate al suo onset reale — in ordine
+    cronologico, cosi' una banda con ``drift`` deriva davvero di istanza in
+    istanza — e iniettate negli scope ``let`` dei nodi-expr che le nominano
+    (``inject_combo``, il meccanismo di ``versions``). Poi il parse di
+    sempre: ``resolve_streams`` + ``build_stack_stream``, con le strategy di
+    spread che si **rivalutano a ogni istanza** coi valori iniettati — e'
+    l'evoluzione-di-spread del design. Il seed resta invariato se non
+    toccato: la stessa camminata/pescaggio ritorna, trasformata dalle
+    variabili (il gesto che ritorna); il reseed e' un override come un altro.
+
+    La ``duration`` d'istanza entra come ``duration:`` del documento della
+    singola istanza prima del parse: fa da default, una duration per-stream
+    vince. Lo ``stream_id`` e' suffissato ``__k=NN`` (1-based, zero-padded
+    sulla larghezza del K finale: l'ordine alfabetico in SV e' quello
+    cronologico); l'onset per-stream resta relativo alla propria istanza
+    (``onset_finale = onset_istanza + onset_stream``). Il padding dei nomi di
+    spread e' stabilizzato sulla larghezza del massimo ``n`` lungo il
+    percorso (``spread_counts`` -> ``spread_pad``): la stessa voce logica ha
+    lo stesso nome ovunque esista, e il post-merge per nome-base la cuce nel
+    tempo. Durata documento = ``max(onset + duration)``.
+    """
+    from .stack import build_stack_stream
+    from .spread import spread_counts
+    from .study_spec import resolve_streams
+    from .versions import inject_combo
+    from .yaml_builder import build_multi_document
+
+    sid = study_id or data.get("study_id") or "study"
+    ctx = ErrCtx(locs=locs)
+    spec = parse_percorso(data, locs=locs)
+    timeline = build_timeline(spec, sid, locs=locs)
+    durations = resolve_durations(spec, timeline, sid, locs=locs)
+    samplers = {
+        name: make_sampler(name, traj, sid, ctx)
+        for name, traj in spec.variables.items()
+    }
+    combos = [
+        {name: round(sample(frac), 9) for name, sample in samplers.items()}
+        for frac in timeline.fracs()
+    ]
+    base_data = {k: v for k, v in data.items() if k != "percorso"}
+
+    # Prima passata: documenti iniettati e massimo n per entry-spread (il
+    # padding stabile richiede il conteggio di TUTTE le istanze prima di
+    # nominare la prima voce).
+    docs: List[Dict[str, Any]] = []
+    pad_n: Dict[str, int] = {}
+    for k, combo in enumerate(combos):
+        data_k = inject_combo(base_data, combo)
+        data_k["duration"] = durations[k]
+        docs.append(data_k)
+        for entry, n in spread_counts(data_k.get("streams") or {}, locs).items():
+            pad_n[entry] = max(pad_n.get(entry, 0), n)
+
+    width = len(str(len(docs)))
+    built: List[Dict[str, Any]] = []
+    for k, data_k in enumerate(docs):
+        label = f"k={k + 1:0{width}d}"
+        for s_spec in resolve_streams(data_k, sid, locs=locs, spread_pad=pad_n):
+            s = build_stack_stream(s_spec, output_sr=output_sr)
+            s["stream_id"] = f"{s['stream_id']}__{label}"
+            s["onset"] = (s.get("onset") or 0) + timeline.onsets[k]
+            built.append(s)
+    return build_multi_document(
+        built,
+        title=f"{sid} :: stack :: percorso",
+        seed=data.get("seed"),
+        duration=max(s["onset"] + s["duration"] for s in built),
+    )

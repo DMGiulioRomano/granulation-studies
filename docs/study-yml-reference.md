@@ -79,6 +79,15 @@ versions:
   onset: {values: [0, 10, 40]}    # chiave riservata (opzionale): posizioni assolute
   duration: {values: [8, 8, 20]}  # chiave riservata (opzionale): durate per versione
 
+# Processo percorso (attivo per presenza; richiede `stack:`): istanze di
+# spread distribuite sul tempo reale — i valori cambiano insieme, appaiati,
+# nessun prodotto cartesiano. Vedi la sezione "Il blocco percorso" sotto.
+percorso:
+  arco: 180                       # strategy camminata: estensione totale...
+  passo: {base: [30, 8]}          #   ...e legge dell'intervallo (XOR: `onset:` enumerato)
+  duration: 1.3                   # traiettoria riservata, unit factor (default) | s
+  w: {base: [0, 1], range: .1}    # traiettoria -> iniettata nei let che la nominano
+
 # Processo stack (attivo per presenza del blocco): tutti gli stream sommati in
 # UN documento multi-stream. Vedi la sezione "Il blocco stack" sotto.
 stack:
@@ -688,6 +697,47 @@ percorso:
   Con `unit: s` la durata è assoluta. Bordo: enumerata con `k = 1` e factor
   (anche implicito, il legato) è errore — non c'è intervallo di riferimento,
   serve `unit: s`.
+- **Iniezione e istanze**: per ogni istanza i valori campionati vengono
+  iniettati negli scope `let` dei nodi-expr che nominano la variabile (il
+  meccanismo di `versions`), poi il parse di sempre: le strategy di spread si
+  **rivalutano a ogni istanza** coi valori iniettati — l'istanza è lo spread
+  che evolve. Il default nel `let` (`w: 0`) tiene lo studio valido senza il
+  blocco: `axes:`/`stack:` come sono scritti *sono* l'istanza di partenza
+  (`make stack` la suona), il percorso aggiunge solo il "verso dove".
+  Nominare la stessa variabile in più registri (forma Y, respiro X,
+  `spread.n`) **accoppia** le evoluzioni; nominare diverso le decorrelava —
+  nessuna sintassi dedicata, emerge dall'iniezione.
+- **Seed invariato se non toccato**: ogni istanza eredita tutto via
+  deep-merge, quindi la stessa camminata/pescaggio ritorna, trasformata dalle
+  variabili — il gesto che ritorna. Il reseed è un override esplicito come
+  un altro.
+- **`spread.n` come nodo-expr**: `n: {expr: "floor(3 + 9 * w)", let: {w: 0}}`
+  — valutato per istanza, deve dare un intero >= 1 (arrotonda con
+  `floor`/`ceil`). Il coro cresce o decresce lungo il percorso. La scelta
+  ridistribuzione/accodamento emerge dalla forma del ramp in `over`:
+  `ramp {start, stop}` suddivide su `n` (il ventaglio si ridistribuisce),
+  `ramp {start, step}` è progressione indipendente da `n` (le voci esistenti
+  restano ferme, le nuove si accodano).
+- **Padding stabile**: con `n` dinamico lo zero-padding dei nomi generati è
+  fissato sulla **larghezza del massimo `n` lungo il percorso** — la stessa
+  voce logica ha lo stesso nome ovunque esista, e il post-merge per
+  nome-base la cuce nel tempo (le voci nate dopo hanno silenzio prima). La
+  **patch di spread** (`coro_05:`) si applica in ogni istanza in cui la voce
+  esiste — e può contenere nodi-expr che nominano variabili del percorso:
+  l'eccezione evolve. Nelle istanze in cui la voce non esiste la patch viene
+  consumata in silenzio. La patch di *istanza* ("il quinto passaggio fa
+  eccezione") non esiste (parcheggiata): la scappatoia è la strategy
+  enumerata con una traiettoria `{type: step}` su una finestra che contiene
+  solo l'istanza da trattare.
+- **Naming e output**: ogni stream di ogni istanza ha lo `stream_id`
+  suffissato **`nome__k=NN`** (indice d'istanza 1-based, zero-padded sulla
+  larghezza del K finale: in SV l'ordine alfabetico è quello cronologico).
+  L'onset per-stream resta relativo alla propria istanza
+  (`onset_finale = onset_istanza + onset_stream`); la `duration` d'istanza fa
+  da default del documento della singola istanza (una duration per-stream
+  vince). Durata documento = `max(onset + duration)`. Output:
+  `yaml/percorso/percorso.yml` via `make percorso`; il render generico e il
+  ramo sv lo raccolgono come gli altri processi.
 
 ## Il blocco `spread:` (stream generati)
 
@@ -816,25 +866,27 @@ auto-decorrelano col meccanismo esistente.
 ## Layout di `generated/`
 
 Primo livello = tipo di artefatto, secondo livello = **processo** (`sweep` /
-`stack` / `versions`). Il nome della stream è incorporato nel basename dei
-file sweep (non solo nella sotto-cartella) per facilitare l'identificazione
-in Sonic Visualiser; i documenti stack e versions sono uno per processo (gli
-stream vi sono collassati).
+`stack` / `versions` / `percorso`). Il nome della stream è incorporato nel
+basename dei file sweep (non solo nella sotto-cartella) per facilitare
+l'identificazione in Sonic Visualiser; i documenti stack, versions e percorso
+sono uno per processo (gli stream vi sono collassati).
 
 ```
 generated/<study_id>/
   yaml/sweep/envelope/<stream_id>/e1__density.yml
   yaml/stack/stack.yml
   yaml/versions/versions.yml     # solo per studi con blocco versions
+  yaml/percorso/percorso.yml     # solo per studi con blocco percorso
   yaml/streams_expanded.yml      # solo per studi con spread: il dict streams espanso
   audio/sweep/envelope/<stream_id>/<stream_id>_e1__density.aif
   audio/stack/stack.aif
   audio/versions/versions.aif
+  audio/percorso/percorso.aif
   sv/sweep/envelope/<stream_id>/<stream_id>_e1__density.sv
 ```
 
 `generated/` è rigenerabile: dopo un aggiornamento basta rilanciare
-`make sweep` / `make stack` / `make versions`.
+`make sweep` / `make stack` / `make versions` / `make percorso`.
 
 ## Comandi Make
 
@@ -843,6 +895,7 @@ make sweep  STUDY=<id>                    # genera tutte le stream
 make sweep  STUDY=<id> STREAM=nome        # genera solo quella stream
 make stack  STUDY=<id>                    # genera il documento multi-stream (stack, puro)
 make versions STUDY=<id>                  # genera il documento delle versioni (prodotto cartesiano)
+make percorso STUDY=<id>                  # genera il documento del percorso (orchestrazione temporale)
 make render STUDY=<id>                    # renderizza gli YAML cambiati (incrementale, in parallelo)
 make render STUDY=<id> FORCE=1            # rirenderizza tutto (es. dopo update engine o sample)
 make render STUDY=<id> JOBS=4             # limita i worker paralleli (default: min(8, cpu))

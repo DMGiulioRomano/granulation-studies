@@ -869,3 +869,117 @@ def test_expr_resolve_streams_end_to_end():
     (axis,) = by_id["v_2"].axes
     # banda collassata (range 0) sull'Env valutato: frac 0 -> 100, frac 1 -> 150
     assert axis.values == [100.0, 150.0]
+
+
+# --- n come nodo-expr (percorso-v1, fase 4) --------------------------------------
+
+def test_n_expr_node_evaluated():
+    entry = {
+        "spread": {
+            "n": {"expr": "1 + 2"},
+            "over": {"base.volume": {"expr": "0 - i", "let": {}}},
+        },
+    }
+    out = expand_spreads(_streams(v=entry))
+    assert list(out) == ["v_1", "v_2", "v_3"]
+
+
+def test_n_expr_with_let_default():
+    # il default nel let tiene lo studio valido senza percorso; l'iniezione
+    # lo ombreggia (floor(2 + 8 * w) con w=0 -> 2)
+    entry = {
+        "spread": {
+            "n": {"expr": "floor(2 + 8 * w)", "let": {"w": 0}},
+            "over": {"base.volume": {"expr": "0 - i"}},
+        },
+    }
+    out = expand_spreads(_streams(v=entry))
+    assert list(out) == ["v_1", "v_2"]
+
+
+def test_n_expr_non_integral_errors():
+    entry = {
+        "spread": {
+            "n": {"expr": "2.5"},
+            "over": {"base.volume": {"expr": "0 - i"}},
+        },
+    }
+    with pytest.raises(SpecError, match="inter"):
+        expand_spreads(_streams(v=entry))
+
+
+def test_n_expr_below_one_errors():
+    entry = {
+        "spread": {
+            "n": {"expr": "0"},
+            "over": {"base.volume": {"expr": "0 - i"}},
+        },
+    }
+    with pytest.raises(SpecError, match="inter"):
+        expand_spreads(_streams(v=entry))
+
+
+def test_n_expr_discordant_with_values_errors():
+    entry = {
+        "spread": {
+            "n": {"expr": "4"},
+            "over": {"base.volume": {"values": [-1, -2, -3]}},
+        },
+    }
+    with pytest.raises(SpecError, match="discord"):
+        expand_spreads(_streams(v=entry))
+
+
+# --- padding stabile con n dinamico (percorso-v1, fase 4) --------------------------
+
+def test_pad_n_stabilizes_name_width():
+    entry = {
+        "spread": {
+            "n": 3,
+            "over": {"base.volume": {"expr": "0 - i"}},
+        },
+    }
+    out = expand_spreads(_streams(coro=entry), pad_n={"coro": 12})
+    # larghezza del massimo n del percorso: la stessa voce logica ha lo
+    # stesso nome ovunque esista
+    assert list(out) == ["coro_01", "coro_02", "coro_03"]
+
+
+def test_pad_n_patch_within_range_applies():
+    entry = {
+        "spread": {
+            "n": 3,
+            "over": {"base.volume": {"expr": "0 - i"}},
+        },
+    }
+    streams = _streams(coro=entry, coro_02={"base": {"volume": -90}})
+    out = expand_spreads(streams, pad_n={"coro": 12})
+    assert out["coro_02"]["base"]["volume"] == -90
+
+
+def test_pad_n_patch_out_of_range_consumed_silently():
+    # la voce coro_09 non esiste in questa istanza (n=3, pad su 12): la patch
+    # non deve diventare uno stream ordinario
+    entry = {
+        "spread": {
+            "n": 3,
+            "over": {"base.volume": {"expr": "0 - i"}},
+        },
+    }
+    streams = _streams(coro=entry, coro_09={"base": {"volume": -90}})
+    out = expand_spreads(streams, pad_n={"coro": 12})
+    assert "coro_09" not in out
+    assert list(out) == ["coro_01", "coro_02", "coro_03"]
+
+
+def test_without_pad_n_out_of_range_entry_stays_ordinary():
+    # comportamento storico invariato fuori dal percorso
+    entry = {
+        "spread": {
+            "n": 3,
+            "over": {"base.volume": {"expr": "0 - i"}},
+        },
+    }
+    streams = _streams(v=entry, v_9={"base": {"volume": -90}})
+    out = expand_spreads(streams)
+    assert "v_9" in out

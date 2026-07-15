@@ -3,6 +3,7 @@
     granstudies sweep    STUDY      genera le varianti YAML (processo sweep)
     granstudies stack    STUDY      genera il documento multi-stream (processo stack)
     granstudies versions STUDY      genera il documento delle versioni (processo versions)
+    granstudies percorso STUDY      genera il documento del percorso (processo percorso)
     granstudies render   STUDY      renderizza audio + partitura
     granstudies describe STUDY      calcola descrittori, aggiorna results.yml
     granstudies matrix   STUDY      costruisce kinship.json
@@ -231,6 +232,33 @@ def cmd_versions(study: str) -> int:
     return 0
 
 
+def cmd_percorso(study: str) -> int:
+    from .render import write_percorso
+
+    # Attivazione per presenza, come gli altri processi: percorso e' il
+    # quarto, indipendente (composizione per orchestrazione temporale).
+    data = _load_data(study)
+    if "percorso" not in data:
+        print(f"[percorso] nessun blocco 'percorso:' in {study}/study.yml — niente da fare.")
+        return 0
+    # Come versions: il parse per-istanza avviene DOPO l'iniezione delle
+    # traiettorie nei let, quindi niente _load_specs sul documento grezzo.
+    from .yaml_loc import load as load_with_locations
+
+    path = os.path.join(study_dir(study), "study.yml")
+    raw, locs = load_with_locations(path)
+    sid = raw.get("study_id") or study
+    _write_expanded_streams(study, raw)
+    out = os.path.join(gen_dir(study), "yaml")
+    target = os.path.join(out, "percorso", "percorso.yml")
+    before = os.path.getmtime(target) if os.path.exists(target) else None
+    written = write_percorso(raw, sid, out, locs=locs)
+    changed = before != os.path.getmtime(written[0])
+    stato = "aggiornato" if changed else "invariato"
+    print(f"[percorso] documento percorso ({stato}) -> {written[0]}")
+    return 0
+
+
 def cmd_render(
     study: str, no_score: bool, force: bool = False, jobs: int | None = None,
     stem: bool = False, cache: bool = False, cache_dir: str | None = None,
@@ -240,10 +268,10 @@ def cmd_render(
     spec = _load_spec(study)
     g = gen_dir(study)
     # Il render e' generico: discende yaml/ ricorsivamente (sweep/, stack/,
-    # versions/) e rispecchia i sotto-path sotto audio/ e score/.
+    # versions/, percorso/) e rispecchia i sotto-path sotto audio/ e score/.
     variant_dir = os.path.join(g, "yaml")
     if not os.path.isdir(variant_dir):
-        print(f"[render] nessuno YAML: esegui prima 'sweep {study}', 'stack {study}' o 'versions {study}'.", file=sys.stderr)
+        print(f"[render] nessuno YAML: esegui prima 'sweep {study}', 'stack {study}', 'versions {study}' o 'percorso {study}'.", file=sys.stderr)
         return 1
     t0 = time.perf_counter()
     manifest = render_variants(
@@ -397,15 +425,16 @@ def cmd_sv(study: str, layout: str, markers: bool = True, stream: str | None = N
     g = gen_dir(study)
     total: list = []
 
-    # Processi multi-stream (stack, versions): un .sv per documento, contro il
-    # suo audio sommato. Attivi per presenza del blocco (come i rispettivi
-    # comandi); i flag marker/scope restano sul solo ramo sweep (i marker sono
-    # plateau-di-sweep).
+    # Processi multi-stream (stack, versions, percorso): un .sv per documento,
+    # contro il suo audio sommato. Attivi per presenza del blocco (come i
+    # rispettivi comandi); i flag marker/scope restano sul solo ramo sweep
+    # (i marker sono plateau-di-sweep).
     if stream is None:
-        for process in ("stack", "versions"):
+        processes = ("stack", "versions", "percorso")
+        for process in processes:
             if process in data:
                 _cmd_sv_document(study, g, layout, total, process)
-        if ("stack" in data or "versions" in data) and "sweep" not in data:
+        if any(p in data for p in processes) and "sweep" not in data:
             print(f"[sv] {len(total)} sessioni totali")
             return 0
 
@@ -476,6 +505,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     vp = sub.add_parser("versions", help="genera il documento delle versioni (prodotto cartesiano)")
     vp.add_argument("study")
+
+    pp = sub.add_parser("percorso", help="genera il documento del percorso (orchestrazione temporale)")
+    pp.add_argument("study")
 
     rp = sub.add_parser("render", help="renderizza audio + partitura")
     rp.add_argument("study")
@@ -556,6 +588,8 @@ def _dispatch(args) -> int:
         return cmd_stack(args.study)
     if args.command == "versions":
         return cmd_versions(args.study)
+    if args.command == "percorso":
+        return cmd_percorso(args.study)
     if args.command == "render":
         return cmd_render(args.study, args.no_score, args.force, args.jobs,
                           args.stem, args.cache, args.cache_dir)
