@@ -35,16 +35,25 @@ insieme. È l'unità che il percorso dispone nel tempo.
 _Evita_: usare "stack" per una singola voce → quella è **stream**
 
 **percorso**:
-Il processo compositivo (issue #29): più istanze dello stack disposte nel tempo, dove
-di istanza in istanza i valori di axes e stack cambiano **insieme**, secondo un processo
-formale dichiarato — nessun prodotto cartesiano. È il gemello compositivo di `versions`,
-che resta lo strumento d'analisi (una variabile si muove, le altre ferme, per osservare).
+Il quarto asse del sistema (issue #29): distribuisce **istanze di spread nel tempo**, come
+Y distribuisce valori nel tempo, la camminata-X i tempi, e spread i valori nella popolazione
+di stream. Dove spread genera una popolazione una volta, il percorso la fa evolvere lungo più
+istanze disposte sul tempo reale — i parametri cambiano **insieme**, appaiati, nessun prodotto
+cartesiano. È il gemello compositivo di `versions`, che resta lo strumento d'analisi (una
+variabile si muove, le altre ferme, per osservare). Sta a `versions` come `stack` sta a `sweep`.
 _Evita_: usare il percorso per generare varianti da confrontare → quello è `versions`
 
 **istanza**:
-Una singola apparizione dello stack dentro il percorso, con onset e durata propri e i
-valori che il processo le assegna. È un passo di un processo, non l'esito di una
-combinazione (quella è una *versione* di `versions`).
+Una singola apparizione della popolazione (lo spread valutato) dentro il percorso, con onset
+e durata propri e i valori che il processo le assegna. È un passo di un processo, non l'esito
+di una combinazione (quella è una *versione* di `versions`). La cardinalità della popolazione
+può cambiare da un'istanza all'altra; una voce logica è la stessa ovunque esista.
+
+**traiettoria**:
+La legge con cui una variabile del percorso cambia lungo il tempo reale del percorso. Si
+scrive col vocabolario dei generatori (`values`/`ramp`/banda/`expr`); una banda con `drift`
+è una traiettoria a deriva correlata (ogni istanza vicina alla precedente). Non è un envelope
+dentro uno stream: vive sull'asse delle istanze, non dentro il tempo di una voce.
 
 ## Lo sweep nel tempo
 
