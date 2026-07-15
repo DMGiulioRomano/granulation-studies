@@ -51,9 +51,26 @@ può cambiare da un'istanza all'altra; una voce logica è la stessa ovunque esis
 
 **traiettoria**:
 La legge con cui una variabile del percorso cambia lungo il tempo reale del percorso. Si
-scrive col vocabolario dei generatori (`values`/`ramp`/banda/`expr`); una banda con `drift`
-è una traiettoria a deriva correlata (ogni istanza vicina alla precedente). Non è un envelope
-dentro uno stream: vive sull'asse delle istanze, non dentro il tempo di una voce.
+scrive come la `base` di un axis (Env/banda: `base` più `range`/`drift` opzionali, oppure
+`expr`; uno scalare nudo è la costante); una banda con `drift` è una traiettoria a deriva
+correlata (ogni istanza vicina alla precedente). Non è un envelope dentro uno stream: vive
+sul tempo del percorso, normalizzato 0→1 sulla sua estensione (l'arco nella camminata,
+l'ultimo onset nella forma enumerata), non dentro il tempo di una voce.
+_Evita_: scriverla con `values`/`ramp` → sono generatori di sequenze, appartengono ai
+contesti indicizzati (`onset` enumerato, `spread`, `versions`)
+
+**arco**:
+L'estensione temporale totale del percorso nella strategy a camminata. È il tempo che la
+camminata degli onset consuma: si genera un'istanza dopo l'altra finché l'onset resta dentro
+l'arco (l'ultima può sforarlo con la propria durata). Il numero di istanze non si dichiara:
+emerge dall'arco e dal passo.
+_Evita_: confonderlo con la durata di un'istanza o di uno stream → quella è `duration`
+
+**passo**:
+La legge dell'intervallo tra un'istanza e la successiva nella strategy a camminata:
+`onset_prossimo = onset + passo(onset)`, una traiettoria campionata all'onset corrente.
+Costante = istanze equispaziate; in rampa = accelerando o rallentando; banda con `drift` =
+respiro irregolare ma correlato. È la camminata-X trasposta sull'asse delle istanze.
 
 ## Lo sweep nel tempo
 
