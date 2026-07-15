@@ -1,0 +1,399 @@
+"""Processo ``percorso``: istanze di spread distribuite sul tempo reale.
+
+Il quarto asse del sistema (issue #29), gemello compositivo di ``versions``:
+dove ``versions`` genera il prodotto cartesiano delle combinazioni (analisi,
+una variabile si muove e le altre stanno ferme), ``percorso`` dispone K
+*istanze* dello stack su una timeline e fa cambiare i valori **insieme**,
+appaiati sul tempo — nessun prodotto cartesiano. Sta a ``versions`` come
+``stack`` sta a ``sweep``.
+
+La timeline ha due strategy mutuamente esclusive:
+
+- **enumerata** (``onset:``): gli onset li dichiari tu, sull'indice, col
+  vocabolario di sequenza (``values`` / ``ramp`` / banda). Il conteggio ``k``
+  lo possiede ``onset`` (lunghezza di ``values``, griglia del ramp con
+  ``step``, ``n`` della banda); ``k:`` esplicito e' ammesso come cross-check
+  e obbligatorio solo quando ``onset`` non possiede un conteggio.
+- **camminata** (``arco:`` + ``passo:``): ``arco`` e' l'estensione totale,
+  ``passo`` la legge dell'intervallo — ``t_next = t + passo(t)``, campionato
+  all'onset corrente, finche' ``t < arco``. ``k`` emerge, non si dichiara.
+  La camminata-X trasposta sull'asse delle istanze.
+
+Le altre chiavi del blocco sono **traiettorie**: la legge con cui una
+variabile cambia lungo il tempo reale del percorso. Si scrivono come la
+``base`` di un axis — banda (``base`` + ``range``/``drift``/``distribution``/
+``seed``) o nodo-expr; uno scalare nudo e' la costante. MAI ``values``/
+``ramp``: sono generatori di sequenze, appartengono ai contesti indicizzati.
+Il tempo dei breakpoint e' normalizzato 0 -> 1 sull'estensione del percorso
+(l'``arco`` in camminata, l'ultimo onset in enumerata). I valori campionati
+all'onset reale di ogni istanza vengono iniettati negli scope ``let`` dei
+nodi-expr che li nominano, come fa ``versions``.
+
+``duration`` e' una traiettoria riservata con ``unit: factor`` (default) |
+``s``: col factor ``duration_k = factor(t_k) * intervallo verso la prossima
+istanza`` (1 = legato, > 1 sovrapposizione, < 1 buchi); assente = legato.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
+
+from .errors import ErrCtx
+from .expr import parse_expr_node
+from .value_generators import Y_GENERATOR_KEYS
+from .versions import _referenced_names
+from .yaml_loc import Locations
+
+# Nomi che il sistema fornisce gia' agli scope expr (``i``/``n`` dello spread,
+# le costanti): una traiettoria con questi nomi sarebbe ambigua.
+_RESERVED_NAMES = frozenset({"i", "n", "pi", "e"})
+
+# Chiavi riservate del blocco ``percorso:``: la timeline (le due strategy) e
+# la duration d'istanza. Non sono variabili di scope.
+_TIMELINE_KEYS = frozenset({"k", "onset", "arco", "passo", "duration"})
+
+# Chiavi ammesse in una traiettoria-banda: la banda di sempre, senza ``n``
+# (le traiettorie non possiedono mai il conteggio: sono leggi sul tempo).
+_BAND_KEYS = frozenset({"base", "range", "seed", "distribution", "drift"})
+
+# Unit ammesse per la traiettoria ``duration``.
+_DURATION_UNITS = ("factor", "s")
+
+
+@dataclass
+class Trajectory:
+    """Una traiettoria del percorso, validata ma non ancora campionata.
+
+    ``kind``: ``const`` (params = lo scalare) | ``band`` (params = dict della
+    banda) | ``expr`` (params = ``(testo, let)``).
+    """
+
+    kind: str
+    params: Any
+
+
+@dataclass
+class PercorsoSpec:
+    """Il blocco ``percorso:`` validato.
+
+    ``k`` e' il conteggio effettivo nella strategy enumerata (posseduto da
+    ``onset``, cross-check con ``k:`` esplicito); ``None`` in camminata, dove
+    il conteggio emerge da ``arco``/``passo`` alla costruzione della timeline.
+    """
+
+    strategy: str                                  # "enumerata" | "camminata"
+    k: Optional[int] = None
+    onset: Optional[Dict[str, Any]] = None         # cfg del generatore (enumerata)
+    arco: Optional[float] = None                   # estensione totale (camminata)
+    passo: Optional[Trajectory] = None             # legge dell'intervallo (camminata)
+    duration: Optional[Trajectory] = None          # None = legato
+    duration_unit: str = "factor"
+    variables: Dict[str, Trajectory] = field(default_factory=dict)
+
+
+def _is_scalar(v: Any) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _trajectory(name: str, cfg: Any, ctx: ErrCtx) -> Trajectory:
+    """Valida e classifica una traiettoria (grammatica-Env).
+
+    Scalare nudo = costante; dict con ``base`` = banda; dict con ``expr`` =
+    nodo-expr. ``values``/``ramp`` sono errore con l'hint sui contesti
+    indicizzati: una traiettoria e' una legge sul tempo, non una sequenza.
+    """
+    key = ("percorso", name)
+    if _is_scalar(cfg):
+        return Trajectory("const", cfg)
+    if not isinstance(cfg, dict):
+        raise ctx.err(
+            f"percorso: '{name}' non e' una traiettoria — serve uno scalare "
+            f"(costante), una banda ('base') o un nodo-expr (trovato {cfg!r}).",
+            key=key,
+            hint="una traiettoria si scrive come la 'base' di un axis: es. "
+            "'{base: [0, 1], range: .1}' oppure '{expr: \"...\", let: {...}}'.",
+        )
+    if "values" in cfg or "ramp" in cfg:
+        marker = "values" if "values" in cfg else "ramp"
+        raise ctx.err(
+            f"percorso: '{name}' usa '{marker}' — le traiettorie non si "
+            "scrivono con generatori di sequenze.",
+            key=key,
+            hint="'values'/'ramp' appartengono ai contesti indicizzati "
+            "('onset' enumerato, 'spread', 'versions'); una traiettoria e' "
+            "una legge sul tempo: banda ('base') o nodo-expr.",
+        )
+    if "expr" in cfg:
+        markers = sorted(Y_GENERATOR_KEYS & set(cfg))
+        if markers:
+            raise ctx.err(
+                f"percorso: '{name}' mescola 'expr' con {markers} — "
+                "esattamente una forma per traiettoria.",
+                key=key,
+            )
+        with ctx.wrapping(key=key):
+            text, let = parse_expr_node(cfg)
+        return Trajectory("expr", (text, let))
+    if "base" in cfg:
+        if "n" in cfg:
+            raise ctx.err(
+                f"percorso: '{name}' dichiara 'n' — le traiettorie non "
+                "possiedono mai il conteggio: sono leggi sul tempo, le "
+                "campioni in 3 o 300 istanze e sono le stesse.",
+                key=key,
+                hint="il conteggio lo possiede la timeline ('onset' o "
+                "'arco'/'passo').",
+            )
+        extra = set(cfg) - _BAND_KEYS
+        if extra:
+            raise ctx.err(
+                f"percorso: '{name}', chiavi non ammesse {sorted(extra)} "
+                f"(solo {sorted(_BAND_KEYS)}).",
+                key=key,
+            )
+        return Trajectory("band", dict(cfg))
+    raise ctx.err(
+        f"percorso: '{name}' non e' una traiettoria riconoscibile "
+        f"(chiavi {sorted(cfg)}).",
+        key=key,
+        hint="scalare nudo = costante; banda = 'base' con "
+        "'range'/'drift'/'distribution'/'seed' opzionali; nodo-expr = "
+        "'{expr, let}'.",
+    )
+
+
+def _duration_trajectory(
+    cfg: Any, ctx: ErrCtx
+) -> Tuple[Optional[Trajectory], str]:
+    """``(traiettoria, unit)`` della chiave riservata ``duration``.
+
+    ``unit`` viaggia accanto alla forma (``{base: ..., unit: s}``) e si
+    stacca prima del parse della traiettoria; ``factor`` e' il default —
+    il duty un asse piu' in alto.
+    """
+    if cfg is None:
+        return None, "factor"
+    unit = "factor"
+    if isinstance(cfg, dict) and "unit" in cfg:
+        unit = cfg["unit"]
+        if unit not in _DURATION_UNITS:
+            raise ctx.err(
+                f"percorso: duration, unit '{unit}' non ammessa "
+                f"({' | '.join(_DURATION_UNITS)}).",
+                key=("percorso", "duration"),
+                hint="'factor' moltiplica l'intervallo verso la prossima "
+                "istanza (1 = legato); 's' e' assoluta in secondi.",
+            )
+        cfg = {k: v for k, v in cfg.items() if k != "unit"}
+    return _trajectory("duration", cfg, ctx), unit
+
+
+def _onset_seed(sid: str) -> int:
+    """Seed derivato del generatore di ``onset`` (banda senza ``seed``,
+    nodi-generatore annidati): unico per parse e timeline, cosi' il conteggio
+    e la generazione non possono divergere."""
+    from .value_generators import stable_seed
+
+    return stable_seed(f"{sid}:percorso:onset")
+
+
+def _owned_k(onset: Dict[str, Any], sid: str, ctx: ErrCtx) -> Optional[int]:
+    """Il conteggio posseduto dal generatore di ``onset``, se lo possiede.
+
+    ``values`` possiede la propria lunghezza; ``ramp`` con ``step`` la sua
+    griglia; la banda solo con ``n`` proprio. ``ramp {start, stop}`` senza
+    ``step`` e la banda senza ``n`` lasciano il conteggio a ``k:``.
+    """
+    key = ("percorso", "onset")
+    if not isinstance(onset, dict):
+        raise ctx.err(
+            f"percorso: 'onset' deve avere un generatore (dict), trovato "
+            f"{onset!r}.",
+            key=key,
+            hint="dichiara 'values', 'ramp' o una banda ('base'/'range').",
+        )
+    if "values" in onset:
+        return len(onset["values"])
+    if "ramp" in onset:
+        params = onset["ramp"]
+        if not isinstance(params, dict) or "start" not in params or "stop" not in params:
+            raise ctx.err(
+                "percorso: onset, la rampa richiede 'start' e 'stop'.",
+                key=key,
+            )
+        if "step" not in params:
+            return None
+        from .value_generators import expand_params, ramp
+
+        with ctx.wrapping(key=key):
+            return len(
+                ramp(**expand_params(dict(params), seed=_onset_seed(sid)))
+            )
+    if "base" in onset:
+        n = onset.get("n")
+        if n is None:
+            return None
+        return n
+    raise ctx.err(
+        "percorso: 'onset' senza generatore riconoscibile "
+        f"(chiavi {sorted(onset) if isinstance(onset, dict) else onset!r}).",
+        key=key,
+        hint="dichiara 'values' (tempi assoluti), 'ramp' o una banda "
+        "('base'/'range').",
+    )
+
+
+def _resolve_k(raw: Dict[str, Any], sid: str, ctx: ErrCtx) -> int:
+    """``k`` effettivo della strategy enumerata: esplicito e posseduto coincidono."""
+    counts: Dict[str, Any] = {}
+    if "k" in raw:
+        counts["k"] = raw["k"]
+    owned = _owned_k(raw["onset"], sid, ctx)
+    if owned is not None:
+        counts["onset"] = owned
+    if not counts:
+        raise ctx.err(
+            "percorso: 'k' non derivabile — 'onset' non possiede il "
+            "conteggio.",
+            key=("percorso",),
+            hint="dichiara 'k:' accanto a 'onset', oppure un generatore che "
+            "possiede il conteggio ('values', 'ramp' con 'step', banda con "
+            "'n').",
+        )
+    values = set(counts.values())
+    if len(values) != 1:
+        dettaglio = ", ".join(f"{k}={v}" for k, v in counts.items())
+        raise ctx.err(
+            f"percorso: conteggi discordi ({dettaglio}) — 'k' e 'onset' "
+            "devono coincidere (il conteggio lo possiede 'onset', 'k:' e' "
+            "un cross-check).",
+            key=("percorso", "k"),
+        )
+    (k,) = values
+    if not isinstance(k, int) or isinstance(k, bool) or k < 1:
+        raise ctx.err(
+            f"percorso: 'k' deve essere un intero >= 1 (ricevuto {k!r}).",
+            key=("percorso", "k"),
+        )
+    return k
+
+
+def parse_percorso(
+    data: Dict[str, Any], locs: Locations | None = None
+) -> PercorsoSpec:
+    """Valida il blocco ``percorso:`` e classifica timeline e traiettorie.
+
+    Richiede ``stack:`` (le istanze sono la popolazione dello stack disposta
+    nel tempo); ``versions:`` puo' coesistere nel documento — sono processi
+    indipendenti, li esercita il target. Ogni variabile deve essere
+    referenziata da almeno un'espressione del documento (guardia anti-refuso,
+    come ``versions``).
+    """
+    ctx = ErrCtx(locs=locs)
+    sid = data.get("study_id") or "study"
+    raw = data.get("percorso")
+    if not isinstance(raw, dict) or not raw:
+        raise ctx.err(
+            "percorso: serve un dict non vuoto con una strategy di timeline "
+            "e le traiettorie.",
+            key=("percorso",),
+            hint="es. 'percorso: {arco: 180, passo: 22.5, w: {base: [0, 1]}}'.",
+        )
+    if "stack" not in data:
+        raise ctx.err(
+            "percorso: richiede il blocco 'stack:' (le istanze sono la "
+            "popolazione dello stack disposta nel tempo).",
+            key=("percorso",),
+            hint="aggiungi 'stack: {}' (anche vuoto) al documento.",
+        )
+    has_onset = "onset" in raw
+    has_walk = "arco" in raw or "passo" in raw
+    if has_onset and has_walk:
+        raise ctx.err(
+            "percorso: 'onset' insieme ad 'arco'/'passo' — le due strategy "
+            "di timeline sono mutuamente esclusive.",
+            key=("percorso",),
+            hint="strategy enumerata: 'onset:' (piu' 'k:' quando serve); "
+            "strategy camminata: 'arco:' + 'passo:'. Scegline una.",
+        )
+    if not has_onset and not has_walk:
+        raise ctx.err(
+            "percorso: manca la strategy di timeline — 'k:' da solo non "
+            "esiste (le traiettorie non possiedono il conteggio).",
+            key=("percorso",),
+            hint="strategy enumerata: 'onset:' dichiara i tempi sull'indice "
+            "('values'/'ramp'/banda); strategy camminata: 'arco:' + 'passo:' "
+            "(l'equispaziato e' un passo costante: 'arco: 180, passo: 22.5').",
+        )
+
+    if has_onset:
+        spec = PercorsoSpec(
+            strategy="enumerata",
+            k=_resolve_k(raw, sid, ctx),
+            onset=dict(raw["onset"]) if isinstance(raw["onset"], dict) else raw["onset"],
+        )
+    else:
+        if "k" in raw:
+            raise ctx.err(
+                "percorso: 'k' non si dichiara nella strategy camminata — "
+                "il conteggio emerge da 'arco' e 'passo'.",
+                key=("percorso", "k"),
+                hint="togli 'k:'; per un conteggio dichiarato usa la "
+                "strategy enumerata ('onset:').",
+            )
+        if "arco" not in raw:
+            raise ctx.err(
+                "percorso: 'passo' senza 'arco' — la camminata li richiede "
+                "insieme.",
+                key=("percorso",),
+                hint="'arco' e' l'estensione totale del percorso in secondi.",
+            )
+        if "passo" not in raw:
+            raise ctx.err(
+                "percorso: 'arco' senza 'passo' — la camminata li richiede "
+                "insieme.",
+                key=("percorso",),
+                hint="'passo' e' la legge dell'intervallo tra un'istanza e "
+                "la prossima (scalare, banda o nodo-expr).",
+            )
+        arco = raw["arco"]
+        if not _is_scalar(arco) or arco <= 0:
+            raise ctx.err(
+                f"percorso: 'arco' deve essere uno scalare > 0 (ricevuto "
+                f"{arco!r}) — e' l'estensione totale, non una traiettoria.",
+                key=("percorso", "arco"),
+            )
+        spec = PercorsoSpec(
+            strategy="camminata",
+            arco=float(arco),
+            passo=_trajectory("passo", raw["passo"], ctx),
+        )
+
+    spec.duration, spec.duration_unit = _duration_trajectory(
+        raw.get("duration"), ctx
+    )
+
+    referenced = _referenced_names(
+        {k: v for k, v in data.items() if k != "percorso"}
+    )
+    for name, cfg in raw.items():
+        if name in _TIMELINE_KEYS:
+            continue
+        if name in _RESERVED_NAMES:
+            raise ctx.err(
+                f"percorso: '{name}' e' un nome riservato degli scope expr "
+                f"({', '.join(sorted(_RESERVED_NAMES))}).",
+                key=("percorso", name),
+                hint="scegli un altro nome per la traiettoria.",
+            )
+        traj = _trajectory(name, cfg, ctx)
+        if name not in referenced:
+            raise ctx.err(
+                f"percorso: la traiettoria '{name}' non e' referenziata da "
+                "nessuna espressione del documento.",
+                key=("percorso", name),
+                hint=f"usala in un nodo-expr (es. \"expr: 'env + {name}'\") "
+                "oppure toglila dal blocco.",
+            )
+        spec.variables[name] = traj
+    return spec

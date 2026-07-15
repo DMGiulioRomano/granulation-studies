@@ -610,6 +610,62 @@ l'inviluppo si scrive una volta nel default di `axes:` (`expr: "env + d"`,
 (il `let` si eredita via deep-merge), e `versions: {d: {values: [1, 2, 3]}}`
 genera le tre coppie concatenate.
 
+## Il blocco `percorso:`
+
+Il quarto asse del sistema (issue #29), **gemello compositivo** di `versions`:
+dove `versions` genera il prodotto cartesiano delle combinazioni (analisi —
+una variabile si muove, le altre ferme, per osservare), `percorso` dispone K
+**istanze** dello stack su una timeline e fa cambiare i valori **insieme**,
+appaiati sul tempo reale — nessun prodotto cartesiano. Sta a `versions` come
+`stack` sta a `sweep`. Processo indipendente, attivo per presenza: richiede
+`stack:`, può coesistere con `versions:` (li esercitano target diversi), e
+`make stack` resta l'ascolto dell'istanza di partenza.
+
+```yaml
+percorso:
+  arco: 180                                        # camminata: estensione totale
+  passo: {base: [30, 8]}                           # accelerando: IOI da 30s a 8s
+  duration: 1.3                                    # factor: crossfade costante
+  w: {base: [0, 1], range: .1, drift: {step: .2}}  # la manopola: sale 0→1 con deriva
+```
+
+- **Due strategy di timeline, mutuamente esclusive** (dichiararle insieme è
+  errore; `k:` da solo non esiste):
+  - **enumerata — `onset:`**: gli onset li dichiari tu, sull'indice, col
+    vocabolario di sequenza (`values` = tempi assoluti uno per istanza,
+    `ramp`, banda). Il conteggio `k` lo **possiede `onset`** (lunghezza di
+    `values`, griglia del ramp con `step`, `n` della banda); `k:` esplicito è
+    ammesso come cross-check (discordanza = errore) ed è obbligatorio solo
+    quando `onset` non possiede un conteggio (`ramp {start, stop}` senza
+    `step`, banda senza `n`).
+  - **camminata — `arco:` + `passo:`** (obbligatori insieme): `arco` è
+    l'estensione totale (scalare > 0), `passo` la legge dell'intervallo —
+    `t_next = t + passo(t)`, con `passo` traiettoria campionata all'onset
+    corrente, finché `t < arco`. **`k` emerge**, non si dichiara (dichiararlo
+    è errore). L'equispaziato si scrive con passo costante
+    (`arco: 180, passo: 22.5` → 8 istanze). È la camminata-X trasposta
+    sull'asse delle istanze.
+- **Le altre chiavi sono traiettorie**: la legge con cui una variabile cambia
+  lungo il tempo reale del percorso. Si scrivono in **grammatica-Env**, come
+  la `base` di un axis: banda (`base` + `range`/`drift`/`distribution`/`seed`
+  opzionali), nodo-expr (`{expr, let}`), o scalare nudo = costante. **Mai
+  `values`/`ramp`**: sono generatori di sequenze e appartengono ai contesti
+  indicizzati (`onset` enumerato, `spread`, `versions`) — usarli in una
+  traiettoria è errore con hint. Una banda con `n` è errore: le traiettorie
+  non possiedono mai il conteggio (sono leggi sul tempo: le campioni in 3 o
+  300 istanze e sono le stesse). Una banda con `drift` è una traiettoria a
+  **deriva correlata**: ogni istanza vicina alla precedente, il passo
+  dell'ubriaco sull'asse delle istanze.
+- **Nomi riservati**: `k`, `onset`, `arco`, `passo`, `duration` sono chiavi
+  del blocco (mai variabili); `i`, `n`, `pi`, `e` sono riservati agli scope
+  expr e vengono rifiutati come nomi di traiettoria. Una traiettoria che
+  nessuna espressione del documento referenzia è errore (guardia
+  anti-refuso, come `versions`).
+- **`duration`** è una traiettoria riservata con **`unit: factor` (default) |
+  `s`**, dichiarata accanto alla forma (`duration: {base: [30, 8], unit: s}`;
+  lo scalare nudo è un factor costante). Assente = **legato**. Semantica
+  completa nella sezione timeline.
+
 ## Il blocco `spread:` (stream generati)
 
 `spread` è il terzo asse del sistema, quello della **macro-forma**: Y
