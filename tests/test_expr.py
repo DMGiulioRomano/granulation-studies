@@ -304,3 +304,175 @@ def test_parse_expr_node_generator_in_let_raises():
     node = {"expr": "v * 2", "let": {"v": {"ramp": {"start": 0, "step": 1}}}}
     with pytest.raises(ValueError, match="statiche"):
         parse_expr_node(node)
+
+
+# --- mix(A, B, w): il morphing tra due forme (unica porta Env⊙Env) -------------
+
+def _at(env, t):
+    """Campiona una forma statica di Env al tempo ``t`` (per i bound test)."""
+    from granstudies.value_generators import _threshold_at
+
+    return _threshold_at(env, t)
+
+
+def test_mix_scalar_lerp():
+    assert eval_expr("mix(3, 8, 0.5)", {}) == 5.5
+
+
+def test_mix_scalar_endpoints():
+    assert eval_expr("mix(3, 8, 0)", {}) == 3
+    assert eval_expr("mix(3, 8, 1)", {}) == 8
+
+
+def test_mix_no_clamp_extrapolates():
+    assert eval_expr("mix(0, 10, 1.5)", {}) == 15
+    assert eval_expr("mix(0, 10, -0.5)", {}) == -5
+
+
+def test_mix_linear_linear_union_exact():
+    a = [[0, 10], [0.6, 2], [1, 0.1]]
+    b = [[0, 2], [1, 2]]
+    out = eval_expr("mix(a, b, 0.5)", {"a": a, "b": b})
+    # breakpoint sull'unione dei tempi, lerp esatto in ognuno
+    assert out == [[0, 6], [0.6, 2], [1, 1.05]]
+
+
+def test_mix_linear_exact_everywhere():
+    # il fast-path emette la forma piecewise-linear vera: esatta in ogni punto,
+    # non solo sui breakpoint
+    a = [[0, 0], [1, 10]]
+    b = [[0, 10], [0.5, 0], [1, 10]]
+    out = eval_expr("mix(a, b, 0.25)", {"a": a, "b": b})
+    assert out == [[0, 2.5], [0.5, 3.75], [1, 10]]
+
+
+def test_mix_broadcast_scalar_to_env():
+    # lo scalare diventa Env costante: il risultato vive sui tempi dell'Env
+    a = [[0, 0], [1, 10]]
+    assert eval_expr("mix(a, 4, 0.5)", {"a": a}) == [[0, 2], [1, 7]]
+    assert eval_expr("mix(4, a, 0.5)", {"a": a}) == [[0, 2], [1, 7]]
+
+
+def test_mix_shorthand_is_linear():
+    out = eval_expr("mix(a, b, 0.5)", {"a": [0, 10], "b": [10, 0]})
+    assert out == [[0, 5], [1, 5]]
+
+
+def test_mix_dict_linear_curve_one_is_exact():
+    a = {"type": "linear", "points": [[0, 0], [1, 10]], "curve": 1}
+    b = [[0, 10], [1, 0]]
+    out = eval_expr("mix(a, b, 0.5)", {"a": a, "b": b})
+    assert out == [[0, 5], [1, 5]]
+
+
+def test_mix_w_env_scalar_forms_exact():
+    # w-Env con A e B scalari: il risultato segue w, esatto sui suoi tempi
+    w = [[0, 0], [0.5, 1], [1, 0]]
+    out = eval_expr("mix(0, 10, w)", {"w": w})
+    assert out == [[0, 0], [0.5, 10], [1, 0]]
+
+
+def test_mix_step_step_union():
+    a = {"type": "step", "points": [[0, 1], [0.5, 3]]}
+    b = {"type": "step", "points": [[0, 11], [0.25, 7]]}
+    out = eval_expr("mix(a, b, 0.5)", {"a": a, "b": b})
+    assert out == {"type": "step", "points": [[0, 6], [0.25, 4], [0.5, 5]]}
+
+
+def test_mix_step_step_w_step_snaps():
+    # morphing a scatti (w step) tra forme step: mondo omogeneo, esatto
+    a = {"type": "step", "points": [[0, 0]]}
+    b = {"type": "step", "points": [[0, 10]]}
+    w = {"type": "step", "points": [[0, 0], [0.5, 1]]}
+    out = eval_expr("mix(a, b, w)", {"a": a, "b": b, "w": w})
+    assert out == {"type": "step", "points": [[0, 0], [0.5, 10]]}
+
+
+def test_mix_w_step_scalar_forms_is_step():
+    # scalari (costanti, neutri) con w step: risultato step sui tempi di w
+    w = {"type": "step", "points": [[0, 0], [0.5, 1]]}
+    out = eval_expr("mix(3, 8, w)", {"w": w})
+    assert out == {"type": "step", "points": [[0, 3], [0.5, 8]]}
+
+
+def test_mix_adaptive_curve_bound():
+    # curve != 1: campionamento adattivo — il test verifica il bound, non i
+    # punti esatti (scarto sotto l'1% dell'escursione)
+    a = {"type": "linear", "points": [[0, 0], [1, 10]], "curve": 2}
+    b = [[0, 10], [1, 0]]
+    out = eval_expr("mix(a, b, 0.5)", {"a": a, "b": b})
+    assert isinstance(out, list)
+    for i in range(101):
+        t = i / 100
+        expected = 0.5 * (10 * t ** 2) + 0.5 * (10 - 10 * t)
+        assert abs(_at(out, t) - expected) <= 0.1
+
+
+def test_mix_adaptive_w_env_moving_forms_bound():
+    # w-Env con forme mobili: il prodotto e' quadratico, serve l'adattivo
+    a = [[0, 0], [1, 10]]
+    b = [[0, 10], [1, 0]]
+    w = [[0, 0], [1, 1]]
+    out = eval_expr("mix(a, b, w)", {"a": a, "b": b, "w": w})
+    for i in range(101):
+        t = i / 100
+        expected = (1 - t) * (10 * t) + t * (10 - 10 * t)
+        assert abs(_at(out, t) - expected) <= 0.1
+
+
+def test_mix_nested():
+    a = [[0, 0], [1, 10]]
+    b = [[0, 10], [1, 0]]
+    out = eval_expr("mix(mix(a, b, 0.5), c, 0.5)", {"a": a, "b": b, "c": 0})
+    assert out == [[0, 2.5], [1, 2.5]]
+
+
+def test_mix_result_enters_arithmetic():
+    a = [[0, 0], [1, 10]]
+    assert eval_expr("mix(a, 0, 0.5) * 2", {"a": a}) == [[0, 0], [1, 10]]
+
+
+def test_env_times_env_still_rejected_outside_mix():
+    envs = {"e1": [[0, 1], [1, 2]], "e2": [[0, 3], [1, 4]]}
+    with pytest.raises(ValueError, match="Env"):
+        eval_expr("e1 * e2", envs)
+    with pytest.raises(ValueError, match="Env"):
+        eval_expr("min(e1, e2)", envs)
+
+
+def test_mix_rigid_signature():
+    with pytest.raises(ValueError, match="argoment"):
+        eval_expr("mix(1, 2)", {})
+    with pytest.raises(ValueError, match="argoment"):
+        eval_expr("mix(1, 2, 3, 4)", {})
+    with pytest.raises(ValueError, match="keyword"):
+        eval_expr("mix(1, 2, w=0.5)", {})
+
+
+def test_mix_step_with_continuous_rejected():
+    # discontinuita' pesata (step dentro morphing continuo): fuori dal v1,
+    # errore esplicito — nessuna semantica inventata
+    a = {"type": "step", "points": [[0, 1], [0.5, 3]]}
+    b = [[0, 0], [1, 10]]
+    with pytest.raises(ValueError, match="step"):
+        eval_expr("mix(a, b, 0.5)", {"a": a, "b": b})
+
+
+def test_mix_w_step_with_continuous_forms_rejected():
+    a = [[0, 0], [1, 10]]
+    w = {"type": "step", "points": [[0, 0], [0.5, 1]]}
+    with pytest.raises(ValueError, match="step"):
+        eval_expr("mix(a, 5, w)", {"a": a, "w": w})
+
+
+def test_mix_unknown_type_rejected():
+    a = {"type": "cubic", "points": [[0, 1], [1, 3]]}
+    with pytest.raises(ValueError, match="cubic"):
+        eval_expr("mix(a, 0, 0.5)", {"a": a})
+
+
+def test_mix_step_with_curve_rejected():
+    a = {"type": "step", "points": [[0, 1], [0.5, 3]], "curve": 2}
+    b = {"type": "step", "points": [[0, 0]]}
+    with pytest.raises(ValueError, match="curve"):
+        eval_expr("mix(a, b, 0.5)", {"a": a, "b": b})

@@ -384,13 +384,30 @@ axes:
 - **Funzioni primitive** (whitelist — il set generatore da cui derivare le
   altre): `abs`, `floor`, `ceil`, `sqrt`, `exp`, `log` (naturale, o
   `log(x, b)` per la base), `sin`, `cos`, `tan`, `atan`, `min`, `max`
-  (variadiche, almeno 2 argomenti). Una chiamata con un argomento-Env agisce
+  (variadiche, almeno 2 argomenti), `mix` (vedi sotto). Una chiamata con un
+  argomento-Env agisce
   **sulle y** come gli operatori — `min(env, 10)` è un clamp del livello,
-  `floor(env)` quantizza — e due Env nella stessa chiamata sono errore.
+  `floor(env)` quantizza — e due Env nella stessa chiamata sono errore
+  (tranne `mix`, che di due Env vive).
   `%` è il resto con semantica Python (segno del divisore); `//` il
   quoziente intero: `i % 3` e `i // 3` trasformano l'indice dello spread in
   coordinate di griglia. Fuori dominio (`sqrt` di un negativo, `log` di zero,
   potenza frazionaria di un negativo) è errore chiaro, non un NaN.
+- **`mix(A, B, w)`** — il morphing pesato `A*(1-w) + B*w` tra due forme:
+  l'**unica porta Env⊙Env** del sistema (issue #29). Esattamente 3 argomenti
+  posizionali. Uno scalare al posto di una forma diventa Env costante
+  (broadcast); `w` può essere a sua volta un Env (il morphing evolve dentro
+  il tempo dello stream); **niente clamp** su `w` — fuori `[0, 1]` si
+  estrapola, il clamp si scrive con `min`/`max`; l'annidamento è libero
+  (`mix(mix(A, B, w), C, v)`). Dove il risultato resta rappresentabile senza
+  perdita il ricampionamento sull'unione dei tempi è **esatto**
+  (linear/linear con `w` scalare; step/step; `w`-Env su scalari); altrove
+  (forme `curve`, `w`-Env su forme mobili) interviene un campionamento
+  adattivo con scarto massimo sotto una tolleranza proporzionale
+  all'escursione — l'output resta un Env simbolico a pochi breakpoint.
+  Le forme devono abitare lo stesso mondo: **step con continua è errore**
+  (discontinuità pesata, fuori dal v1). Il morphing a scatti si scrive con
+  forme step (o scalari) e `w` step.
 - **`let`** dichiara i nomi in scope: scalari o forme **statiche** di Env
   (`[a, b]`, `[[t, v], ...]`, `{type, points, curve}`). Un nodo-generatore
   dentro `let` è errore: i due meccanismi non si annidano — con una sola
