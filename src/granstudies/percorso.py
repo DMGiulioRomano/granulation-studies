@@ -39,8 +39,16 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from .errors import ErrCtx
-from .expr import parse_expr_node
-from .value_generators import Y_GENERATOR_KEYS
+from .expr import eval_expr, parse_expr_node
+from .value_generators import (
+    Y_GENERATOR_KEYS,
+    _band_sampler,
+    _threshold_at,
+    band,
+    expand_params,
+    ramp,
+    stable_seed,
+)
 from .versions import _referenced_names
 from .yaml_loc import Locations
 
@@ -192,8 +200,6 @@ def _onset_seed(sid: str) -> int:
     """Seed derivato del generatore di ``onset`` (banda senza ``seed``,
     nodi-generatore annidati): unico per parse e timeline, cosi' il conteggio
     e la generazione non possono divergere."""
-    from .value_generators import stable_seed
-
     return stable_seed(f"{sid}:percorso:onset")
 
 
@@ -223,8 +229,6 @@ def _owned_k(onset: Dict[str, Any], sid: str, ctx: ErrCtx) -> Optional[int]:
             )
         if "step" not in params:
             return None
-        from .value_generators import expand_params, ramp
-
         with ctx.wrapping(key=key):
             return len(
                 ramp(**expand_params(dict(params), seed=_onset_seed(sid)))
@@ -397,3 +401,235 @@ def parse_percorso(
             )
         spec.variables[name] = traj
     return spec
+
+
+# --- campionamento delle traiettorie e timeline --------------------------------
+
+# Tetto anti-runaway della camminata: un passo che collassa verso lo zero
+# genererebbe una timeline enorme. Stessa filosofia di MAX_RAMP_POINTS nei
+# generatori (errore di configurazione, non caso d'uso).
+MAX_ISTANZE = 10_000
+
+
+@dataclass
+class Timeline:
+    """La timeline risolta: dove le istanze vivono sul tempo reale.
+
+    ``intervals[k]`` e' l'intervallo di riferimento dell'istanza k (verso la
+    prossima): in camminata e' ``passo(t_k)`` per ogni k (l'ultima usa il
+    passo che avrebbe seguito, gia' calcolato dal loop); in enumerata e' la
+    differenza tra onset consecutivi, con l'ultima che ripete l'ultimo
+    intervallo noto. ``span`` e' l'estensione su cui i tempi delle traiettorie
+    si normalizzano 0 -> 1: l'``arco`` in camminata (l'ultima istanza cade
+    *prima* di 1 — campionamento onesto, come i grani campionano un envelope),
+    l'ultimo onset in enumerata (l'ultima cade esattamente a 1).
+    """
+
+    onsets: List[float]
+    intervals: List[float]
+    span: float
+
+    def fracs(self) -> List[float]:
+        """La posizione normalizzata 0 -> 1 di ogni istanza."""
+        if self.span <= 0:
+            return [0.0 for _ in self.onsets]
+        return [t / self.span for t in self.onsets]
+
+
+def make_sampler(name: str, traj: Trajectory, sid: str, ctx: ErrCtx):
+    """``sample(frac) -> valore`` di una traiettoria.
+
+    Costante -> il valore; banda -> il pescaggio di ``_band_sampler`` (con
+    ``drift`` lo stato del walk vive nella closure: campionare le istanze in
+    ordine cronologico produce la deriva correlata); nodo-expr -> valutato una
+    volta, il risultato (scalare o Env statico) campionato con la semantica
+    di sempre. Una banda senza ``seed`` deriva
+    ``stable_seed("<study>:percorso:<nome>")``: deterministico tra run,
+    traiettorie diverse decorrelate da sole.
+    """
+    key = ("percorso", name)
+    if traj.kind == "const":
+        value = float(traj.params)
+        return lambda frac: value
+    if traj.kind == "expr":
+        text, let = traj.params
+        with ctx.wrapping(key=key):
+            out = eval_expr(text, let)
+        if isinstance(out, (int, float)):
+            return lambda frac: float(out)
+
+        def sample_expr(frac: float) -> float:
+            with ctx.wrapping(key=key):
+                return float(_threshold_at(out, frac))
+
+        return sample_expr
+    # banda: parametri espansi alla seam (nodi-generatore annidati compresi)
+    params = dict(traj.params)
+    seed = params.pop("seed", stable_seed(f"{sid}:percorso:{name}"))
+    with ctx.wrapping(key=key):
+        params = expand_params(params, seed=seed)
+        inner = _band_sampler(
+            params["base"],
+            params.get("range", 0.0),
+            seed,
+            params.get("distribution", "uniform"),
+            params.get("drift"),
+            f"percorso.{name}",
+        )
+
+    def sample_band(frac: float) -> float:
+        with ctx.wrapping(key=key):
+            return inner(frac)
+
+    return sample_band
+
+
+def _enumerated_onsets(spec: PercorsoSpec, sid: str, ctx: ErrCtx) -> List[float]:
+    """Gli onset assoluti della strategy enumerata, risolti sull'indice.
+
+    Stessa semantica di ``_timeline_sequence`` di ``versions``: ``values`` =
+    tempi assoluti uno per istanza; ``ramp`` con ``step`` = griglia (conta
+    ``k`` da sola); ``ramp {start, stop}`` = ``k`` valori equispaziati;
+    banda = ``k`` pescaggi (seed derivato se assente).
+    """
+    key = ("percorso", "onset")
+    onset, k = spec.onset, spec.k
+    seed = _onset_seed(sid)
+    with ctx.wrapping(key=key):
+        if "values" in onset:
+            values: List[Any] = list(onset["values"])
+        elif "ramp" in onset:
+            params = dict(onset["ramp"])
+            if "step" in params:
+                values = ramp(**expand_params(params, seed=seed))
+            else:
+                start, stop = params["start"], params["stop"]
+                values = (
+                    [start + (stop - start) * i / (k - 1) for i in range(k)]
+                    if k > 1 else [start]
+                )
+        else:  # banda (il parse ha gia' validato la forma)
+            params = {kk: v for kk, v in onset.items() if kk != "n"}
+            params.setdefault("seed", seed)
+            values = band(
+                n=k, **expand_params(params, seed=params["seed"])
+            )
+    for v in values:
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            raise ctx.err(
+                f"percorso: onset, valore non numerico {v!r}.", key=key
+            )
+        if v < 0:
+            raise ctx.err(
+                f"percorso: onset deve essere >= 0 (generato {v}).", key=key
+            )
+    return [round(float(v), 9) for v in values]
+
+
+def build_timeline(
+    spec: PercorsoSpec, sid: str, locs: Locations | None = None
+) -> Timeline:
+    """Risolve la timeline delle istanze (fase 1 dell'ordine a due fasi).
+
+    La circolarita' si rompe qui: gli onset nascono sull'indice (enumerata) o
+    dall'accumulo del passo (camminata); tutto il resto — ``duration`` e le
+    traiettorie ordinarie — si campiona poi sull'onset reale. In camminata
+    ``t_next = t + passo(t)`` finche' ``t < arco``: ``k`` emerge, e un passo
+    non positivo al campionamento e' errore (loop infinito).
+    """
+    ctx = ErrCtx(locs=locs)
+    if spec.strategy == "enumerata":
+        onsets = _enumerated_onsets(spec, sid, ctx)
+        span = onsets[-1]
+        if len(onsets) > 1:
+            diffs = [
+                round(b - a, 9) for a, b in zip(onsets, onsets[1:])
+            ]
+            intervals = diffs + [diffs[-1]]
+        else:
+            # Nessun intervallo di riferimento: legato/factor erroreranno
+            # in resolve_durations (serve unit: s).
+            intervals = [0.0]
+        return Timeline(onsets=onsets, intervals=intervals, span=span)
+
+    # camminata
+    sample = make_sampler("passo", spec.passo, sid, ctx)
+    arco = spec.arco
+    onsets: List[float] = []
+    intervals: List[float] = []
+    t = 0.0
+    while t < arco:
+        frac = t / arco
+        step = sample(frac)
+        if not isinstance(step, (int, float)) or step <= 0:
+            raise ctx.err(
+                f"percorso: passo non positivo ({step}) all'onset {t} — "
+                "la camminata non avanzerebbe.",
+                key=("percorso", "passo"),
+                hint="la traiettoria di 'passo' deve restare > 0 su tutto "
+                "l'arco.",
+            )
+        onsets.append(round(t, 9))
+        intervals.append(round(float(step), 9))
+        t += step
+        if len(onsets) > MAX_ISTANZE:
+            raise ctx.err(
+                f"percorso: oltre {MAX_ISTANZE} istanze — il passo e' "
+                "troppo piccolo per l'arco.",
+                key=("percorso", "passo"),
+            )
+    return Timeline(onsets=onsets, intervals=intervals, span=float(arco))
+
+
+def resolve_durations(
+    spec: PercorsoSpec,
+    timeline: Timeline,
+    sid: str,
+    locs: Locations | None = None,
+) -> List[float]:
+    """La durata di ogni istanza, campionata al suo onset reale.
+
+    Identica nelle due strategy: solo il modo in cui gli onset vengono al
+    mondo le distingue. Assente = legato (factor 1). Con ``unit: factor``
+    (default) ``duration_k = factor(t_k) * intervals[k]`` — 1 = legato, > 1
+    sovrapposizione (crossfade), < 1 buchi: il duty un asse piu' in alto, e
+    la proporzione tiene dentro un accelerando. Con ``unit: s`` la durata e'
+    assoluta. Enumerata con ``k = 1`` e factor e' errore: nessun intervallo
+    di riferimento.
+    """
+    ctx = ErrCtx(locs=locs)
+    key = ("percorso", "duration")
+    if spec.duration is None:
+        factors = None  # legato: factor 1 senza campionare nulla
+        unit = "factor"
+    else:
+        sample = make_sampler("duration", spec.duration, sid, ctx)
+        factors = [sample(frac) for frac in timeline.fracs()]
+        unit = spec.duration_unit
+    if unit == "factor" and spec.strategy == "enumerata" and len(timeline.onsets) == 1:
+        raise ctx.err(
+            "percorso: con una sola istanza enumerata non c'e' un intervallo "
+            "di riferimento per il factor (e il legato e' un factor 1).",
+            key=key,
+            hint="dichiara una durata assoluta: 'duration: {base: <s>, "
+            "unit: s}'.",
+        )
+    if factors is None:
+        durations = list(timeline.intervals)
+    elif unit == "factor":
+        durations = [
+            round(f * dt, 9) for f, dt in zip(factors, timeline.intervals)
+        ]
+    else:
+        durations = [round(float(f), 9) for f in factors]
+    for k, d in enumerate(durations):
+        if d <= 0:
+            raise ctx.err(
+                f"percorso: duration dell'istanza {k + 1} non positiva "
+                f"({d}).",
+                key=key,
+                hint="con onset non monotoni il legato/factor produce "
+                "intervalli negativi: dichiara 'unit: s' o riordina gli "
+                "onset.",
+            )
+    return durations

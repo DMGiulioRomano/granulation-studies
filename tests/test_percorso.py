@@ -9,7 +9,7 @@ cartesiano: i valori cambiano insieme, appaiati sul tempo.
 import pytest
 
 from granstudies.errors import SpecError
-from granstudies.percorso import parse_percorso
+from granstudies.percorso import build_timeline, parse_percorso, resolve_durations
 
 
 # --- documento base condiviso dai test ---------------------------------------
@@ -321,3 +321,167 @@ def test_percorso_without_variables_is_valid():
     data = _study({"arco": 60, "passo": 10})
     spec = parse_percorso(data)
     assert spec.variables == {}
+
+
+# --- timeline: strategy enumerata ----------------------------------------------
+
+def _timeline(percorso, **over):
+    data = _study(percorso, **over)
+    spec = parse_percorso(data)
+    return build_timeline(spec, data.get("study_id") or "study")
+
+
+def test_enumerata_values_absolute_onsets():
+    tl = _timeline({"onset": {"values": [0, 10, 25]}, "w": 1})
+    assert tl.onsets == [0.0, 10.0, 25.0]
+    assert tl.span == 25.0
+
+
+def test_enumerata_ramp_step_grid():
+    tl = _timeline({"onset": {"ramp": {"start": 0, "stop": 60, "step": 20}}, "w": 1})
+    assert tl.onsets == [0.0, 20.0, 40.0, 60.0]
+
+
+def test_enumerata_ramp_start_stop_equispaced_on_k():
+    tl = _timeline({"onset": {"ramp": {"start": 0, "stop": 60}}, "k": 4, "w": 1})
+    assert tl.onsets == [0.0, 20.0, 40.0, 60.0]
+
+
+def test_enumerata_band_deterministic():
+    p = {"onset": {"base": 0, "range": 60, "n": 4}, "w": 1}
+    a, b = _timeline(p), _timeline(p)
+    assert a.onsets == b.onsets
+    assert len(a.onsets) == 4
+    assert all(0 <= t <= 60 for t in a.onsets)
+
+
+def test_enumerata_negative_onset_errors():
+    with pytest.raises(SpecError, match="onset"):
+        _timeline({"onset": {"values": [0, -5]}, "w": 1})
+
+
+def test_enumerata_intervals_last_repeats():
+    tl = _timeline({"onset": {"values": [0, 10, 25]}, "w": 1})
+    # intervallo verso la prossima; l'ultima istanza usa l'ultimo intervallo noto
+    assert tl.intervals == [10.0, 15.0, 15.0]
+
+
+# --- timeline: strategy camminata ------------------------------------------------
+
+def test_camminata_constant_passo_equispaced():
+    tl = _timeline({"arco": 60, "passo": 10, "w": 1})
+    assert tl.onsets == [0.0, 10.0, 20.0, 30.0, 40.0, 50.0]
+    assert tl.intervals == [10.0] * 6
+    assert tl.span == 60.0
+
+
+def test_camminata_accumulates_passo_at_current_onset():
+    # passo in rampa (banda collassata): accelerando deterministico
+    tl = _timeline({"arco": 60, "passo": {"base": [10, 20]}, "w": 1})
+    assert tl.onsets[0] == 0.0
+    assert all(t < 60 for t in tl.onsets)
+    for i, dt in enumerate(tl.intervals[:-1]):
+        assert tl.onsets[i + 1] == pytest.approx(tl.onsets[i] + dt)
+    # il passo cresce lungo l'arco: intervalli strettamente crescenti
+    assert all(a < b for a, b in zip(tl.intervals, tl.intervals[1:]))
+
+
+def test_camminata_passo_expr_constant():
+    tl = _timeline({"arco": 30, "passo": {"expr": "5 + 5"}, "w": 1})
+    assert tl.onsets == [0.0, 10.0, 20.0]
+
+
+def test_camminata_passo_not_positive_errors():
+    with pytest.raises(SpecError, match="passo"):
+        _timeline({"arco": 60, "passo": 0, "w": 1})
+
+
+def test_camminata_single_instance():
+    tl = _timeline({"arco": 10, "passo": 25, "w": 1})
+    assert tl.onsets == [0.0]
+    assert tl.intervals == [25.0]
+
+
+# --- duration: traiettoria, factor | s, legato di default -------------------------
+
+def _durations(percorso, **over):
+    data = _study(percorso, **over)
+    spec = parse_percorso(data)
+    sid = data.get("study_id") or "study"
+    tl = build_timeline(spec, sid)
+    return resolve_durations(spec, tl, sid)
+
+
+def test_legato_default_enumerata():
+    d = _durations({"onset": {"values": [0, 10, 25]}, "w": 1})
+    assert d == [10.0, 15.0, 15.0]
+
+
+def test_legato_default_camminata_last_uses_passo():
+    # l'ultima istanza puo' sforare l'arco con la propria durata
+    d = _durations({"arco": 60, "passo": 25, "w": 1})
+    assert d == [25.0, 25.0, 25.0]   # onsets 0, 25, 50; 50 + 25 > 60
+
+
+def test_factor_scales_interval():
+    d = _durations({"onset": {"values": [0, 10, 25]}, "duration": 1.5, "w": 1})
+    assert d == [15.0, 22.5, 22.5]
+
+
+def test_factor_below_one_leaves_gaps():
+    d = _durations({"arco": 40, "passo": 20, "duration": 0.5, "w": 1})
+    assert d == [10.0, 10.0]
+
+
+def test_unit_s_absolute():
+    d = _durations({"arco": 40, "passo": 20,
+                    "duration": {"base": 12, "unit": "s"}, "w": 1})
+    assert d == [12.0, 12.0]
+
+
+def test_duration_sampled_at_real_onset_camminata_norm_on_arco():
+    # normalizzazione 0->1 sull'arco: onsets 0 e 30 su arco 60 -> frac 0 e 0.5
+    d = _durations({"arco": 60, "passo": 30,
+                    "duration": {"base": [[0, 10], [1, 20]], "unit": "s"}, "w": 1})
+    assert d == [10.0, 15.0]
+
+
+def test_duration_sampled_at_real_onset_enumerata_norm_on_last_onset():
+    # normalizzazione sull'ultimo onset: 0, 10, 20 -> frac 0, 0.5, 1
+    d = _durations({"onset": {"values": [0, 10, 20]},
+                    "duration": {"base": [[0, 10], [1, 20]], "unit": "s"}, "w": 1})
+    assert d == [10.0, 15.0, 20.0]
+
+
+def test_enumerata_single_instance_factor_errors():
+    with pytest.raises(SpecError, match="unit"):
+        _durations({"onset": {"values": [0]}, "duration": 1.3, "w": 1})
+
+
+def test_enumerata_single_instance_legato_errors():
+    # il legato e' factor 1: senza intervallo di riferimento serve unit: s
+    with pytest.raises(SpecError, match="unit"):
+        _durations({"onset": {"values": [0]}, "w": 1})
+
+
+def test_enumerata_single_instance_unit_s_ok():
+    d = _durations({"onset": {"values": [0]},
+                    "duration": {"base": 12, "unit": "s"}, "w": 1})
+    assert d == [12.0]
+
+
+def test_camminata_single_instance_legato_ok():
+    # in camminata l'intervallo di riferimento esiste sempre: passo(t_K)
+    d = _durations({"arco": 10, "passo": 25, "w": 1})
+    assert d == [25.0]
+
+
+def test_duration_not_positive_errors():
+    with pytest.raises(SpecError, match="duration"):
+        _durations({"arco": 40, "passo": 20,
+                    "duration": {"base": 0, "unit": "s"}, "w": 1})
+
+
+def test_legato_non_monotone_onsets_errors():
+    with pytest.raises(SpecError, match="duration"):
+        _durations({"onset": {"values": [0, 20, 10]}, "w": 1})

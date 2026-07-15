@@ -663,8 +663,31 @@ percorso:
   anti-refuso, come `versions`).
 - **`duration`** è una traiettoria riservata con **`unit: factor` (default) |
   `s`**, dichiarata accanto alla forma (`duration: {base: [30, 8], unit: s}`;
-  lo scalare nudo è un factor costante). Assente = **legato**. Semantica
-  completa nella sezione timeline.
+  lo scalare nudo è un factor costante). Assente = **legato**.
+- **La timeline si risolve prima** (ordine a due fasi, per rompere la
+  circolarità "le variabili si campionano sul tempo reale, ma il tempo reale
+  lo creano onset e passo"): prima gli onset — sull'indice in enumerata,
+  per accumulo `t += passo(t)` in camminata (con `passo` campionato all'onset
+  corrente; un passo non positivo è errore) — poi tutto il resto, `duration`
+  e traiettorie ordinarie, campionato **all'onset reale** di ogni istanza.
+  "A metà" = a metà dell'ascolto, non del conteggio.
+- **Normalizzazione del tempo delle traiettorie**: i tempi dei breakpoint
+  sono normalizzati 0 → 1 sull'**estensione del percorso** — l'`arco` in
+  camminata (l'ultima istanza cade *prima* di 1: campionamento onesto, come
+  i grani campionano un envelope), l'**ultimo onset** in enumerata (l'ultima
+  istanza cade esattamente a 1).
+- **Semantica di `duration`**: campionata all'onset dell'istanza, identica
+  nelle due strategy. Con `unit: factor`,
+  `duration_k = factor(t_k) × intervallo verso la prossima istanza` — 1 =
+  legato, > 1 sovrapposizione (crossfade), < 1 buchi: è il *duty* un asse più
+  in alto, e mantiene la proporzione dentro un accelerando. L'intervallo di
+  riferimento dell'ultima istanza è `passo(t_K)` in camminata (il passo che
+  avrebbe seguito, già calcolato: l'ultima istanza può **sforare l'arco** con
+  la propria durata — l'engine dimensiona su `max(onset + duration)`) e
+  l'ultimo intervallo noto in enumerata. Assente = legato (factor 1).
+  Con `unit: s` la durata è assoluta. Bordo: enumerata con `k = 1` e factor
+  (anche implicito, il legato) è errore — non c'è intervallo di riferimento,
+  serve `unit: s`.
 
 ## Il blocco `spread:` (stream generati)
 
