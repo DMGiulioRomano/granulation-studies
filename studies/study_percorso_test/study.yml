@@ -3,12 +3,18 @@
 # Il caso bersaglio del design (issue #29): una sola manopola `w` che sale
 # 0 -> 1 lungo il percorso e pilota, nominata negli scope:
 #   - la forma Y (`mix(formaA, formaB, w)`: il morphing tra due forme);
-#   - `spread.n` (il coro cresce da 2 a 5 voci, padding stabile).
+#   - `spread.n` (il coro cresce, padding stabile).
 # Strategy camminata: arco 60s, passo in accelerando 20 -> 10; duration
 # factor 1.2 = crossfade proporzionale. Il default `w: 0` nei let tiene lo
 # studio valido anche senza percorso: `make stack` suona l'istanza di
-# partenza. Per la strategy enumerata equivalente, commenta arco/passo e
-# scommenta onset.
+# partenza.
+#
+# Nota sul conteggio del coro: in camminata l'ultima istanza cade *prima*
+# della fine dell'arco (a frac ~0.84), quindi `w` non tocca mai 1 e il coro
+# arriva a 4 voci (floor(2 + 3*0.84) = 4) — e' il campionamento onesto del
+# design. Nella strategy enumerata equivalente (commenta arco/passo e
+# scommenta onset) l'ultima istanza cade esattamente a frac 1 e il coro
+# arriva a 5.
 #
 #   make percorso STUDY=study_percorso_test
 #   make render STUDY=study_percorso_test
@@ -57,6 +63,6 @@ percorso:
 streams:
   coro:
     spread:
-      n: {expr: "floor(2 + 3 * w)", let: {w: 0}}          # il coro cresce: 2 -> 5
+      n: {expr: "floor(2 + 3 * w)", let: {w: 0}}          # il coro cresce (2 -> 4 in camminata, 2 -> 5 in enumerata; vedi nota in testa)
       over:
         base.pointer.start: {ramp: {start: .1, stop: .5}}  # ventaglio: si ridistribuisce su n

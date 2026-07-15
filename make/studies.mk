@@ -35,5 +35,8 @@ compose: _require-study $(MARKER)
 sv: _require-study render
 	$(PY) -m granstudies sv $(STUDY) $(if $(LAYOUT),--layout $(LAYOUT),) $(if $(STREAM),--stream $(STREAM),)
 
+# Pipeline di base: sweep + stack + render. `versions` e `percorso` sono
+# processi opt-in (generano repliche/istanze, potenzialmente pesanti), fuori
+# di proposito da all-study: si lanciano esplicitamente quando servono.
 .PHONY: all-study
 all-study: sweep stack render #describe matrix compose render-final
