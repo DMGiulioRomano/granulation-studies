@@ -391,8 +391,9 @@ def cmd_compose(study: str, seed: int | None, steps: int | None, start: str | No
 
 
 def _cmd_sv_document(study: str, g: str, layout: str, total: list, process: str) -> None:
-    """Emette i .sv di un documento multi-stream (``stack`` o ``versions``):
-    uno contro il mix, uno contro gli stem."""
+    """Emette i .sv di un documento multi-stream (``stack``/``versions``/
+    ``percorso``): uno contro il mix, uno contro gli stem. Ogni processo vive
+    nella propria cartella e i suoi stem hanno il prefisso ``<process>__``."""
     from .sv_export import stack_to_sv, stack_stems_to_sv
 
     variant = os.path.join(g, "yaml", process, f"{process}.yml")
@@ -411,8 +412,10 @@ def _cmd_sv_document(study: str, g: str, layout: str, total: list, process: str)
     print(f"[sv] {out}")
 
     # Un pane per stem (audio separato per stream): richiede 'render --stem'.
+    # Il prefisso degli stem e' quello del processo (versions__/percorso__),
+    # non il letterale 'stack__' (issue #29).
     stems_out = os.path.join(g, "sv", process, f"{study}_{process}_stems.sv")
-    if stack_stems_to_sv(variant, audio_dir, stems_out):
+    if stack_stems_to_sv(variant, audio_dir, stems_out, process=process):
         total.append(stems_out)
         print(f"[sv] {stems_out}")
 

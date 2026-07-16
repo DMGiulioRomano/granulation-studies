@@ -128,7 +128,7 @@ def test_cmd_sv_exports_versions_document(tmp_path, monkeypatch):
     monkeypatch.setattr(sv_export, "stack_to_sv",
                         lambda variant, audio, out, layout: calls.append(("doc", variant, out)))
     monkeypatch.setattr(sv_export, "stack_stems_to_sv",
-                        lambda variant, audio_dir, out: False)
+                        lambda variant, audio_dir, out, process="stack": False)
 
     assert cli.cmd_sv(study, layout="multi") == 0
     variants = [c[1] for c in calls]
@@ -215,14 +215,19 @@ def test_cmd_sv_exports_percorso_document(tmp_path, monkeypatch):
             fh.write(b"")
 
     calls = []
+    stem_processes = []
     import granstudies.sv_export as sv_export
     monkeypatch.setattr(sv_export, "stack_to_sv",
                         lambda variant, audio, out, layout: calls.append(("doc", variant, out)))
+    # Registra il 'process' con cui viene chiamato: e' il fix del bug PR #30
+    # (il prefisso stem dev'essere quello del processo, non 'stack' cablato).
     monkeypatch.setattr(sv_export, "stack_stems_to_sv",
-                        lambda variant, audio_dir, out: False)
+                        lambda variant, audio_dir, out, process="stack": stem_processes.append(process) or False)
 
     assert cli.cmd_sv(study, layout="multi") == 0
     variants = [c[1] for c in calls]
     assert any(os.path.join("yaml", "percorso", "percorso.yml") in v for v in variants)
     outs = [c[2] for c in calls]
     assert any(os.path.join("sv", "percorso", f"{study}_percorso.sv") in o for o in outs)
+    # Lo stem export del percorso riceve process='percorso', non 'stack'.
+    assert "percorso" in stem_processes

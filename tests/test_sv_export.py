@@ -312,6 +312,42 @@ def test_padded_stem_incremental(tmp_path):
     assert os.path.getmtime(out) > first
 
 
+def test_stems_sv_uses_process_prefix_not_hardcoded_stack(tmp_path):
+    """Issue #29: gli stem di 'percorso'/'versions' hanno il prefisso del
+    processo, non il letterale 'stack__' — altrimenti l'export SV per-stem non
+    li trova (bug segnalato sulla PR #30)."""
+    import yaml
+    from granstudies.sv_export import stack_stems_to_sv
+
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    # Voce logica 'coro' moltiplicata da percorso: il post-merge produce il
+    # file accorpato 'percorso__coro.aif' (non 'stack__coro.aif').
+    _write_aif(str(audio_dir / "percorso__coro.aif"), seconds=2.0, sr=1000)
+
+    doc = {"duration": 4, "streams": [
+        {"stream_id": "coro__d=1", "onset": 0, "duration": 2,
+         "density": {"type": "linear", "points": [[0.0, 10], [1.0, 20]],
+                     "time_mode": "normalized"}},
+        {"stream_id": "coro__d=2", "onset": 2, "duration": 2,
+         "density": {"type": "linear", "points": [[0.0, 30], [1.0, 40]],
+                     "time_mode": "normalized"}},
+    ]}
+    yml = tmp_path / "percorso.yml"
+    yml.write_text(yaml.safe_dump(doc))
+
+    # Col default (process='stack') non troverebbe lo stem -> None.
+    assert stack_stems_to_sv(str(yml), str(audio_dir), str(tmp_path / "no.sv")) is None
+    # Col processo giusto lo trova e scrive.
+    out = stack_stems_to_sv(str(yml), str(audio_dir), str(tmp_path / "s.sv"),
+                            process="percorso")
+    assert out is not None
+    xml = _parse((tmp_path / "s.sv").read_bytes())
+    files = [m.get("file") for m in xml.findall("./data/model")
+             if m.get("type") == "wavefile"]
+    assert any(f.endswith("percorso__coro.aif") for f in files)
+
+
 def test_stems_sv_uses_padded_audio_and_offsets_envelopes(tmp_path):
     import yaml
     from granstudies.sv_export import stack_stems_to_sv
