@@ -104,9 +104,15 @@ stack:
 
 # Stream: varianti di ascolto con override parziali sul documento sopra.
 # Regole del merge: i dict si fondono ricorsivamente, le liste rimpiazzano.
-# Se questa sezione è assente, sweep genera un'unica versione senza sotto-cartella.
+# Le chiavi PUNTATE si espandono in dict annidati prima del merge, come in
+# `spread.over`: `axes.density.base.expr: X` equivale a
+# `axes: {density: {base: {expr: X}}}` (rami sovrapposti si fondono). Se questa
+# sezione è assente, sweep genera un'unica versione senza sotto-cartella.
 streams:
   base: {}                       # nessun override — identica alla base
+
+  fermo:                         # override in forma PUNTATA (equivale all'annidata)
+    axes.density.base.expr: "env"  # cambia solo l'expr; il let si eredita dal merge
 
   nome_stream:                   # chiave libera → diventa la sotto-cartella dell'output
     duration: 60                 # durata propria (s): vince sul default top-level

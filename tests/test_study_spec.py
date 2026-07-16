@@ -587,6 +587,53 @@ def test_stream_override_merges_nested_env_dict():
     assert spec.axis("a").values == pytest.approx([1.0, 1.0, 1.0, 8.0])
 
 
+def test_stream_override_expands_dotted_keys():
+    """Una chiave puntata in un override di stream si espande in dict annidati,
+    coerente con spread.over. Era la causa di fermo==mobile in
+    study_versions_test: `axes.density.base.expr` finiva come chiave letterale
+    ignorata dal deep-merge, e l'override non toccava l'asse (issue #29)."""
+    data = {
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {
+            "density": {"path": "density", "baseline": 50, "n": 3,
+                        "base": {"expr": "a + b", "let": {"a": 10, "b": 5}},
+                        "range": 0},
+        },
+        "sweep": {"mode": "envelope", "orders": [1]},
+        "streams": {
+            "solo_a": {"axes.density.base.expr": "a"},   # dotted -> density = a = 10
+            "somma": {},                                  # eredita -> a + b = 15
+        },
+    }
+    specs = {s.stream_id: s for s in resolve_streams(data)}
+    # il let (a, b) si eredita via deep-merge: expr "a" con a=10 -> 10
+    assert specs["solo_a"].axis("density").values == pytest.approx([10.0, 10.0, 10.0])
+    assert specs["somma"].axis("density").values == pytest.approx([15.0, 15.0, 15.0])
+
+
+def test_stream_override_dotted_deep_merges_with_nested():
+    """Chiave puntata e forma annidata che toccano lo stesso ramo si fondono
+    (il let annidato resta, la puntata cambia solo l'expr)."""
+    data = {
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {
+            "density": {"path": "density", "baseline": 50, "n": 2,
+                        "base": {"expr": "a", "let": {"a": 1}}, "range": 0},
+        },
+        "sweep": {"mode": "envelope", "orders": [1]},
+        "streams": {
+            "mix": {
+                "axes": {"density": {"base": {"let": {"a": 7}}}},  # annidato: a=7
+                "axes.density.base.expr": "a * 2",                  # puntato: expr
+            },
+        },
+    }
+    spec = [s for s in resolve_streams(data) if s.stream_id == "mix"][0]
+    assert spec.axis("density").values == pytest.approx([14.0, 14.0])
+
+
 # --- duration/onset per-stream (issue #26) ---------------------------------------
 
 def _streams_dict():

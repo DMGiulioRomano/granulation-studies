@@ -230,6 +230,39 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
     return result
 
 
+def _expand_dotted_keys(override: Dict[str, Any]) -> Dict[str, Any]:
+    """Espande le chiavi puntate di un override di stream in dict annidati.
+
+    ``{"axes.density.base.expr": X}`` -> ``{"axes": {"density": {"base":
+    {"expr": X}}}}``. La stessa notazione a punti che ``spread.over`` gia'
+    accetta (via ``_deep_set``) vale cosi' anche negli override scritti a mano
+    in ``streams:``: senza questa espansione la chiave puntata finiva come
+    chiave *letterale* top-level, ignorata dal merge e dal parse — l'override
+    era un no-op silenzioso (era la causa di ``fermo == mobile`` in
+    ``study_versions_test``, issue #29).
+
+    Rami che si sovrappongono — una chiave puntata e una forma annidata sullo
+    stesso path, o due chiavi puntate con prefisso comune — si **fondono** via
+    ``_deep_merge`` nell'ordine di dichiarazione (l'ultima vince sui conflitti
+    di foglia). Ricorsivo: una forma annidata puo' contenere a sua volta chiavi
+    puntate. Le chiavi senza punto restano invariate.
+    """
+    out: Dict[str, Any] = {}
+    for k, v in override.items():
+        if isinstance(v, dict):
+            v = _expand_dotted_keys(v)
+        if isinstance(k, str) and "." in k:
+            branch: Any = v
+            parts = k.split(".")
+            for p in reversed(parts[1:]):
+                branch = {p: branch}
+            contribution = {parts[0]: branch}
+        else:
+            contribution = {k: v}
+        out = _deep_merge(out, contribution)
+    return out
+
+
 def _replace_generators(merged: Dict[str, Any], override: Dict[str, Any]) -> None:
     """Se un override sceglie un generatore per un asse, rimpiazza quello ereditato.
 
@@ -298,8 +331,11 @@ def resolve_streams(
     streams = expand_spreads(streams, locs, pad_n=spread_pad)
     result = []
     for stream_id, override in streams.items():
-        merged = _deep_merge(data, override or {})
-        _replace_generators(merged, override or {})
+        # Le chiavi puntate scritte a mano nell'override (``axes.density.base.expr``)
+        # si espandono in dict annidati prima del merge, come in ``spread.over``.
+        override = _expand_dotted_keys(override or {})
+        merged = _deep_merge(data, override)
+        _replace_generators(merged, override)
         merged.pop("streams", None)
         merged.setdefault("sweep", {})["stream_id"] = stream_id
         try:
