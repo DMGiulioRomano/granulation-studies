@@ -15,7 +15,7 @@
 study_id: study_versions_test
 title: "Test versions — env condiviso, offset d crescente"
 seed: 7
-duration: 2
+duration: 5
 samples_dir: samples
 
 base:
@@ -27,6 +27,7 @@ base:
   volume: -6
   pointer:
     #speed_ratio: 0
+    #speed_ratio: 0.04
     start: .3
 
 axes:
@@ -42,16 +43,25 @@ axes:
         d: 0
         f: 40
     range: 0
-
+  grain_duration:
+    path: grain.duration
+    baseline: .01
+    base:
+      expr: "d * (.1)"
+      let:
+        d: 0
 stack:
   density:
+    base: .5
+  grain_duration:
     base: .5
 
 
 versions:
-  f:  {ramp: {start: 10, stop: 30, step: 5}}
-  d: {ramp: {start: 0.1, stop: .5, step: 0.1}}
-  #duration: {base: 3, range: 1}
+  f:  {ramp: {start: 40, stop: 400, step: 10}}
+  d: {ramp: {start: .1, stop: 1, step: .1}}
+
+  #duration: {ramp: {start: 2, stop: 1}}
   #onset: {ramp: {start: 0, stop: 100}}
 
 streams:
