@@ -872,10 +872,11 @@ auto-decorrelano col meccanismo esistente.
 ## Layout di `generated/`
 
 Primo livello = tipo di artefatto, secondo livello = **processo** (`sweep` /
-`stack` / `versions` / `percorso`). Il nome della stream è incorporato nel
-basename dei file sweep (non solo nella sotto-cartella) per facilitare
-l'identificazione in Sonic Visualiser; i documenti stack, versions e percorso
-sono uno per processo (gli stream vi sono collassati).
+`stack` / `versions` / `percorso`). Il nome dello studio e della stream sono
+incorporati nel basename dei file sweep (non solo nella sotto-cartella) per
+facilitare l'identificazione in Sonic Visualiser — audio e `.sv` condividono
+lo stesso basename `<study>_<stream_id>_<variante>`; i documenti stack,
+versions e percorso sono uno per processo (gli stream vi sono collassati).
 
 ```
 generated/<study_id>/
@@ -884,11 +885,11 @@ generated/<study_id>/
   yaml/versions/versions.yml     # solo per studi con blocco versions
   yaml/percorso/percorso.yml     # solo per studi con blocco percorso
   yaml/streams_expanded.yml      # solo per studi con spread: il dict streams espanso
-  audio/sweep/envelope/<stream_id>/<stream_id>_e1__density.aif
+  audio/sweep/envelope/<stream_id>/<study_id>_<stream_id>_e1__density.aif
   audio/stack/stack.aif
   audio/versions/versions.aif
   audio/percorso/percorso.aif
-  sv/sweep/envelope/<stream_id>/<stream_id>_e1__density.sv
+  sv/sweep/envelope/<stream_id>/<study_id>_<stream_id>_e1__density.sv
 ```
 
 `generated/` è rigenerabile: dopo un aggiornamento basta rilanciare

@@ -337,6 +337,7 @@ def render_variants(
     per_stream: bool = False,
     use_cache: bool = False,
     cache_dir: str | None = None,
+    study: str | None = None,
 ) -> List[Dict[str, Any]]:
     """Renderizza ogni YAML in ``variant_dir`` -> audio (e PDF se ``score_dir``).
 
@@ -384,12 +385,18 @@ def render_variants(
         # dello stream al basename per distinguerli in SV. La regola e'
         # relativa alla cartella di modalita', cosi' vale sia per il layout
         # yaml/sweep/... sia per directory di varianti passate direttamente;
-        # i documenti stack (stack/stack.yml) restano senza prefisso.
+        # i documenti dei processi (stack/versions/percorso) restano senza
+        # prefisso. Con ``study`` le varianti di modalita' prendono anche il
+        # prefisso dello studio: e' il basename che ``cmd_sv`` si aspetta
+        # ({study}_{stream}_{variante}), vedi PR #30.
         parts = name.split(os.sep)
         audio_basename = parts[-1]
         for i, p in enumerate(parts[:-1]):
-            if p in ("discrete", "envelope") and len(parts) - i >= 3:
-                audio_basename = f"{parts[-2]}_{parts[-1]}"
+            if p in ("discrete", "envelope"):
+                if len(parts) - i >= 3:
+                    audio_basename = f"{parts[-2]}_{parts[-1]}"
+                if study:
+                    audio_basename = f"{study}_{audio_basename}"
                 break
         audio_path = os.path.join(audio_dir, *parts[:-1], audio_basename + ".aif")
         pdf_path = os.path.join(score_dir, f"{name}.pdf") if score_dir else None

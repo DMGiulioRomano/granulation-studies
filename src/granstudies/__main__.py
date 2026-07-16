@@ -284,6 +284,7 @@ def cmd_render(
         per_stream=stem,
         use_cache=cache,
         cache_dir=cache_dir or os.path.join(g, "cache"),
+        study=study,
     )
     elapsed = time.perf_counter() - t0
     tempo = f"{elapsed:.1f}s" if elapsed < 60 else f"{int(elapsed // 60)}m{elapsed % 60:04.1f}s"

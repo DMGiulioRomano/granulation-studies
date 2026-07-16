@@ -231,3 +231,53 @@ def test_cmd_sv_exports_percorso_document(tmp_path, monkeypatch):
     assert any(os.path.join("sv", "percorso", f"{study}_percorso.sv") in o for o in outs)
     # Lo stem export del percorso riceve process='percorso', non 'stack'.
     assert "percorso" in stem_processes
+
+
+# --- allineamento render/sv sulle varianti sweep (regressione PR #30) --------------
+
+DOC_WITH_SWEEP = {
+    "study_id": "s_sweepsv",
+    "samples_dir": "samples",
+    "base": {"sample": "x.wav", "duration": 6, "time_mode": "normalized"},
+    "axes": {
+        "density": {"path": "density", "baseline": 20, "values": [5, 50]},
+    },
+    "sweep": {"mode": "envelope", "orders": [1], "plateau": 5, "transition": 5},
+    "streams": {"vox": {}},
+}
+
+
+def test_sweep_render_sv_basenames_align(tmp_path, monkeypatch, capsys):
+    """sweep → render → sv: il render scrive l'audio con lo stesso basename
+    che cmd_sv si aspetta ({study}_{stream}_{variante}), quindi nessuna
+    variante viene saltata per 'audio mancante' (regressione PR #30)."""
+    study = _write_study(tmp_path, monkeypatch, DOC_WITH_SWEEP)
+    import granstudies.render as render_mod
+
+    def fake_render(yaml_path, output_path, samples_dir, output_sr=48000,
+                    per_stream=False, use_cache=False, cache_dir=None):
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+        with open(output_path, "w") as fh:
+            fh.write("x")
+        return [output_path]
+
+    monkeypatch.setattr(render_mod.engine_bridge, "render", fake_render)
+    assert cli.cmd_sweep(study) == 0
+    assert cli.cmd_render(study, no_score=True) == 0
+
+    import granstudies.sv_export as sv_export
+    exported = []
+    monkeypatch.setattr(
+        sv_export, "variant_to_sv",
+        lambda variant, audio, out, layout, markers, markers_scope: exported.append(audio),
+    )
+    assert cli.cmd_sv(study, layout="multi") == 0
+    err = capsys.readouterr().err
+    assert "audio mancante" not in err
+    env_dir = os.path.join(
+        str(tmp_path), "generated", study, "yaml", "sweep", "envelope", "vox"
+    )
+    n_variants = len([f for f in os.listdir(env_dir) if f.endswith(".yml")])
+    assert n_variants > 0
+    assert len(exported) == n_variants
+    assert all(os.path.basename(a).startswith(f"{study}_vox_") for a in exported)
