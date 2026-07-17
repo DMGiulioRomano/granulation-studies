@@ -1,10 +1,9 @@
-# gl-ls
-# TEST STACK 5 (10 minuti) — copia di study_stack_test_5 con duration
-# portata da 190s a 600s. Tutti i breakpoint X degli envelope sono stati
-# riscalati di un fattore 190/600 = 0.31667 per preservare il tempo
-# assoluto a cui cade ogni evento (stessa logica di study_stack_test_5,
-# solo "stirata" su una durata più lunga: quello che accadeva a x=1
-# su 190s ora accade a x=0.3167 su 600s).
+# Brano 01 — versione due (10 minuti): stesso materiale di brano01 con
+# duration portata da 190s a 600s. Tutti i breakpoint X degli envelope sono
+# stati riscalati di un fattore 190/600 = 0.31667 per preservare il tempo
+# assoluto a cui cade ogni evento (stessa logica di brano01, solo "stirata"
+# su una durata più lunga: quello che accadeva a x=1 su 190s ora accade a
+# x=0.3167 su 600s).
 #
 # Documenta i punti d'innesto dell'annidamento (docs/plans/done/nested-generators.md):
 #   - Y banda con `base` annidato (pavimento generato) + `range` scalare
@@ -18,10 +17,10 @@
 # Il seed dei nodi senza `seed` proprio deriva dal padre (gerarchico):
 # rigenerare due volte produce lo stesso stack.yml.
 #
-#   make stack STUDY=study_stack_test_5_10min
+#   make stack STUDY=brano01_v2
 
-study_id: study_stack_test_5_10min
-title: "Test stack 5 — generatori annidati (10 min)"
+study_id: brano01_v2
+title: "Brano 01 — versione due (10 min)"
 seed: 5
 duration: 600
 samples_dir: samples
