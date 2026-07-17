@@ -70,7 +70,10 @@ def _load_specs(study: str, stream: str | None = None) -> list:
     sid = data.get("study_id") or study
     specs = resolve_streams(data, sid, locs=locs)
     if stream:
-        specs = [s for s in specs if s.stream_id == stream]
+        # Match esatto (un cugino) o spread: il nome-spread 'zona_ombra_d05'
+        # seleziona tutti i cugini 'zona_ombra_d05_1'..'_N'.
+        pref = stream + "_"
+        specs = [s for s in specs if s.stream_id == stream or s.stream_id.startswith(pref)]
         if not specs:
             print(f"[sweep] stream '{stream}' non trovata in {study}.", file=sys.stderr)
     return specs
