@@ -35,8 +35,9 @@ compose: _require-study $(MARKER)
 sv: _require-study render
 	$(PY) -m granstudies sv $(STUDY) $(if $(LAYOUT),--layout $(LAYOUT),) $(if $(STREAM),--stream $(STREAM),)
 
-# Pipeline di base: sweep + stack + render. `versions` e `percorso` sono
-# processi opt-in (generano repliche/istanze, potenzialmente pesanti), fuori
-# di proposito da all-study: si lanciano esplicitamente quando servono.
+# Pipeline completa: sweep + stack + versions + percorso + render. versions e
+# percorso sono attivati per presenza (cmd_versions/cmd_percorso sono no-op
+# se lo study.yml non ha il blocco corrispondente), quindi girano sempre
+# prima di render senza costo per gli study che non li usano.
 .PHONY: all-study
-all-study: sweep stack render #describe matrix compose render-final
+all-study: sweep stack versions percorso render #describe matrix compose render-final
