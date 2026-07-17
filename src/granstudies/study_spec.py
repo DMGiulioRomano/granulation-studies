@@ -177,18 +177,34 @@ def _validate(spec: StudySpec, ctx: ErrCtx) -> None:
                 axis=ax.name,
                 hint="dichiara 'values', 'ramp' o una banda ('base'/'range'/'n').",
             )
-        # Avviso non bloccante: valori fuori bounds engine vengono poi clampati.
-        for v in list(ax.values) + [ax.baseline]:
-            b = bounds_mod.bounds_for(ax.path)
-            if b is not None:
-                lo, hi = b
-                if (lo is not None and v < lo) or (hi is not None and v > hi):
+        # Sforo bloccante: i bounds engine sono un safety clamp, un valore
+        # fuori range va fermato al parse invece di essere silenziosamente
+        # clampato in render.
+        #
+        # I bounds del registry sono in *secondi*. Se lo stream dichiara
+        # ``grain.duration_unit: samples`` (stream.py:415), i valori dell'asse
+        # ``grain.duration`` sono in campioni: vanno convertiti in secondi
+        # (fattore 1/output_sr) prima del confronto, e ``output_sr`` porta il
+        # minimo a 1 campione come fa l'engine.
+        samples_unit = (
+            ax.path == "grain.duration"
+            and spec.base.get("grain", {}).get("duration_unit") == "samples"
+        )
+        sr = bounds_mod.default_output_sr()
+        b = bounds_mod.bounds_for(ax.path, output_sr=sr if samples_unit else None)
+        if b is not None:
+            lo, hi = b
+            for v in list(ax.values) + [ax.baseline]:
+                v_sec = v / sr if samples_unit else v
+                if (lo is not None and v_sec < lo) or (hi is not None and v_sec > hi):
+                    unit = "campioni" if samples_unit else "s"
                     raise ctx.err(
-                        f"Asse '{ax.name}' valore {v} fuori bounds {b} "
-                        f"per il path '{ax.path}'.",
+                        f"Asse '{ax.name}' valore {v} {unit} fuori bounds {b} "
+                        f"(s) per il path '{ax.path}'.",
                         key=("axes", ax.name),
                         axis=ax.name,
-                        hint=f"i valori (e il baseline) devono stare in {b}.",
+                        hint=f"i valori (e il baseline), convertiti in secondi, "
+                        f"devono stare in {b}.",
                     )
 
 

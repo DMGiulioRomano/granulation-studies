@@ -12,7 +12,6 @@ import itertools
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
-from . import bounds as bounds_mod
 from .study_spec import StudySpec
 from .yaml_builder import build_document
 
@@ -34,13 +33,13 @@ class Variant:
     values: Dict[str, float]      # nome asse -> valore (tutti gli assi)
 
     def overrides(self, spec: StudySpec, *, output_sr: int = 48000) -> Dict[str, float]:
-        """path YAML -> valore clampato ai bounds engine, per ogni asse."""
-        out: Dict[str, float] = {}
-        for ax in spec.axes:
-            out[ax.path] = bounds_mod.clamp(
-                ax.path, self.values[ax.name], output_sr=output_sr
-            )
-        return out
+        """path YAML -> valore per ogni asse.
+
+        Nessun clamp: i valori enumerabili sono gia' validati (e bloccati se
+        fuori bounds) al parse — il clamp per correttezza avviene una volta
+        sola, li'. ``output_sr`` resta nella firma per simmetria coi consumer.
+        """
+        return {ax.path: self.values[ax.name] for ax in spec.axes}
 
     def to_document(self, spec: StudySpec, *, output_sr: int = 48000) -> Dict[str, Any]:
         base = dict(spec.base)

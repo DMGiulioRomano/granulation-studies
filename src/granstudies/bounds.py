@@ -56,16 +56,39 @@ def bounds_for(
     return (pb.min_val, pb.max_val)
 
 
-def clamp(path: str, value: float, *, output_sr: Optional[int] = None) -> float:
+def default_output_sr() -> int:
+    """Sample rate di render di default dell'engine (single source)."""
+    from .engine_bridge import default_output_sr as _sr
+
+    return _sr()
+
+
+def clamp(
+    path: str,
+    value: float,
+    *,
+    output_sr: Optional[int] = None,
+    in_samples: bool = False,
+) -> float:
     """Riporta ``value`` entro i bounds del path (no-op se path sconosciuto).
 
     ``output_sr``, se fornito, attiva il floor dinamico di ``grain.duration``
     (vedi ``bounds_for``) invece del fallback statico di 1ms.
+
+    ``in_samples``: ``value`` e' in campioni (``grain.duration_unit: samples``,
+    stream.py:415). I bounds del registry sono in secondi, quindi vanno scalati
+    in spazio-campioni (``* output_sr``) prima del confronto; il ritorno resta
+    in campioni. Richiede ``output_sr``.
     """
     b = bounds_for(path, output_sr=output_sr)
     if b is None:
         return value
     lo, hi = b
+    if in_samples:
+        if output_sr is None:
+            raise ValueError("in_samples richiede output_sr")
+        lo = None if lo is None else lo * output_sr
+        hi = None if hi is None else hi * output_sr
     if lo is not None and value < lo:
         return lo
     if hi is not None and value > hi:
