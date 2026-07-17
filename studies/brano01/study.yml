@@ -13,10 +13,10 @@
 # Il seed dei nodi senza `seed` proprio deriva dal padre (gerarchico):
 # rigenerare due volte produce lo stesso stack.yml.
 #
-#   make stack STUDY=study_stack_test_5
+#   make stack STUDY=brano01
 
-study_id: study_stack_test_5
-title: "Test stack 5 — generatori annidati"
+study_id: brano01
+title: "Brano 01"
 seed: 5
 duration: 190
 samples_dir: samples
