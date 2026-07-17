@@ -203,6 +203,74 @@ def test_ramp_full_count_mismatch_with_explicit_n_raises():
         expand_spreads(_streams(v=entry))
 
 
+# --- chiavi puntate in over --------------------------------------------------------
+
+def test_over_dotted_values_equals_nested():
+    dotted = {"spread": {"over": {"base.pointer.start.values": [0.1, 0.2, 0.3]}}}
+    nested = {"spread": {"over": {"base.pointer.start": {"values": [0.1, 0.2, 0.3]}}}}
+    assert expand_spreads(_streams(v=dotted)) == expand_spreads(_streams(v=nested))
+
+
+def test_over_dotted_expr_marker():
+    entry = {"spread": {"n": 3, "over": {"base.onset.expr": "10 * (i + 1)"}}}
+    out = expand_spreads(_streams(v=entry))
+    assert [out[k]["base"]["onset"] for k in out] == [10, 20, 30]
+
+
+def test_over_dotted_leaves_dict_valued_strategy_as_full_path():
+    # Valore-dict = strategy completa: la chiave resta path intero, anche se
+    # termina con un marcatore (banda-base di un asse).
+    entry = {
+        "spread": {
+            "n": 2,
+            "over": {"axes.density.base": {"expr": "50 * (i + 1)", "let": {}}},
+        },
+    }
+    out = expand_spreads(_streams(v=entry))
+    assert out["v_1"]["axes"]["density"]["base"] == 50
+    assert out["v_2"]["axes"]["density"]["base"] == 100
+
+
+def test_over_dotted_banda_fragments_merge_on_path():
+    # base + range + seed su tre righe puntate si fondono in un'unica strategy.
+    from granstudies.value_generators import band
+
+    entry = {
+        "spread": {
+            "n": 4,
+            "over": {
+                "base.volume.base": -12,
+                "base.volume.range": 6,
+                "base.volume.seed": 42,
+            },
+        },
+    }
+    out = expand_spreads(_streams(v=entry))
+    assert [out[k]["base"]["volume"] for k in out] == band(n=4, base=-12, range=6, seed=42)
+
+
+def test_over_dotted_two_markers_same_path_conflicts():
+    # Due marcatori terminali puntati sullo stesso path (values + expr) si
+    # fondono in un'unica strategy a due marcatori: errore a valle.
+    entry = {
+        "spread": {
+            "over": {
+                "base.onset.values": [1, 2],
+                "base.onset.expr": "i",
+            },
+        },
+    }
+    with pytest.raises(SpecError):
+        expand_spreads(_streams(v=entry))
+
+
+def test_over_nondotted_path_unchanged():
+    # Un path che NON termina con un marcatore resta chiave-path intera.
+    entry = {"spread": {"over": {"base.pointer.start": {"values": [0.1, 0.2]}}}}
+    out = expand_spreads(_streams(v=entry))
+    assert out["v_1"]["base"]["pointer"]["start"] == 0.1
+
+
 # --- strategy banda ----------------------------------------------------------------
 
 def test_band_draws_n_values_in_band():
