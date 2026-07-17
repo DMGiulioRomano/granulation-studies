@@ -1,9 +1,14 @@
 function study {
   local s="$1"
   [[ -z "$s" ]] && { echo "uso: study <STUDY>" >&2; return 1 }
-  make all-study STUDY="$s" \
-    && make sv STUDY="$s" \
-    && sonic "generated/$s/sv/stack/${s}_stack_stems.sv"
+  make all-study STUDY="$s" && make sv STUDY="$s" || return 1
+  # stack/versions/percorso: un .sv per stem del documento multi-stream.
+  # sweep: nessun documento multi-stream, un .sv per variante envelope.
+  local f
+  for f in generated/"$s"/sv/{stack,versions,percorso}/"$s"_*_stems.sv(N) \
+           generated/"$s"/sv/sweep/**/*.sv(N); do
+    sonic "$f"
+  done
 }
 
 _study() {

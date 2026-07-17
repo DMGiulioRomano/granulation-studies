@@ -12,8 +12,10 @@ quegli stati — il tutto producendo YAML che l'engine compila in audio.
 ## Pipeline
 
 ```
-study.yml ──sweep──▶ yaml/sweep/*.yml ──render──▶ audio + partitura
-          ──stack──▶ yaml/stack/stack.yml ──┘  │
+study.yml ──sweep────▶ yaml/sweep/*.yml ───────────┬─render──▶ audio + partitura
+          ──stack────▶ yaml/stack/stack.yml ───────┤       │
+          ──versions─▶ yaml/versions/versions.yml ─┤       │
+          ──percorso─▶ yaml/percorso/percorso.yml ─┘       │
                               (ascolto + tag manuali)
                                           ▼
                                      results.yml ──┐

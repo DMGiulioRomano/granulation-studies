@@ -1,8 +1,10 @@
-"""Integrazione sul VERO studies/study01_grain_density/study.yml.
+"""Guardia di migrazione: uno snapshot fisso di study01_grain_density deve
+parsare e produrre output coerenti con entrambi i processi (sweep + stack)
+dopo la rimozione di combine: parallel.
 
-Guardia di migrazione: il file dati reale deve parsare e produrre output
-coerenti con entrambi i processi (sweep + stack) dopo la rimozione di
-combine: parallel.
+Usa una fixture (tests/fixtures/study01_migrated_stack.yml), non il file di
+lavoro reale in studies/ — quel file è curato a mano dall'utente e cambia
+liberamente; questo test non deve dipendere dal suo contenuto corrente.
 """
 import os
 
@@ -13,7 +15,7 @@ from granstudies.stack import generate_stack_document
 from granstudies.study_spec import resolve_streams
 
 _STUDY = os.path.join(
-    os.path.dirname(__file__), "..", "studies", "study01_grain_density", "study.yml"
+    os.path.dirname(__file__), "fixtures", "study01_migrated_stack.yml"
 )
 
 

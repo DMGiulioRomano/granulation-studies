@@ -5,16 +5,19 @@ un'espressione aritmetica i cui nomi si risolvono in uno scope di scalari e
 forme *statiche* di Env (``[a, b]``, ``[[t, v], ...]``, ``{type, points,
 curve}``). Un'operazione tra un Env e uno scalare agisce elementwise sulle y
 (i tempi restano intatti); tra due Env e' un errore esplicito — richiederebbe
-unione dei breakpoint, si estende se servira' davvero.
+unione dei breakpoint. L'unica porta Env⊙Env e' la primitiva ``mix(A, B, w)``
+(issue #29): il morphing pesato tra due forme, con semantica esplicita di
+ricampionamento sull'unione dei tempi (vedi ``_mix``).
 
 Grammatica (whitelist AST, ``mode="eval"``): numeri, nomi, ``+ - * / // % **``,
 unario ``-``, parentesi, le chiamate alle funzioni primitive di ``_FUNCTIONS``
 (``abs``/``floor``/``ceil``/``sqrt``/``exp``/``log``/``sin``/``cos``/``tan``/
-``atan``/``min``/``max``) e le costanti ``pi``/``e`` (ombreggiabili dallo
-scope). Una chiamata con un argomento-Env agisce elementwise sulle y (es.
-``min(env, 10)`` e' un clamp); due Env nella stessa chiamata sono un errore,
-come per gli operatori. Niente subscript, confronti o keyword: il parser
-rifiuta ogni altro costrutto col frammento incriminato.
+``atan``/``min``/``max``/``mix``) e le costanti ``pi``/``e`` (ombreggiabili
+dallo scope). Una chiamata con un argomento-Env agisce elementwise sulle y
+(es. ``min(env, 10)`` e' un clamp); due Env nella stessa chiamata sono un
+errore, come per gli operatori — tranne ``mix``, che di due (o tre) Env vive.
+Niente subscript, confronti o keyword: il parser rifiuta ogni altro costrutto
+col frammento incriminato.
 
 Modulo puro, solo stdlib: chi lo chiama decide lo scope (``expand_env`` passa
 il solo ``let``; la strategy di spread aggiunge ``i``, ``n`` e i pescaggi
@@ -59,6 +62,9 @@ _FUNCTIONS = {
     "atan": (math.atan, 1, 1),
     "min": (min, 2, None),
     "max": (max, 2, None),
+    # ``mix`` ha un ramo dedicato in ``_call`` (accetta Env multipli: e'
+    # l'unica porta Env⊙Env); qui vive per la whitelist e il check di arieta'.
+    "mix": (None, 3, 3),
 }
 
 # Chiavi ammesse nel nodo-expr.
@@ -223,6 +229,8 @@ def _call(node: ast.Call, scope: Mapping[str, Any]) -> Any:
         raise ValueError(
             f"expr: '{name}' vuole {span} argomenti (ricevuti {count})."
         )
+    if name == "mix":
+        return _mix(*args)
 
     def apply(*xs):
         try:
@@ -246,6 +254,169 @@ def _call(node: ast.Call, scope: Mapping[str, Any]) -> Any:
         return apply(*xs)
 
     return _map_y(args[k], on_y)
+
+
+# --- mix(A, B, w): il morphing tra due forme (issue #29) ----------------------
+#
+# L'unica porta Env⊙Env del DSL: ricampiona A e B sull'unione dei tempi e
+# interpola le y col peso ``w`` (che puo' essere a sua volta un Env). Fast-path
+# esatti dove il risultato e' rappresentabile senza perdita (linear/linear con
+# w scalare; step/step; w-Env su forme scalari); altrove campionamento
+# adattivo con suddivisione ricorsiva al punto medio. Niente clamp su ``w``
+# (l'estrapolazione e' legittima; il clamp si scrive con min/max).
+
+# Tolleranza del campionamento adattivo, frazione dell'escursione del
+# risultato: sotto e' inudibile e i breakpoint restano pochi e leggibili.
+_MIX_REL_TOL = 1e-3
+
+# Guardia anti-degenerazione della suddivisione ricorsiva: 2**12 punti per
+# segmento bastano a qualunque forma sensata (errore di configurazione, non
+# caso d'uso — stessa filosofia di MAX_RAMP_POINTS nei generatori).
+_MIX_MAX_DEPTH = 12
+
+
+def _mix_form(v: Any) -> Tuple[str, Any, float]:
+    """``(kind, data, curve)`` di un argomento di mix.
+
+    ``kind``: ``scalar`` (data = valore) | ``linear`` | ``step`` (data =
+    breakpoint ordinati per tempo). Le forme sono quelle statiche di Env gia'
+    ammesse in scope; ``type`` fuori da linear/step non e' campionabile qui
+    (le forme future dell'engine entreranno con la loro semantica, non con
+    una inventata).
+    """
+    if _is_scalar(v):
+        return "scalar", v, 1.0
+    if isinstance(v, dict):
+        kind = v.get("type", "linear")
+        curve = v.get("curve", 1.0)
+        pts = sorted(v["points"], key=lambda p: p[0])
+        if kind == "step":
+            if curve != 1.0:
+                raise ValueError(
+                    "expr: mix, 'curve' non ha effetto con 'type: step' "
+                    "(nessuna rampa da piegare)."
+                )
+            return "step", pts, 1.0
+        if kind != "linear":
+            raise ValueError(
+                f"expr: mix, type '{kind}' non campionabile (linear | step)."
+            )
+        if curve <= 0:
+            raise ValueError(
+                f"expr: mix, curve deve essere > 0 (ricevuto {curve})."
+            )
+        return "linear", pts, curve
+    if _is_pairs(v):
+        return "linear", sorted(([t, y] for t, y in v), key=lambda p: p[0]), 1.0
+    a, b = v  # shorthand [a, b] == [[0, a], [1, b]]
+    return "linear", [[0.0, a], [1.0, b]], 1.0
+
+
+def _form_at(form: Tuple[str, Any, float], t: float) -> float:
+    """La forma campionata al tempo ``t``, con hold fuori dai bordi.
+
+    Stessa semantica di ``_interp_breakpoints`` in ``value_generators``
+    (linear con piega ``u**curve``, step hold-sinistro): logica duplicata
+    perche' e' ``value_generators`` a importare questo modulo, non viceversa
+    (come il deep-merge locale di ``spread``).
+    """
+    kind, data, curve = form
+    if kind == "scalar":
+        return data
+    pts = data
+    if t <= pts[0][0]:
+        return pts[0][1]
+    if t >= pts[-1][0]:
+        return pts[-1][1]
+    for (t0, v0), (t1, v1) in zip(pts, pts[1:]):
+        if t0 <= t <= t1:
+            if kind == "step" or t1 == t0:
+                return v0
+            u = (t - t0) / (t1 - t0)
+            if curve != 1.0:
+                u = u ** curve
+            return v0 + (v1 - v0) * u
+    return pts[-1][1]  # irraggiungibile: t e' tra primo e ultimo tempo
+
+
+def _mix(a: Any, b: Any, w: Any) -> Any:
+    """``A*(1-w) + B*w``: morphing pesato tra due forme.
+
+    Tre scalari -> lerp scalare. Con Env in gioco le forme devono abitare lo
+    stesso mondo: tutte step (il risultato e' step sull'unione dei tempi,
+    esatto) o tutte continue (linear/curve). Nel continuo il risultato e'
+    esatto sull'unione dei tempi quando resta piecewise-linear (``curve == 1``
+    ovunque e nessun prodotto Env×Env: ``w`` scalare, oppure ``w``-Env su A e
+    B scalari); altrimenti campionamento adattivo (``_mix_adaptive``). Step
+    dentro morphing continuo = discontinuita' pesata, fuori dal v1: errore
+    esplicito, nessuna semantica inventata.
+    """
+    forms = [_mix_form(x) for x in (a, b, w)]
+    kinds = {kind for kind, _, _ in forms if kind != "scalar"}
+    if not kinds:
+        return a + (b - a) * w
+    if "step" in kinds and "linear" in kinds:
+        raise ValueError(
+            "expr: mix tra una forma step e una continua non e' supportato "
+            "(discontinuita' pesata, fuori dal v1) — dichiara le forme "
+            "entrambe step o entrambe continue."
+        )
+
+    def value(t: float) -> float:
+        va = _form_at(forms[0], t)
+        vb = _form_at(forms[1], t)
+        vw = _form_at(forms[2], t)
+        return va + (vb - va) * vw
+
+    times = sorted({
+        t for kind, data, _ in forms if kind != "scalar" for t, _ in data
+    })
+    if kinds == {"step"}:
+        return {"type": "step", "points": [[t, value(t)] for t in times]}
+    exact = all(
+        curve == 1.0 for kind, _, curve in forms if kind == "linear"
+    ) and (
+        forms[2][0] == "scalar"
+        or (forms[0][0] == "scalar" and forms[1][0] == "scalar")
+    )
+    if exact or len(times) < 2:
+        return [[t, value(t)] for t in times]
+    return _mix_adaptive(value, times)
+
+
+def _mix_adaptive(value, times: list) -> list:
+    """Breakpoint lineari adattivi di ``value`` sui segmenti di ``times``.
+
+    Suddivisione ricorsiva al punto medio finche' lo scarto della corda,
+    misurato al punto medio, scende sotto tolleranza (il caso peggiore per
+    segmento e' una parabola — i prodotti di forme lineari — e li' lo scarto
+    massimo cade esattamente al punto medio). Tolleranza proporzionale
+    all'escursione stimata campionando tempi e punti medi di partenza. La
+    tabella di campionamento e' locale e temporanea: l'output resta un Env
+    simbolico a pochi breakpoint, leggibile nei pannelli envelope.
+    """
+    samples = [(t, value(t)) for t in times]
+    mids = [
+        ((t0 + t1) / 2, value((t0 + t1) / 2))
+        for (t0, _), (t1, _) in zip(samples, samples[1:])
+    ]
+    ys = [y for _, y in samples] + [y for _, y in mids]
+    span = max(ys) - min(ys)
+    tol = max(span * _MIX_REL_TOL, 1e-9)
+    out = [samples[0]]
+
+    def refine(t0, y0, t1, y1, depth):
+        tm = (t0 + t1) / 2
+        ym = value(tm)
+        if abs(ym - (y0 + y1) / 2) <= tol or depth >= _MIX_MAX_DEPTH:
+            out.append((t1, y1))
+            return
+        refine(t0, y0, tm, ym, depth + 1)
+        refine(tm, ym, t1, y1, depth + 1)
+
+    for (t0, y0), (t1, y1) in zip(samples, samples[1:]):
+        refine(t0, y0, t1, y1, 0)
+    return [[t, y] for t, y in out]
 
 
 def _rebuild(v: Any) -> Any:

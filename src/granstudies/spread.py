@@ -18,7 +18,7 @@ import copy
 from typing import Any, Dict, List
 
 from .errors import ErrCtx
-from .expr import eval_expr, parse_expr_node
+from .expr import eval_expr, is_expr_node, parse_expr_node
 from .value_generators import (
     Y_GENERATOR_KEYS,
     band,
@@ -212,13 +212,39 @@ def _ramp_full(
         return ramp(**expand_params(params, seed=seed))
 
 
+def _spread_n(raw: Any, ctx: ErrCtx) -> Any:
+    """``spread.n`` normalizzato: il valore com'e', o il nodo-expr valutato.
+
+    Il nodo-expr (percorso-v1, issue #29) rende ``n`` funzione delle variabili
+    del percorso, iniettate nel suo ``let`` come in ogni espressione: il coro
+    cresce o decresce di istanza in istanza. Valutato qui deve dare un intero
+    >= 1; un default nel ``let`` tiene lo studio valido anche senza percorso.
+    """
+    if not is_expr_node(raw):
+        return raw
+    key = ("spread", "n")
+    with ctx.wrapping(key=key):
+        text, let = parse_expr_node(raw)
+        out = eval_expr(text, let)
+    if isinstance(out, float) and out.is_integer():
+        out = int(out)
+    if not isinstance(out, int) or isinstance(out, bool) or out < 1:
+        raise ctx.err(
+            f"spread: l'espressione di 'n' deve dare un intero >= 1 "
+            f"(valutato {out!r}).",
+            key=key,
+            hint="arrotonda nell'espressione con floor/ceil.",
+        )
+    return out
+
+
 def _resolve_n(
     name: str, spread: Dict[str, Any], strategies: Dict[str, tuple], ctx: ErrCtx
 ) -> int:
     """``n`` effettivo dello spread: esplicito e conteggi posseduti coincidono."""
     counts: Dict[str, int] = {}
     if "n" in spread:
-        counts["spread.n"] = spread["n"]
+        counts["spread.n"] = _spread_n(spread["n"], ctx)
     for path, (marker, params) in strategies.items():
         owned = _owned_count(name, path, marker, params, ctx)
         if owned is not None:
@@ -347,12 +373,17 @@ def _validate_spread(name: str, spread: Any, ctx: ErrCtx) -> Dict[str, Any]:
 
 
 def _plan_entry(
-    name: str, entry: Dict[str, Any], locs: Locations | None
-) -> tuple[List[str], Dict[str, List[Any]]]:
-    """(nomi generati, valori per path) di una entry-spread.
+    name: str, entry: Dict[str, Any], locs: Locations | None, pad: int | None = None
+) -> tuple[List[str], Dict[str, List[Any]], List[str]]:
+    """(nomi generati, valori per path, nomi-fantasma) di una entry-spread.
 
-    I nomi sono 1-based, zero-padded alla larghezza di ``n``. Una collisione
-    tra generati di spread diverse e' strutturalmente impossibile (l'indice e'
+    I nomi sono 1-based, zero-padded alla larghezza di ``n`` — o di ``pad``
+    quando il chiamante lo fornisce (il percorso passa il massimo ``n`` lungo
+    le istanze: la stessa voce logica ha lo stesso nome ovunque esista, e il
+    post-merge per nome-base la cuce nel tempo). I nomi-fantasma sono le voci
+    tra ``n`` e ``pad`` che *in questa istanza* non esistono: servono a
+    consumare le loro patch senza farne stream ordinari. Una collisione tra
+    generati di spread diverse e' strutturalmente impossibile (l'indice e'
     solo cifre, i nomi delle entry sono chiavi uniche del dict): l'unico
     incontro possibile e' con una entry esplicita, cioe' la patch.
     """
@@ -364,9 +395,11 @@ def _plan_entry(
         path: _strategy_values(name, path, marker, params, n, ctx)
         for path, (marker, params) in strategies.items()
     }
-    width = len(str(n))
+    top = max(n, pad or 0)
+    width = len(str(top))
     names = [f"{name}_{i + 1:0{width}d}" for i in range(n)]
-    return names, per_path
+    ghosts = [f"{name}_{i + 1:0{width}d}" for i in range(n, top)]
+    return names, per_path, ghosts
 
 
 def _is_spread(entry: Any) -> bool:
@@ -374,7 +407,9 @@ def _is_spread(entry: Any) -> bool:
 
 
 def expand_spreads(
-    streams: Dict[str, Any], locs: Locations | None = None
+    streams: Dict[str, Any],
+    locs: Locations | None = None,
+    pad_n: Dict[str, int] | None = None,
 ) -> Dict[str, Any]:
     """Espande le entry-spread di ``streams:`` in entry ordinarie.
 
@@ -384,16 +419,23 @@ def expand_spreads(
     generato e viene consumata ("genera n, poi ritocca a mano il quinto"),
     ovunque compaia nel documento. Con ``locs`` gli errori portano file e
     riga (lookup override-first dentro ``streams.<nome>``).
+
+    ``pad_n`` (percorso-v1, issue #29) stabilizza il padding dei nomi con
+    ``n`` dinamico: ``{entry: massimo n lungo il percorso}``. La patch di una
+    voce che in questa istanza non esiste (indice oltre ``n`` ma dentro il
+    massimo) viene consumata in silenzio: la voce e' speciale *in tutte le
+    istanze in cui esiste*, e qui non esiste. Senza ``pad_n`` il
+    comportamento storico e' invariato.
     """
     plans = {
-        name: _plan_entry(name, entry, locs)
+        name: _plan_entry(name, entry, locs, (pad_n or {}).get(name))
         for name, entry in streams.items()
         if _is_spread(entry)
     }
     # Le patch si individuano prima di costruire: una entry-patch che e' a sua
     # volta una spread e' ambigua (generatore o ritocco?) -> errore.
     consumed: set = set()
-    for name, (names, _) in plans.items():
+    for name, (names, _, ghosts) in plans.items():
         for gname in names:
             if gname not in streams:
                 continue
@@ -406,6 +448,9 @@ def expand_spreads(
                     f"da '{gname}' per farne un ritocco del generato.",
                 )
             consumed.add(gname)
+        for gname in ghosts:
+            if gname in streams and not _is_spread(streams[gname]):
+                consumed.add(gname)
 
     expanded: Dict[str, Any] = {}
     for name, entry in streams.items():
@@ -414,7 +459,7 @@ def expand_spreads(
         if name not in plans:
             expanded[name] = entry
             continue
-        names, per_path = plans[name]
+        names, per_path, _ghosts = plans[name]
         proto = {k: v for k, v in entry.items() if k != "spread"}
         for i, gname in enumerate(names):
             override = copy.deepcopy(proto)
@@ -426,3 +471,26 @@ def expand_spreads(
                 override = _deep_merge(override, copy.deepcopy(streams[gname] or {}))
             expanded[gname] = override
     return expanded
+
+
+def spread_counts(
+    streams: Dict[str, Any], locs: Locations | None = None
+) -> Dict[str, int]:
+    """``n`` effettivo di ogni entry-spread di ``streams:``.
+
+    Serve al percorso per il padding stabile: valutato sul documento di ogni
+    istanza (dopo l'iniezione), il massimo per entry diventa il ``pad_n`` di
+    ``expand_spreads``. Stessa risoluzione di ``_plan_entry``, senza generare
+    i valori.
+    """
+    out: Dict[str, int] = {}
+    for name, entry in streams.items():
+        if not _is_spread(entry):
+            continue
+        ctx = ErrCtx(locs=locs, stream=name)
+        over = _validate_spread(name, entry["spread"], ctx)
+        strategies = {
+            path: _strategy(name, path, cfg, ctx) for path, cfg in over.items()
+        }
+        out[name] = _resolve_n(name, entry["spread"], strategies, ctx)
+    return out

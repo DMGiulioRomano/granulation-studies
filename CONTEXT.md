@@ -29,6 +29,49 @@ Una voce = un file yaml. Accordi e polimetrie nascono impilando più stream con 
 in rapporto tra loro (in banda audio → accordi, in sub-audio → polimetrie);
 l'orchestratore li riunisce in un unico yaml per l'engine.
 
+**stack**:
+L'unione verticale di più stream: un solo documento engine in cui le voci suonano
+insieme. È l'unità che il percorso dispone nel tempo.
+_Evita_: usare "stack" per una singola voce → quella è **stream**
+
+**percorso**:
+Il quarto asse del sistema (issue #29): distribuisce **istanze di spread nel tempo**, come
+Y distribuisce valori nel tempo, la camminata-X i tempi, e spread i valori nella popolazione
+di stream. Dove spread genera una popolazione una volta, il percorso la fa evolvere lungo più
+istanze disposte sul tempo reale — i parametri cambiano **insieme**, appaiati, nessun prodotto
+cartesiano. È il gemello compositivo di `versions`, che resta lo strumento d'analisi (una
+variabile si muove, le altre ferme, per osservare). Sta a `versions` come `stack` sta a `sweep`.
+_Evita_: usare il percorso per generare varianti da confrontare → quello è `versions`
+
+**istanza**:
+Una singola apparizione della popolazione (lo spread valutato) dentro il percorso, con onset
+e durata propri e i valori che il processo le assegna. È un passo di un processo, non l'esito
+di una combinazione (quella è una *versione* di `versions`). La cardinalità della popolazione
+può cambiare da un'istanza all'altra; una voce logica è la stessa ovunque esista.
+
+**traiettoria**:
+La legge con cui una variabile del percorso cambia lungo il tempo reale del percorso. Si
+scrive come la `base` di un axis (Env/banda: `base` più `range`/`drift` opzionali, oppure
+`expr`; uno scalare nudo è la costante); una banda con `drift` è una traiettoria a deriva
+correlata (ogni istanza vicina alla precedente). Non è un envelope dentro uno stream: vive
+sul tempo del percorso, normalizzato 0→1 sulla sua estensione (l'arco nella camminata,
+l'ultimo onset nella forma enumerata), non dentro il tempo di una voce.
+_Evita_: scriverla con `values`/`ramp` → sono generatori di sequenze, appartengono ai
+contesti indicizzati (`onset` enumerato, `spread`, `versions`)
+
+**arco**:
+L'estensione temporale totale del percorso nella strategy a camminata. È il tempo che la
+camminata degli onset consuma: si genera un'istanza dopo l'altra finché l'onset resta dentro
+l'arco (l'ultima può sforarlo con la propria durata). Il numero di istanze non si dichiara:
+emerge dall'arco e dal passo.
+_Evita_: confonderlo con la durata di un'istanza o di uno stream → quella è `duration`
+
+**passo**:
+La legge dell'intervallo tra un'istanza e la successiva nella strategy a camminata:
+`onset_prossimo = onset + passo(onset)`, una traiettoria campionata all'onset corrente.
+Costante = istanze equispaziate; in rampa = accelerando o rallentando; banda con `drift` =
+respiro irregolare ma correlato. È la camminata-X trasposta sull'asse delle istanze.
+
 ## Lo sweep nel tempo
 
 Termini che vivono sull'asse **tempo**: sono le leve dell'envelope nello sweep, non

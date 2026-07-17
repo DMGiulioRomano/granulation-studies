@@ -79,6 +79,15 @@ versions:
   onset: {values: [0, 10, 40]}    # chiave riservata (opzionale): posizioni assolute
   duration: {values: [8, 8, 20]}  # chiave riservata (opzionale): durate per versione
 
+# Processo percorso (attivo per presenza; richiede `stack:`): istanze di
+# spread distribuite sul tempo reale — i valori cambiano insieme, appaiati,
+# nessun prodotto cartesiano. Vedi la sezione "Il blocco percorso" sotto.
+percorso:
+  arco: 180                       # strategy camminata: estensione totale...
+  passo: {base: [30, 8]}          #   ...e legge dell'intervallo (XOR: `onset:` enumerato)
+  duration: 1.3                   # traiettoria riservata, unit factor (default) | s
+  w: {base: [0, 1], range: .1}    # traiettoria -> iniettata nei let che la nominano
+
 # Processo stack (attivo per presenza del blocco): tutti gli stream sommati in
 # UN documento multi-stream. Vedi la sezione "Il blocco stack" sotto.
 stack:
@@ -95,9 +104,15 @@ stack:
 
 # Stream: varianti di ascolto con override parziali sul documento sopra.
 # Regole del merge: i dict si fondono ricorsivamente, le liste rimpiazzano.
-# Se questa sezione è assente, sweep genera un'unica versione senza sotto-cartella.
+# Le chiavi PUNTATE si espandono in dict annidati prima del merge, come in
+# `spread.over`: `axes.density.base.expr: X` equivale a
+# `axes: {density: {base: {expr: X}}}` (rami sovrapposti si fondono). Se questa
+# sezione è assente, sweep genera un'unica versione senza sotto-cartella.
 streams:
   base: {}                       # nessun override — identica alla base
+
+  fermo:                         # override in forma PUNTATA (equivale all'annidata)
+    axes.density.base.expr: "env"  # cambia solo l'expr; il let si eredita dal merge
 
   nome_stream:                   # chiave libera → diventa la sotto-cartella dell'output
     duration: 60                 # durata propria (s): vince sul default top-level
@@ -384,13 +399,30 @@ axes:
 - **Funzioni primitive** (whitelist — il set generatore da cui derivare le
   altre): `abs`, `floor`, `ceil`, `sqrt`, `exp`, `log` (naturale, o
   `log(x, b)` per la base), `sin`, `cos`, `tan`, `atan`, `min`, `max`
-  (variadiche, almeno 2 argomenti). Una chiamata con un argomento-Env agisce
+  (variadiche, almeno 2 argomenti), `mix` (vedi sotto). Una chiamata con un
+  argomento-Env agisce
   **sulle y** come gli operatori — `min(env, 10)` è un clamp del livello,
-  `floor(env)` quantizza — e due Env nella stessa chiamata sono errore.
+  `floor(env)` quantizza — e due Env nella stessa chiamata sono errore
+  (tranne `mix`, che di due Env vive).
   `%` è il resto con semantica Python (segno del divisore); `//` il
   quoziente intero: `i % 3` e `i // 3` trasformano l'indice dello spread in
   coordinate di griglia. Fuori dominio (`sqrt` di un negativo, `log` di zero,
   potenza frazionaria di un negativo) è errore chiaro, non un NaN.
+- **`mix(A, B, w)`** — il morphing pesato `A*(1-w) + B*w` tra due forme:
+  l'**unica porta Env⊙Env** del sistema (issue #29). Esattamente 3 argomenti
+  posizionali. Uno scalare al posto di una forma diventa Env costante
+  (broadcast); `w` può essere a sua volta un Env (il morphing evolve dentro
+  il tempo dello stream); **niente clamp** su `w` — fuori `[0, 1]` si
+  estrapola, il clamp si scrive con `min`/`max`; l'annidamento è libero
+  (`mix(mix(A, B, w), C, v)`). Dove il risultato resta rappresentabile senza
+  perdita il ricampionamento sull'unione dei tempi è **esatto**
+  (linear/linear con `w` scalare; step/step; `w`-Env su scalari); altrove
+  (forme `curve`, `w`-Env su forme mobili) interviene un campionamento
+  adattivo con scarto massimo sotto una tolleranza proporzionale
+  all'escursione — l'output resta un Env simbolico a pochi breakpoint.
+  Le forme devono abitare lo stesso mondo: **step con continua è errore**
+  (discontinuità pesata, fuori dal v1). Il morphing a scatti si scrive con
+  forme step (o scalari) e `w` step.
 - **`let`** dichiara i nomi in scope: scalari o forme **statiche** di Env
   (`[a, b]`, `[[t, v], ...]`, `{type, points, curve}`). Un nodo-generatore
   dentro `let` è errore: i due meccanismi non si annidano — con una sola
@@ -498,12 +530,16 @@ soli**, restando riproducibili tra run.
 
 ## Il blocco `versions:`
 
-Il processo versions è un **modificatore dello stack**: parte solo se sono
-presenti sia `versions:` sia `stack:`, e l'output resta l'unico
-`yaml/stack/stack.yml`. Dove lo stack collassa gli stream in un documento,
-versions **replica quel collasso N volte nel tempo**: una replica per
-combinazione delle variabili. Di default le versioni si concatenano; con le
-chiavi riservate `onset`/`duration` si distanziano o sovrappongono liberamente.
+Il processo versions è un **processo indipendente** come sweep e stack:
+richiede il blocco `stack:` (le versioni sono repliche dello stack) ma ha
+sottocomando (`make versions`) e output propri, `yaml/versions/versions.yml`.
+`make stack` resta **puro**: produce il materiale com'è scritto in
+`yaml/stack/stack.yml`, ignorando il blocco `versions:` — è l'ascolto
+dell'istanza di partenza (vedi `percorso`, issue #29). Dove lo stack collassa
+gli stream in un documento, versions **replica quel collasso N volte nel
+tempo**: una replica per combinazione delle variabili. Di default le versioni
+si concatenano; con le chiavi riservate `onset`/`duration` si distanziano o
+sovrappongono liberamente.
 
 ```yaml
 versions:
@@ -568,15 +604,15 @@ versions:
   (il parser `.sv` ancora ogni wavefile al frame 0, nessun attributo di
   offset): per gli stream con `onset > 0` l'export genera quindi una **copia
   paddata** dello stem — `onset` secondi di silenzio prepesi — in
-  `audio/stack/padded/`, e ancora lì gli envelope. Gli stem originali non
+  `audio/versions/padded/`, e ancora lì gli envelope. Gli stem originali non
   vengono toccati; le copie si rigenerano solo se l'originale è più nuovo.
 - **Stem accorpati per voce logica.** In STEMS mode ogni combinazione produce
-  il proprio stem (`stack__fermo__d=1.aif`, `stack__fermo__d=2.aif`, ...): con
-  molte combinazioni il `.sv` per-stem avrebbe un pane per file. Dopo la pass
+  il proprio stem (`versions__fermo__d=1.aif`, `versions__fermo__d=2.aif`, ...):
+  con molte combinazioni il `.sv` per-stem avrebbe un pane per file. Dopo la pass
   STEMS il render fa quindi un **post-merge per nome-base** (lo `stream_id`
   prima del primo `__`): le versioni di una stessa voce logica vengono sommate
   al proprio onset (overlay-add con clip: regge anche versioni sovrapposte) in
-  un unico file `stack__{voce}.aif`, ancorato al tempo 0 dello stack. `stack_stems_to_sv`
+  un unico file `versions__{voce}.aif`, ancorato al tempo 0 del documento. `stack_stems_to_sv`
   consuma i file accorpati: **un pane per voce logica**, con gli envelope di
   ogni versione offsettati al proprio onset dentro il pane. Gli stem per
   combinazione restano su disco intatti; i file accorpati si rigenerano solo
@@ -588,6 +624,126 @@ l'inviluppo si scrive una volta nel default di `axes:` (`expr: "env + d"`,
 `let: {env: ..., d: 0}`), lo stream fermo ridefinisce solo `expr: "env"`
 (il `let` si eredita via deep-merge), e `versions: {d: {values: [1, 2, 3]}}`
 genera le tre coppie concatenate.
+
+## Il blocco `percorso:`
+
+Il quarto asse del sistema (issue #29), **gemello compositivo** di `versions`:
+dove `versions` genera il prodotto cartesiano delle combinazioni (analisi —
+una variabile si muove, le altre ferme, per osservare), `percorso` dispone K
+**istanze** dello stack su una timeline e fa cambiare i valori **insieme**,
+appaiati sul tempo reale — nessun prodotto cartesiano. Sta a `versions` come
+`stack` sta a `sweep`. Processo indipendente, attivo per presenza: richiede
+`stack:`, può coesistere con `versions:` (li esercitano target diversi), e
+`make stack` resta l'ascolto dell'istanza di partenza.
+
+```yaml
+percorso:
+  arco: 180                                        # camminata: estensione totale
+  passo: {base: [30, 8]}                           # accelerando: IOI da 30s a 8s
+  duration: 1.3                                    # factor: crossfade costante
+  w: {base: [0, 1], range: .1, drift: {step: .2}}  # la manopola: sale 0→1 con deriva
+```
+
+- **Due strategy di timeline, mutuamente esclusive** (dichiararle insieme è
+  errore; `k:` da solo non esiste):
+  - **enumerata — `onset:`**: gli onset li dichiari tu, sull'indice, col
+    vocabolario di sequenza (`values` = tempi assoluti uno per istanza,
+    `ramp`, banda). Il conteggio `k` lo **possiede `onset`** (lunghezza di
+    `values`, griglia del ramp con `step`, `n` della banda); `k:` esplicito è
+    ammesso come cross-check (discordanza = errore) ed è obbligatorio solo
+    quando `onset` non possiede un conteggio (`ramp {start, stop}` senza
+    `step`, banda senza `n`).
+  - **camminata — `arco:` + `passo:`** (obbligatori insieme): `arco` è
+    l'estensione totale (scalare > 0), `passo` la legge dell'intervallo —
+    `t_next = t + passo(t)`, con `passo` traiettoria campionata all'onset
+    corrente, finché `t < arco`. **`k` emerge**, non si dichiara (dichiararlo
+    è errore). L'equispaziato si scrive con passo costante
+    (`arco: 180, passo: 22.5` → 8 istanze). È la camminata-X trasposta
+    sull'asse delle istanze.
+- **Le altre chiavi sono traiettorie**: la legge con cui una variabile cambia
+  lungo il tempo reale del percorso. Si scrivono in **grammatica-Env**, come
+  la `base` di un axis: banda (`base` + `range`/`drift`/`distribution`/`seed`
+  opzionali), nodo-expr (`{expr, let}`), o scalare nudo = costante. **Mai
+  `values`/`ramp`**: sono generatori di sequenze e appartengono ai contesti
+  indicizzati (`onset` enumerato, `spread`, `versions`) — usarli in una
+  traiettoria è errore con hint. Una banda con `n` è errore: le traiettorie
+  non possiedono mai il conteggio (sono leggi sul tempo: le campioni in 3 o
+  300 istanze e sono le stesse). Una banda con `drift` è una traiettoria a
+  **deriva correlata**: ogni istanza vicina alla precedente, il passo
+  dell'ubriaco sull'asse delle istanze.
+- **Nomi riservati**: `k`, `onset`, `arco`, `passo`, `duration` sono chiavi
+  del blocco (mai variabili); `i`, `n`, `pi`, `e` sono riservati agli scope
+  expr e vengono rifiutati come nomi di traiettoria. Una traiettoria che
+  nessuna espressione del documento referenzia è errore (guardia
+  anti-refuso, come `versions`).
+- **`duration`** è una traiettoria riservata con **`unit: factor` (default) |
+  `s`**, dichiarata accanto alla forma (`duration: {base: [30, 8], unit: s}`;
+  lo scalare nudo è un factor costante). Assente = **legato**.
+- **La timeline si risolve prima** (ordine a due fasi, per rompere la
+  circolarità "le variabili si campionano sul tempo reale, ma il tempo reale
+  lo creano onset e passo"): prima gli onset — sull'indice in enumerata,
+  per accumulo `t += passo(t)` in camminata (con `passo` campionato all'onset
+  corrente; un passo non positivo è errore) — poi tutto il resto, `duration`
+  e traiettorie ordinarie, campionato **all'onset reale** di ogni istanza.
+  "A metà" = a metà dell'ascolto, non del conteggio.
+- **Normalizzazione del tempo delle traiettorie**: i tempi dei breakpoint
+  sono normalizzati 0 → 1 sull'**estensione del percorso** — l'`arco` in
+  camminata (l'ultima istanza cade *prima* di 1: campionamento onesto, come
+  i grani campionano un envelope), l'**ultimo onset** in enumerata (l'ultima
+  istanza cade esattamente a 1).
+- **Semantica di `duration`**: campionata all'onset dell'istanza, identica
+  nelle due strategy. Con `unit: factor`,
+  `duration_k = factor(t_k) × intervallo verso la prossima istanza` — 1 =
+  legato, > 1 sovrapposizione (crossfade), < 1 buchi: è il *duty* un asse più
+  in alto, e mantiene la proporzione dentro un accelerando. L'intervallo di
+  riferimento dell'ultima istanza è `passo(t_K)` in camminata (il passo che
+  avrebbe seguito, già calcolato: l'ultima istanza può **sforare l'arco** con
+  la propria durata — l'engine dimensiona su `max(onset + duration)`) e
+  l'ultimo intervallo noto in enumerata. Assente = legato (factor 1).
+  Con `unit: s` la durata è assoluta. Bordo: enumerata con `k = 1` e factor
+  (anche implicito, il legato) è errore — non c'è intervallo di riferimento,
+  serve `unit: s`.
+- **Iniezione e istanze**: per ogni istanza i valori campionati vengono
+  iniettati negli scope `let` dei nodi-expr che nominano la variabile (il
+  meccanismo di `versions`), poi il parse di sempre: le strategy di spread si
+  **rivalutano a ogni istanza** coi valori iniettati — l'istanza è lo spread
+  che evolve. Il default nel `let` (`w: 0`) tiene lo studio valido senza il
+  blocco: `axes:`/`stack:` come sono scritti *sono* l'istanza di partenza
+  (`make stack` la suona), il percorso aggiunge solo il "verso dove".
+  Nominare la stessa variabile in più registri (forma Y, respiro X,
+  `spread.n`) **accoppia** le evoluzioni; nominare diverso le decorrelava —
+  nessuna sintassi dedicata, emerge dall'iniezione.
+- **Seed invariato se non toccato**: ogni istanza eredita tutto via
+  deep-merge, quindi la stessa camminata/pescaggio ritorna, trasformata dalle
+  variabili — il gesto che ritorna. Il reseed è un override esplicito come
+  un altro.
+- **`spread.n` come nodo-expr**: `n: {expr: "floor(3 + 9 * w)", let: {w: 0}}`
+  — valutato per istanza, deve dare un intero >= 1 (arrotonda con
+  `floor`/`ceil`). Il coro cresce o decresce lungo il percorso. La scelta
+  ridistribuzione/accodamento emerge dalla forma del ramp in `over`:
+  `ramp {start, stop}` suddivide su `n` (il ventaglio si ridistribuisce),
+  `ramp {start, step}` è progressione indipendente da `n` (le voci esistenti
+  restano ferme, le nuove si accodano).
+- **Padding stabile**: con `n` dinamico lo zero-padding dei nomi generati è
+  fissato sulla **larghezza del massimo `n` lungo il percorso** — la stessa
+  voce logica ha lo stesso nome ovunque esista, e il post-merge per
+  nome-base la cuce nel tempo (le voci nate dopo hanno silenzio prima). La
+  **patch di spread** (`coro_05:`) si applica in ogni istanza in cui la voce
+  esiste — e può contenere nodi-expr che nominano variabili del percorso:
+  l'eccezione evolve. Nelle istanze in cui la voce non esiste la patch viene
+  consumata in silenzio. La patch di *istanza* ("il quinto passaggio fa
+  eccezione") non esiste (parcheggiata): la scappatoia è la strategy
+  enumerata con una traiettoria `{type: step}` su una finestra che contiene
+  solo l'istanza da trattare.
+- **Naming e output**: ogni stream di ogni istanza ha lo `stream_id`
+  suffissato **`nome__k=NN`** (indice d'istanza 1-based, zero-padded sulla
+  larghezza del K finale: in SV l'ordine alfabetico è quello cronologico).
+  L'onset per-stream resta relativo alla propria istanza
+  (`onset_finale = onset_istanza + onset_stream`); la `duration` d'istanza fa
+  da default del documento della singola istanza (una duration per-stream
+  vince). Durata documento = `max(onset + duration)`. Output:
+  `yaml/percorso/percorso.yml` via `make percorso`; il render generico e il
+  ramo sv lo raccolgono come gli altri processi.
 
 ## Il blocco `spread:` (stream generati)
 
@@ -716,29 +872,37 @@ auto-decorrelano col meccanismo esistente.
 ## Layout di `generated/`
 
 Primo livello = tipo di artefatto, secondo livello = **processo** (`sweep` /
-`stack`). Il nome della stream è incorporato nel basename dei file sweep (non
-solo nella sotto-cartella) per facilitare l'identificazione in Sonic
-Visualiser; il documento stack è uno solo (gli stream vi sono collassati).
+`stack` / `versions` / `percorso`). Il nome dello studio e della stream sono
+incorporati nel basename dei file sweep (non solo nella sotto-cartella) per
+facilitare l'identificazione in Sonic Visualiser — audio e `.sv` condividono
+lo stesso basename `<study>_<stream_id>_<variante>`; i documenti stack,
+versions e percorso sono uno per processo (gli stream vi sono collassati).
 
 ```
 generated/<study_id>/
   yaml/sweep/envelope/<stream_id>/e1__density.yml
   yaml/stack/stack.yml
+  yaml/versions/versions.yml     # solo per studi con blocco versions
+  yaml/percorso/percorso.yml     # solo per studi con blocco percorso
   yaml/streams_expanded.yml      # solo per studi con spread: il dict streams espanso
-  audio/sweep/envelope/<stream_id>/<stream_id>_e1__density.aif
+  audio/sweep/envelope/<stream_id>/<study_id>_<stream_id>_e1__density.aif
   audio/stack/stack.aif
-  sv/sweep/envelope/<stream_id>/<stream_id>_e1__density.sv
+  audio/versions/versions.aif
+  audio/percorso/percorso.aif
+  sv/sweep/envelope/<stream_id>/<study_id>_<stream_id>_e1__density.sv
 ```
 
 `generated/` è rigenerabile: dopo un aggiornamento basta rilanciare
-`make sweep` / `make stack`.
+`make sweep` / `make stack` / `make versions` / `make percorso`.
 
 ## Comandi Make
 
 ```bash
 make sweep  STUDY=<id>                    # genera tutte le stream
 make sweep  STUDY=<id> STREAM=nome        # genera solo quella stream
-make stack  STUDY=<id>                    # genera il documento multi-stream (stack)
+make stack  STUDY=<id>                    # genera il documento multi-stream (stack, puro)
+make versions STUDY=<id>                  # genera il documento delle versioni (prodotto cartesiano)
+make percorso STUDY=<id>                  # genera il documento del percorso (orchestrazione temporale)
 make render STUDY=<id>                    # renderizza gli YAML cambiati (incrementale, in parallelo)
 make render STUDY=<id> FORCE=1            # rirenderizza tutto (es. dopo update engine o sample)
 make render STUDY=<id> JOBS=4             # limita i worker paralleli (default: min(8, cpu))

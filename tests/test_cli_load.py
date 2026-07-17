@@ -68,7 +68,7 @@ def test_load_spec_invalid_stream_still_raises(tmp_path, monkeypatch):
         cli._load_spec(study)
 
 
-# --- cmd_stack con blocco versions ------------------------------------------
+# --- cmd_versions con documento incompleto senza iniezione -------------------
 
 VERSIONS_DOC = {
     "study_id": "s_versions",
@@ -78,7 +78,7 @@ VERSIONS_DOC = {
     "base": {"onset": 0, "sample": "corpus.wav"},
     "axes": {
         # Nessun default per 'd' nel let: il documento e' completo SOLO dopo
-        # l'iniezione di versions — cmd_stack deve branchare prima del parse.
+        # l'iniezione di versions — cmd_versions deve branchare prima del parse.
         "density": {
             "path": "density",
             "baseline": 50,
@@ -93,11 +93,11 @@ VERSIONS_DOC = {
 }
 
 
-def test_cmd_stack_versions_writes_concatenated_document(tmp_path, monkeypatch):
+def test_cmd_versions_writes_concatenated_document(tmp_path, monkeypatch):
     study = _write_study(tmp_path, monkeypatch, VERSIONS_DOC)
     monkeypatch.setattr(cli, "gen_dir", lambda s: os.path.join(str(tmp_path), "generated", s))
-    assert cli.cmd_stack(study) == 0
-    out = os.path.join(str(tmp_path), "generated", study, "yaml", "stack", "stack.yml")
+    assert cli.cmd_versions(study) == 0
+    out = os.path.join(str(tmp_path), "generated", study, "yaml", "versions", "versions.yml")
     with open(out) as fh:
         doc = yaml.safe_load(fh)
     ids = [s["stream_id"] for s in doc["streams"]]

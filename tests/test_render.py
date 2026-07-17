@@ -580,6 +580,70 @@ def test_render_variants_per_stream_merges_version_stems(tmp_path, monkeypatch):
     assert os.path.exists(str(tmp_path / "audio" / "stack" / "stack__fermo__d=1.aif"))
 
 
+def test_render_audio_basename_includes_study_prefix(tmp_path, monkeypatch):
+    # Regressione PR #30: cmd_sv cerca {study}_{stream}_{variante}.aif, ma il
+    # render scriveva {stream}_{variante}.aif. Con study= il basename audio
+    # delle varianti sweep include il prefisso dello studio.
+    variant_root = str(tmp_path / "yaml")
+    spec = _spec("envelope")
+    spec = __import__("dataclasses").replace(spec, stream_id="vox")
+    write_variants(spec, os.path.join(variant_root, "sweep"))
+    calls = []
+    monkeypatch.setattr(render_mod.engine_bridge, "render", _fake_engine_render(calls))
+    manifest = render_variants(
+        variant_dir=variant_root,
+        audio_dir=str(tmp_path / "audio"),
+        score_dir=None,
+        samples_dir="unused",
+        jobs=1,
+        study="s01",
+    )
+    names = [os.path.basename(e["audio"]) for e in manifest]
+    assert names
+    assert all(n.startswith("s01_vox_") for n in names)
+
+
+def test_render_study_prefix_without_stream_subdir(tmp_path, monkeypatch):
+    # Layout senza stream (yaml/sweep/envelope/<variante>.yml): cmd_sv si
+    # aspetta {study}_{variante}.aif, quindi il prefisso si applica comunque.
+    variant_root = str(tmp_path / "yaml")
+    written = write_variants(_spec("envelope"), os.path.join(variant_root, "sweep"))
+    calls = []
+    monkeypatch.setattr(render_mod.engine_bridge, "render", _fake_engine_render(calls))
+    manifest = render_variants(
+        variant_dir=variant_root,
+        audio_dir=str(tmp_path / "audio"),
+        score_dir=None,
+        samples_dir="unused",
+        jobs=1,
+        study="s01",
+    )
+    expected = sorted(
+        "s01_" + os.path.splitext(os.path.basename(p))[0] + ".aif" for p in written
+    )
+    assert sorted(os.path.basename(e["audio"]) for e in manifest) == expected
+
+
+def test_render_study_prefix_leaves_documents_alone(tmp_path, monkeypatch):
+    # I documenti dei processi (stack/versions/percorso) restano senza
+    # prefisso: cmd_sv li cerca per nome processo ({process}.aif).
+    from granstudies.render import write_stack
+
+    yaml_dir = str(tmp_path / "yaml")
+    write_stack(_stack_specs(), yaml_dir)
+    calls = []
+    monkeypatch.setattr(render_mod.engine_bridge, "render", _fake_engine_render(calls))
+    manifest = render_variants(
+        variant_dir=yaml_dir,
+        audio_dir=str(tmp_path / "audio"),
+        score_dir=None,
+        samples_dir="unused",
+        jobs=1,
+        study="s01",
+    )
+    assert [os.path.basename(e["audio"]) for e in manifest] == ["stack.aif"]
+
+
 def test_render_stream_prefix_relative_to_mode_dir(tmp_path, monkeypatch):
     # Nuovo layout: yaml/sweep/envelope/<stream>/<nome>.yml — il basename audio
     # va prefissato col nome dello stream anche con la cartella sweep/ in mezzo.

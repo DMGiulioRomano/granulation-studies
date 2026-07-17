@@ -513,7 +513,9 @@ def _build_sv_xml_stems(stems: List[Tuple[str, str, int, float, float, List[Tupl
     return bz2.compress(xml_bytes)
 
 
-def stack_stems_to_sv(stack_yaml_path: str, audio_dir: str, out_path: str) -> str | None:
+def stack_stems_to_sv(
+    stack_yaml_path: str, audio_dir: str, out_path: str, process: str = "stack"
+) -> str | None:
     """.sv con un pane per stem audio (un file audio per stream), non per il mix.
 
     A differenza di ``stack_to_sv`` (un solo pane waveform contro l'audio
@@ -524,13 +526,17 @@ def stack_stems_to_sv(stack_yaml_path: str, audio_dir: str, out_path: str) -> st
     ``None`` (senza scrivere nulla) se manca anche un solo stem.
 
     Gli stream vengono raggruppati per nome-base (lo ``stream_id`` prima del
-    primo ``__``): un gruppo con piu' stream e' una voce logica moltiplicata
-    da ``versions`` e consuma il file accorpato ``stack__{base}.aif`` prodotto
-    dal post-merge del render (issue #24) — un pane per voce, non uno per
-    combinazione. Il file accorpato e' gia' ancorato al tempo 0 dello stack,
-    quindi niente padding; gli envelope di ogni versione restano distinti nel
-    pane, offsettati al proprio onset. I gruppi singoli consumano lo stem
-    grezzo come sempre (con l'onset cotto come silenzio iniziale).
+    primo ``__``): un gruppo con piu' stream e' una voce logica moltiplicata da
+    ``versions``/``percorso`` e consuma il file accorpato ``{process}__{base}.aif``
+    prodotto dal post-merge del render (issue #24) — un pane per voce, non uno
+    per combinazione/istanza. Il file accorpato e' gia' ancorato al tempo 0 del
+    documento, quindi niente padding; gli envelope di ogni istanza restano
+    distinti nel pane, offsettati al proprio onset. I gruppi singoli consumano
+    lo stem grezzo come sempre (con l'onset cotto come silenzio iniziale).
+
+    ``process`` (default ``stack``) e' il prefisso degli stem del processo,
+    cablato un tempo a ``stack`` — gli stem di ``versions``/``percorso`` (nelle
+    proprie cartelle) hanno prefisso ``versions__``/``percorso__`` (issue #29).
     """
     import yaml
 
@@ -545,7 +551,7 @@ def stack_stems_to_sv(stack_yaml_path: str, audio_dir: str, out_path: str) -> st
     stems = []
     for base_name, group in groups.items():
         if len(group) > 1:
-            audio_path = os.path.join(audio_dir, f"stack__{base_name}.aif")
+            audio_path = os.path.join(audio_dir, f"{process}__{base_name}.aif")
             if not os.path.exists(audio_path):
                 print(f"[sv] stem accorpato mancante per '{base_name}': {audio_path} (esegui 'render --stem')")
                 return None
@@ -562,7 +568,7 @@ def stack_stems_to_sv(stack_yaml_path: str, audio_dir: str, out_path: str) -> st
             continue
         stream = group[0]
         stream_id = stream.get("stream_id", "stream")
-        audio_path = os.path.join(audio_dir, f"stack__{stream_id}.aif")
+        audio_path = os.path.join(audio_dir, f"{process}__{stream_id}.aif")
         if not os.path.exists(audio_path):
             print(f"[sv] stem mancante per '{stream_id}': {audio_path} (esegui 'render --stem')")
             return None

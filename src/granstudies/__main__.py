@@ -2,6 +2,8 @@
 
     granstudies sweep    STUDY      genera le varianti YAML (processo sweep)
     granstudies stack    STUDY      genera il documento multi-stream (processo stack)
+    granstudies versions STUDY      genera il documento delle versioni (processo versions)
+    granstudies percorso STUDY      genera il documento del percorso (processo percorso)
     granstudies render   STUDY      renderizza audio + partitura
     granstudies describe STUDY      calcola descrittori, aggiorna results.yml
     granstudies matrix   STUDY      costruisce kinship.json
@@ -179,29 +181,14 @@ def _warn_orphans(variants_dir: str, written: set[str], scoped: bool) -> None:
 
 
 def cmd_stack(study: str) -> int:
-    from .render import write_stack, write_versions_stack
+    from .render import write_stack
 
+    # Stack puro: il blocco ``versions:`` non viene esercitato qui (processo
+    # proprio, ``cmd_versions``). Lo stack com'e' scritto e' l'ascolto del
+    # materiale di partenza — l'istanza 0 del percorso.
     data = _load_data(study)
     if "stack" not in data:
         print(f"[stack] nessun blocco 'stack:' in {study}/study.yml — niente da fare.")
-        return 0
-    if "versions" in data:
-        # Il parse per-versione avviene DOPO l'iniezione delle variabili nei
-        # let: il documento grezzo puo' essere incompleto per costruzione
-        # (variabile senza default nel let), quindi niente _load_specs qui.
-        from .yaml_loc import load as load_with_locations
-
-        path = os.path.join(study_dir(study), "study.yml")
-        raw, locs = load_with_locations(path)
-        sid = raw.get("study_id") or study
-        _write_expanded_streams(study, raw)
-        out = os.path.join(gen_dir(study), "yaml")
-        target = os.path.join(out, "stack", "stack.yml")
-        before = os.path.getmtime(target) if os.path.exists(target) else None
-        written = write_versions_stack(raw, sid, out, locs=locs)
-        changed = before != os.path.getmtime(written[0])
-        stato = "aggiornato" if changed else "invariato"
-        print(f"[stack] documento versions ({stato}) -> {written[0]}")
         return 0
     specs = _load_specs(study)
     if not specs:
@@ -217,6 +204,61 @@ def cmd_stack(study: str) -> int:
     return 0
 
 
+def cmd_versions(study: str) -> int:
+    from .render import write_versions
+
+    # Attivazione per presenza, come sweep e stack: versions e' un processo
+    # indipendente (analisi per confronto), con sottocomando e cartella propri.
+    data = _load_data(study)
+    if "versions" not in data:
+        print(f"[versions] nessun blocco 'versions:' in {study}/study.yml — niente da fare.")
+        return 0
+    # Il parse per-versione avviene DOPO l'iniezione delle variabili nei let:
+    # il documento grezzo puo' essere incompleto per costruzione (variabile
+    # senza default nel let), quindi niente _load_specs qui.
+    from .yaml_loc import load as load_with_locations
+
+    path = os.path.join(study_dir(study), "study.yml")
+    raw, locs = load_with_locations(path)
+    sid = raw.get("study_id") or study
+    _write_expanded_streams(study, raw)
+    out = os.path.join(gen_dir(study), "yaml")
+    target = os.path.join(out, "versions", "versions.yml")
+    before = os.path.getmtime(target) if os.path.exists(target) else None
+    written = write_versions(raw, sid, out, locs=locs)
+    changed = before != os.path.getmtime(written[0])
+    stato = "aggiornato" if changed else "invariato"
+    print(f"[versions] documento versions ({stato}) -> {written[0]}")
+    return 0
+
+
+def cmd_percorso(study: str) -> int:
+    from .render import write_percorso
+
+    # Attivazione per presenza, come gli altri processi: percorso e' il
+    # quarto, indipendente (composizione per orchestrazione temporale).
+    data = _load_data(study)
+    if "percorso" not in data:
+        print(f"[percorso] nessun blocco 'percorso:' in {study}/study.yml — niente da fare.")
+        return 0
+    # Come versions: il parse per-istanza avviene DOPO l'iniezione delle
+    # traiettorie nei let, quindi niente _load_specs sul documento grezzo.
+    from .yaml_loc import load as load_with_locations
+
+    path = os.path.join(study_dir(study), "study.yml")
+    raw, locs = load_with_locations(path)
+    sid = raw.get("study_id") or study
+    _write_expanded_streams(study, raw)
+    out = os.path.join(gen_dir(study), "yaml")
+    target = os.path.join(out, "percorso", "percorso.yml")
+    before = os.path.getmtime(target) if os.path.exists(target) else None
+    written = write_percorso(raw, sid, out, locs=locs)
+    changed = before != os.path.getmtime(written[0])
+    stato = "aggiornato" if changed else "invariato"
+    print(f"[percorso] documento percorso ({stato}) -> {written[0]}")
+    return 0
+
+
 def cmd_render(
     study: str, no_score: bool, force: bool = False, jobs: int | None = None,
     stem: bool = False, cache: bool = False, cache_dir: str | None = None,
@@ -225,11 +267,11 @@ def cmd_render(
 
     spec = _load_spec(study)
     g = gen_dir(study)
-    # Il render e' generico: discende yaml/ ricorsivamente (sweep/ e stack/) e
-    # rispecchia i sotto-path sotto audio/ e score/.
+    # Il render e' generico: discende yaml/ ricorsivamente (sweep/, stack/,
+    # versions/, percorso/) e rispecchia i sotto-path sotto audio/ e score/.
     variant_dir = os.path.join(g, "yaml")
     if not os.path.isdir(variant_dir):
-        print(f"[render] nessuno YAML: esegui prima 'sweep {study}' o 'stack {study}'.", file=sys.stderr)
+        print(f"[render] nessuno YAML: esegui prima 'sweep {study}', 'stack {study}', 'versions {study}' o 'percorso {study}'.", file=sys.stderr)
         return 1
     t0 = time.perf_counter()
     manifest = render_variants(
@@ -242,6 +284,7 @@ def cmd_render(
         per_stream=stem,
         use_cache=cache,
         cache_dir=cache_dir or os.path.join(g, "cache"),
+        study=study,
     )
     elapsed = time.perf_counter() - t0
     tempo = f"{elapsed:.1f}s" if elapsed < 60 else f"{int(elapsed // 60)}m{elapsed % 60:04.1f}s"
@@ -348,31 +391,34 @@ def cmd_compose(study: str, seed: int | None, steps: int | None, start: str | No
     return 0
 
 
-def _cmd_sv_stack(study: str, g: str, layout: str, total: list) -> int:
-    """Emette i .sv del documento stack: uno contro il mix, uno contro gli stem."""
+def _cmd_sv_document(study: str, g: str, layout: str, total: list, process: str) -> None:
+    """Emette i .sv di un documento multi-stream (``stack``/``versions``/
+    ``percorso``): uno contro il mix, uno contro gli stem. Ogni processo vive
+    nella propria cartella e i suoi stem hanno il prefisso ``<process>__``."""
     from .sv_export import stack_to_sv, stack_stems_to_sv
 
-    variant = os.path.join(g, "yaml", "stack", "stack.yml")
-    audio_dir = os.path.join(g, "audio", "stack")
-    audio = os.path.join(audio_dir, "stack.aif")
+    variant = os.path.join(g, "yaml", process, f"{process}.yml")
+    audio_dir = os.path.join(g, "audio", process)
+    audio = os.path.join(audio_dir, f"{process}.aif")
     if not os.path.exists(variant):
-        print("[sv] nessun documento stack: esegui prima 'stack'.", file=sys.stderr)
-        return 0
+        print(f"[sv] nessun documento {process}: esegui prima '{process}'.", file=sys.stderr)
+        return
     if not os.path.exists(audio):
-        print("[sv] audio stack mancante: esegui prima 'render'.", file=sys.stderr)
-        return 0
+        print(f"[sv] audio {process} mancante: esegui prima 'render'.", file=sys.stderr)
+        return
     suffix = f"_{layout}" if layout == "single" else ""
-    out = os.path.join(g, "sv", "stack", f"{study}_stack" + suffix + ".sv")
+    out = os.path.join(g, "sv", process, f"{study}_{process}" + suffix + ".sv")
     stack_to_sv(variant, audio, out, layout=layout)
     total.append(out)
     print(f"[sv] {out}")
 
     # Un pane per stem (audio separato per stream): richiede 'render --stem'.
-    stems_out = os.path.join(g, "sv", "stack", f"{study}_stack_stems.sv")
-    if stack_stems_to_sv(variant, audio_dir, stems_out):
+    # Il prefisso degli stem e' quello del processo (versions__/percorso__),
+    # non il letterale 'stack__' (issue #29).
+    stems_out = os.path.join(g, "sv", process, f"{study}_{process}_stems.sv")
+    if stack_stems_to_sv(variant, audio_dir, stems_out, process=process):
         total.append(stems_out)
         print(f"[sv] {stems_out}")
-    return 1
 
 
 def cmd_sv(study: str, layout: str, markers: bool = True, stream: str | None = None,
@@ -383,12 +429,16 @@ def cmd_sv(study: str, layout: str, markers: bool = True, stream: str | None = N
     g = gen_dir(study)
     total: list = []
 
-    # Processo stack: un solo .sv per il documento multi-stream, contro il suo
-    # audio sommato. Attivo per presenza del blocco (come cmd_stack); i flag
-    # marker/scope restano sul solo ramo sweep (i marker sono plateau-di-sweep).
-    if "stack" in data and stream is None:
-        _cmd_sv_stack(study, g, layout, total)
-        if "sweep" not in data:
+    # Processi multi-stream (stack, versions, percorso): un .sv per documento,
+    # contro il suo audio sommato. Attivi per presenza del blocco (come i
+    # rispettivi comandi); i flag marker/scope restano sul solo ramo sweep
+    # (i marker sono plateau-di-sweep).
+    if stream is None:
+        processes = ("stack", "versions", "percorso")
+        for process in processes:
+            if process in data:
+                _cmd_sv_document(study, g, layout, total, process)
+        if any(p in data for p in processes) and "sweep" not in data:
             print(f"[sv] {len(total)} sessioni totali")
             return 0
 
@@ -456,6 +506,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     stp = sub.add_parser("stack", help="genera il documento multi-stream (stack)")
     stp.add_argument("study")
+
+    vp = sub.add_parser("versions", help="genera il documento delle versioni (prodotto cartesiano)")
+    vp.add_argument("study")
+
+    pp = sub.add_parser("percorso", help="genera il documento del percorso (orchestrazione temporale)")
+    pp.add_argument("study")
 
     rp = sub.add_parser("render", help="renderizza audio + partitura")
     rp.add_argument("study")
@@ -534,6 +590,10 @@ def _dispatch(args) -> int:
         return cmd_sweep(args.study, args.stream)
     if args.command == "stack":
         return cmd_stack(args.study)
+    if args.command == "versions":
+        return cmd_versions(args.study)
+    if args.command == "percorso":
+        return cmd_percorso(args.study)
     if args.command == "render":
         return cmd_render(args.study, args.no_score, args.force, args.jobs,
                           args.stem, args.cache, args.cache_dir)
