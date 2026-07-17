@@ -21,6 +21,18 @@ compose/render-final sono **commentate**, quindi fuori dalla pipeline viva.
 
 Non proporre di "continuare" su quei moduli come se fossero scelte dell'utente.
 
+## Cartelle in `studies/`
+
+Dopo la pulizia delle fixture di test/sintassi restano solo le vere prove
+d'ascolto e i brani:
+
+| Cartella | Cos'è |
+|----------|-------|
+| `study01_grain_density` | studio curato a mano (density + grain.duration), unica con `ascolto/` |
+| `study01_grain_density_stack` | stream non-cartesiani estratti da study01 (ascolto verticale) |
+| `brano01` | brano musicale (ex `study_stack_test_5`) |
+| `brano01_v2` | versione a 10 min di brano01 (ex `study_stack_test_5_10min`) |
+
 ## Diario di ascolto
 
 Ogni studio ha una cartella `ascolto/` dentro la sua directory:
