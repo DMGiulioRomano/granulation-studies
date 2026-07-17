@@ -28,6 +28,9 @@ cancella.
   intendevo terzi di tono o Hz di differenza.
 - [ ] Fare tutti gli ascolti dei grani di **study01 short** e **study01 long**.
 - [ ] Scrivere la parte **study01 meso** (ancora da fare) e poi farne gli ascolti.
+- [ ] Valutare se spostare il diario di ascolto (`ascolto/`) fuori da
+  `study01_grain_density`: metterlo nella working directory o direttamente
+  dentro `studies/`, invece di tenerlo dentro il singolo studio.
 
 ## Fatto
 
