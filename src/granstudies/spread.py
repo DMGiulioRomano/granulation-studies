@@ -37,6 +37,15 @@ _SPREAD_KEYS = frozenset({"n", "over"})
 # senza ``n`` (il conteggio e' dello spread).
 _LET_BAND_KEYS = frozenset({"base", "range", "seed", "distribution", "drift"})
 
+# Marcatori che aprono una strategy dentro ``over[path]``. Una chiave puntata
+# di ``over`` che termina con uno di questi (``base.pointer.start.values``)
+# viene splittata in ``{path: {marcatore: valore}}`` — la stessa espansione a
+# punti che gli override di stream hanno via ``study_spec._expand_dotted_keys``.
+# ponytail: i path di ``over`` puntano a ``base.*``/assi e non terminano con
+# questi nomi; la collisione (un path che finisce davvero in ``base``/``seed``/
+# ...) non si dà nel dominio — se servisse, si scrive la forma annidata.
+_STRATEGY_MARKERS = Y_GENERATOR_KEYS | _LET_BAND_KEYS | frozenset({"expr", "let", "n"})
+
 # Default iniettato nei generati quando l'entry non dichiara ``sweep:``: gli
 # stream di uno spread vivono solo nello stack (ascolto verticale), non
 # moltiplicano le varianti di sweep.
@@ -347,6 +356,37 @@ def _strategy_values(
         return band(n=n, **expand_params(band_params, seed=band_params["seed"]))
 
 
+def _expand_over_dotted(over: Dict[str, Any]) -> Dict[str, Any]:
+    """Espande le chiavi puntate di ``over``.
+
+    Una chiave che termina con un marcatore di strategy diventa
+    ``{path: {marcatore: valore}}`` (``base.pointer.start.values: [...]`` ->
+    ``base.pointer.start: {values: [...]}``); i frammenti che condividono il
+    path si fondono, cosi' una banda si scrive su piu' righe (``.base``,
+    ``.range``, ``.seed``). Le chiavi che non terminano con un marcatore sono
+    path interi e restano invariate. Simmetrico a
+    ``study_spec._expand_dotted_keys`` per gli override di stream.
+    """
+    out: Dict[str, Any] = {}
+    for key, val in over.items():
+        head, _, last = key.rpartition(".") if isinstance(key, str) else ("", "", "")
+        # Un valore-dict e' gia' una strategy completa: la chiave resta path
+        # intero (cosi' ``axes.density.base: {expr: ...}`` non si spezza sul
+        # ``base`` finale). Si splitta solo il valore terminale, dove il
+        # marcatore vive nella chiave (``...start.values: [..]``).
+        if head and last in _STRATEGY_MARKERS and not isinstance(val, dict):
+            slot = out.setdefault(head, {})
+            if isinstance(slot, dict):
+                slot[last] = val
+                continue
+        # path intero: fonde con eventuali frammenti gia' accumulati sul path.
+        if isinstance(out.get(key), dict) and isinstance(val, dict):
+            out[key] = {**out[key], **val}
+        else:
+            out[key] = val
+    return out
+
+
 def _validate_spread(name: str, spread: Any, ctx: ErrCtx) -> Dict[str, Any]:
     if not isinstance(spread, dict):
         raise ctx.err(
@@ -369,7 +409,7 @@ def _validate_spread(name: str, spread: Any, ctx: ErrCtx) -> Dict[str, Any]:
             hint="es. \"over: {base.pointer.start: {ramp: {start: 0.1, "
             "step: 0.1}}}\".",
         )
-    return over
+    return _expand_over_dotted(over)
 
 
 def _plan_entry(

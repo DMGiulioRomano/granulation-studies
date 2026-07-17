@@ -6,6 +6,15 @@ cancella.
 
 ## Da fare
 
+- [ ] Riascoltare le 4 zone d'ombra compartimentate (stream `zona_ombra_d05`,
+  `zona_ombra_d10_20`, `zona_ombra_d25_50`, `zona_ombra_d55_60` — study.yml:66-105)
+  con i 7 cugini pointer.start (indice→secondi: 1=0.1 2=0.25 3=0.4 4=0.55 5=0.8
+  6=0.915 7=1.1), sostituiscono la mappa precedente in `riepilogo.md`. In
+  particolare per `zona_ombra_d55_60` verificare l'estensione grain.dur fino a
+  0.008 (prima non coperta, segnalata come "da verificare" nel vecchio riepilogo).
+- [ ] `zona_ombra_d55_60`: la ramp density ora arriva a **80**
+  (`study.yml:101`, valori 55 e 80). Ho sentito finora solo fino a density 60;
+  density 80 è ancora da sentire.
 - [ ] Ascolto differenza di density tra due stream in stack (versions),
   ripetuto a diverse densità di base: 20–30 Hz, 30–50 Hz, 50–100 Hz,
   100–1000 Hz. (Il range 30–50 Hz con differenze 0.01/0.1/1 è già stato

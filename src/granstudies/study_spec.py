@@ -34,6 +34,14 @@ _GENERATOR_KEYS = Y_GENERATOR_KEYS
 # vanno rimosse insieme quando uno stream cambia generatore su quell'asse).
 _BAND_KEYS = frozenset({"base", "range", "n", "seed", "distribution", "drift"})
 
+# Campi obbligatori per marcatore-generatore (chiave canonica di ``y_generator``).
+# Un merge/override parziale puo' lasciare un generatore incompleto (es.
+# ``ramp: {step: 1}`` senza ``start``/``stop``): senza guardia esploderebbe con
+# un ``TypeError`` grezzo da ``ramp(**params)``. ``values`` (lista) e ``band``
+# (``base`` garantito dal marcatore, ``n`` gia' validato) non hanno campi
+# scoperti — la tabella e' estendibile a futuri generatori.
+_REQUIRED_GEN_FIELDS = {"ramp": ("start", "stop", "step")}
+
 
 @dataclass(frozen=True)
 class Axis:
@@ -261,6 +269,33 @@ def _expand_dotted_keys(override: Dict[str, Any]) -> Dict[str, Any]:
             contribution = {k: v}
         out = _deep_merge(out, contribution)
     return out
+
+
+def _check_generator_complete(
+    name: str, gen_key: str, gen_params: Any, ctx: ErrCtx
+) -> None:
+    """Alza ``SpecError`` se al generatore mancano campi obbligatori.
+
+    Guardia contro i generatori incompleti che un override/merge parziale puo'
+    lasciare (``ramp: {step}`` eredita ``start``/``stop`` solo se la base era a
+    sua volta un ramp; se la base era ``values`` restano solo i campi scritti).
+    Tabella-driven (``_REQUIRED_GEN_FIELDS``): estendibile senza toccare questa
+    funzione.
+    """
+    required = _REQUIRED_GEN_FIELDS.get(gen_key, ())
+    if not isinstance(gen_params, dict):
+        return
+    missing = [k for k in required if k not in gen_params]
+    if missing:
+        raise ctx.err(
+            f"Asse '{name}': {gen_key} incompleto, manca {missing} "
+            f"(servono {list(required)}).",
+            key=("axes", name),
+            axis=name,
+            hint=f"dichiara {', '.join(required)} su axes.{name}.{gen_key}; "
+            "un override parziale eredita gli altri campi solo se la base ha "
+            f"gia' un {gen_key}.",
+        )
 
 
 def _replace_generators(merged: Dict[str, Any], override: Dict[str, Any]) -> None:
@@ -506,6 +541,7 @@ def parse_study_spec(
         # canonica values|ramp|band, con i parametri della banda raccolti piatti.
         with ctx.wrapping(key=("axes", name), axis=name):
             gen_key, gen_params = y_generator(cfg)
+        _check_generator_complete(name, gen_key, gen_params, ctx)
         x_cfg = (stack_axes or {}).get(name)
         defers = gen_key == "band" and "n" not in gen_params
         if defers:
