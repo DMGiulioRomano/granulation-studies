@@ -939,6 +939,84 @@ def test_expr_resolve_streams_end_to_end():
     assert axis.values == [100.0, 150.0]
 
 
+# --- strategy expr: expr annidati dentro let (issue #28) ---------------------------
+
+def test_expr_nested_let_sees_spread_index():
+    entry = {
+        "spread": {
+            "n": 3,
+            "over": {
+                "base.onset": {"expr": "g * 2", "let": {"g": {"expr": "i + 1"}}},
+            },
+        },
+    }
+    out = expand_spreads(_streams(v=entry))
+    assert [out[k]["base"]["onset"] for k in out] == [2, 4, 6]
+
+
+def test_expr_nested_let_coexists_with_band_let():
+    from granstudies.value_generators import band
+
+    entry = {
+        "spread": {
+            "n": 3,
+            "over": {
+                "base.volume": {
+                    "expr": "v + g",
+                    "let": {
+                        "v": {"base": 0, "range": 1, "seed": 7},
+                        "g": {"expr": "i * 10"},
+                    },
+                },
+            },
+        },
+    }
+    out = expand_spreads(_streams(v=entry))
+    draws = band(n=3, base=0, range=1, seed=7)
+    assert [out[k]["base"]["volume"] for k in out] == [
+        round(d + i * 10, 9) for i, d in enumerate(draws)
+    ]
+
+
+def test_expr_nested_let_references_band_let_var():
+    from granstudies.value_generators import band
+
+    entry = {
+        "spread": {
+            "n": 3,
+            "over": {
+                "base.volume": {
+                    "expr": "g",
+                    "let": {
+                        "v": {"base": 0, "range": 1, "seed": 7},
+                        "g": {"expr": "v * 2"},
+                    },
+                },
+            },
+        },
+    }
+    out = expand_spreads(_streams(v=entry))
+    draws = band(n=3, base=0, range=1, seed=7)
+    assert [out[k]["base"]["volume"] for k in out] == [round(d * 2, 9) for d in draws]
+
+
+def test_expr_nested_let_cycle_carries_stream_context():
+    entry = {
+        "spread": {
+            "n": 2,
+            "over": {
+                "base.onset": {
+                    "expr": "a",
+                    "let": {"a": {"expr": "b"}, "b": {"expr": "a"}},
+                },
+            },
+        },
+    }
+    with pytest.raises(SpecError) as exc:
+        expand_spreads(_streams(v=entry))
+    assert "ciclo" in str(exc.value)
+
+
 # --- n come nodo-expr (percorso-v1, fase 4) --------------------------------------
 
 def test_n_expr_node_evaluated():
