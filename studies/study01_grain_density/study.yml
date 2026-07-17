@@ -22,7 +22,7 @@ samples_dir: samples
 base:
   onset: 0
   duration: 6          # usato solo dalle varianti discrete (mode: discrete | both)
-  sample: corpus.wav
+  sample: silenzi.wav
   time_mode: normalized
   grain:
     envelope: hanning
@@ -73,7 +73,7 @@ sweep:
 # nomi d'asse -> strategy-X; un asse assente usa `linear` (tempi equispaziati,
 # n dai valori Y). Ogni asse diventa un envelope indipendente sulla durata
 # condivisa: niente prodotto cartesiano.
-stack: {}
+#stack: {}
 
 # Varianti di ascolto: ogni stream è un override parziale del documento sopra.
 # I campi omessi restano dalla base. Le liste rimpiazzano (non si concatenano).
