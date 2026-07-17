@@ -84,6 +84,45 @@ def test_stream_ramp_override_replaces_inherited_values():
     ]
 
 
+def test_stream_ramp_partial_override_merges_fields():
+    # Stesso marcatore (ramp su ramp): l'override parziale fonde i campi,
+    # start/stop restano dalla base. Semantica merge (decisa esplicitamente).
+    from granstudies.errors import SpecError  # noqa: F401  (import locale, coerente col file)
+
+    data = {
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {"density": {"path": "density", "baseline": 20,
+                             "ramp": {"start": 1, "stop": 10, "step": 5}}},
+        "sweep": {"mode": "envelope", "orders": [1]},
+        "streams": {"prova": {"axes": {"density": {"ramp": {"step": 1}}}}},
+    }
+    spec = resolve_streams(data)[0]
+    assert spec.axis("density").values == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+
+def test_stream_ramp_incomplete_override_raises_spec_error():
+    # L'override cambia marcatore (values -> ramp) ma il ramp e' parziale:
+    # _replace_generators butta i values, resta un ramp senza start/stop.
+    # Deve dare SpecError (non TypeError) con lo stream valorizzato.
+    from granstudies.errors import SpecError
+
+    data = {
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {"grain_duration": {"path": "grain.duration", "values": [0.001, 0.01]}},
+        "sweep": {"mode": "envelope", "orders": [1]},
+        "streams": {"prova": {"axes": {"grain_duration": {"ramp": {"step": 0.00025}}}}},
+    }
+    with pytest.raises(SpecError) as exc:
+        resolve_streams(data)
+    e = exc.value
+    assert e.axis == "grain_duration"
+    assert e.stream == "prova"
+    assert "ramp" in e.msg and "start" in e.msg
+    assert e.hint
+
+
 def test_sweep_combine_removed_raises_with_migration_hint():
     # combine: parallel non esiste piu': l'accoppiamento degli assi vive nel
     # processo stack (stessa X, stesso n). Errore chiaro, non silenzio.

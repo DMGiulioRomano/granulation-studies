@@ -114,3 +114,33 @@ def test_str_keeps_message_for_match():
     data, locs = loads(BASE_TEXT, source="study.yml")
     with pytest.raises(ValueError, match="banda senza 'n'"):
         parse_study_spec(data, "s", locs=locs)
+
+
+RAMP_INCOMPLETE_TEXT = """\
+study_id: s
+duration: 10
+base:
+  onset: 0
+axes:
+  density:
+    path: density
+    baseline: 20
+    ramp: {step: 1}
+sweep:
+  orders: [1]
+"""
+
+
+def test_ramp_incomplete_is_spec_error_not_typeerror():
+    # ramp senza start/stop: prima usciva un TypeError grezzo da ramp(**params).
+    data, locs = loads(RAMP_INCOMPLETE_TEXT, source="study.yml")
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(data, "s", locs=locs)
+    e = exc.value
+    assert e.axis == "density"
+    assert e.key == ("axes", "density")
+    assert e.line == 6          # riga di axes.density
+    assert e.source == "study.yml"
+    assert e.hint               # rimedio presente
+    assert "ramp" in e.msg
+    assert "start" in e.msg and "stop" in e.msg
