@@ -17,7 +17,6 @@ import itertools
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
-from . import bounds as bounds_mod
 from .study_spec import Axis, StudySpec
 
 
@@ -124,17 +123,16 @@ class EnvelopeVariant:
         Gli assi mossi condividono la stessa griglia temporale (breakpoint
         sincronizzati): in ogni plateau assumono insieme i valori della
         combinazione corrente. Gli assi fermi restano scalari al baseline.
-        Tutti i valori sono clampati ai bounds engine.
+
+        Nessun clamp: i valori enumerabili sono gia' validati (e bloccati se
+        fuori bounds) al parse.
         """
         moved_set = set(self.moved)
         all_step = self._all_step(spec)
         out: Dict[str, Any] = {}
         for ax in spec.axes:
             if ax.name in moved_set:
-                seq = [
-                    bounds_mod.clamp(ax.path, combo[ax.name], output_sr=output_sr)
-                    for combo in self.combinations
-                ]
+                seq = [combo[ax.name] for combo in self.combinations]
                 # File tutto-step: layout collassato (durata ridotta). Misto:
                 # griglia a plateau piena, con l'asse step a punto singolo (C).
                 out[ax.path] = envelope_breakpoints(
@@ -145,9 +143,7 @@ class EnvelopeVariant:
                     plateau_single=(not all_step and ax.interpolation == "step"),
                 )
             else:
-                out[ax.path] = bounds_mod.clamp(
-                    ax.path, ax.baseline, output_sr=output_sr
-                )
+                out[ax.path] = ax.baseline
         return out
 
     def _all_step(self, spec: StudySpec) -> bool:

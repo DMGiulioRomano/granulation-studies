@@ -136,6 +136,14 @@ def parameter_bounds(output_sr: Optional[int] = None) -> dict:
     return api.parameter_bounds(output_sr=output_sr)
 
 
+def default_output_sr() -> int:
+    """Sample rate di render di default (costante engine, single source)."""
+    _ensure_engine_on_path()
+    from pge import DEFAULT_OUTPUT_SR
+
+    return DEFAULT_OUTPUT_SR
+
+
 def parameter_defaults() -> dict:
     """Mappa ``yaml_path -> default`` da tutti gli schema dell'engine.
 
