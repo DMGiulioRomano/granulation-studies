@@ -1,0 +1,45 @@
+study_id: _scratch_percorso
+title: "Scratch percorso — esperimenti"
+seed: 7
+duration: 2
+samples_dir: samples
+
+base:
+  onset: 0
+  sample:  silenzi.wav
+  time_mode: normalized
+  grain:
+    envelope: hanning
+  volume: -6
+  pointer:
+    speed_ratio: 0
+    start: .3
+
+axes:
+  interpolation: linear
+  density:
+    path: density
+    baseline: 50
+    n: 8
+    base:
+      expr: "mix(formaA, formaB, w)"
+      let:
+        formaA: [[0, 60], [.6, 20], [1, 10]]
+        formaB: [[0, 20], [1, 20]]
+        w: 0
+    range: 0
+
+stack: {}
+percorso:
+  arco: 60
+  passo: {base: 8, range: 12}   # passo parte vicino a 8, si allarga verso ~20 col progredire
+  duration: {base: 8, range: 5, unit: s}
+  w: {base: [[0, 0], [1, 1]]}
+
+
+streams:
+  coro:
+    spread:
+      n: {expr: "floor(2 + 3 * w)", let: {w: 0}}
+      over:
+        base.pointer.start: {ramp: {start: .1, stop: .5}}
