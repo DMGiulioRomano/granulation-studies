@@ -7,6 +7,7 @@ ordini crescenti (1 alla volta, a coppie, ...).
 """
 from __future__ import annotations
 
+import itertools
 import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
@@ -137,7 +138,7 @@ class StudySpec:
         return self.stack_unit or "hz"
 
 
-def _validate(spec: StudySpec, ctx: ErrCtx) -> None:
+def _validate(spec: StudySpec, ctx: ErrCtx, *, orders_explicit: bool = False) -> None:
     if not spec.axes:
         raise ctx.err(
             "Lo studio deve definire almeno un asse in 'axes'.", key=("axes",)
@@ -164,6 +165,37 @@ def _validate(spec: StudySpec, ctx: ErrCtx) -> None:
             raise ctx.err(
                 f"orderings: assi duplicati {sorted(set(dupes))}",
                 key=("sweep", "orderings"),
+            )
+        if len(ordering) < 2:
+            raise ctx.err(
+                f"orderings: la voce {ordering} ha meno di 2 assi; un ordering "
+                "e' una sequenza lento->veloce e richiede almeno 2 assi.",
+                key=("sweep", "orderings"),
+                hint="per muovere un solo asse usa 'orders: [1]'.",
+            )
+
+    # Ridondanza di ``orders`` scritto esplicito rispetto a ``orderings``:
+    # se ci sono orderings e nessuna combinazione automatica degli ordini
+    # richiesti aggiunge una variante nuova (tutte gia' coperte, per sequenza
+    # esatta, dagli orderings), allora ``orders`` non fa nulla -> errore. Copre
+    # sia ``orders: []`` sia un ``orders: [k]`` interamente deduplicato. La
+    # forma di default (orders assente) non passa di qui.
+    if orders_explicit and spec.orderings:
+        decl = [ax.name for ax in spec.axes]
+        ordering_seqs = {tuple(o) for o in spec.orderings}
+        auto_seqs = {
+            combo
+            for order in spec.orders
+            if order > 0
+            for combo in itertools.combinations(decl, order)
+        }
+        if not (auto_seqs - ordering_seqs):
+            raise ctx.err(
+                "sweep.orders e' ridondante: con 'orderings' popolato non "
+                "aggiunge nessuna combinazione automatica nuova.",
+                key=("sweep", "orders"),
+                hint="rimuovi 'orders' (gli orderings bastano) oppure indica "
+                "ordini che generino combinazioni non gia' negli orderings.",
             )
     seen = set()
     for ax in spec.axes:
@@ -626,8 +658,19 @@ def parse_study_spec(
             hint="dichiara 'duration: <secondi>' al top del documento "
             "(default per tutti gli stream) oppure nello stream.",
         )
-    orders = list(sweep_cfg.get("orders", list(range(1, len(axes) + 1))))
     orderings = [list(o) for o in sweep_cfg.get("orderings", [])]
+    # Default di ``orders`` condizionato dalla presenza di ``orderings``: se
+    # l'utente ha gia' scelto combinazioni esplicite, non aggiungiamo tutte le
+    # automatiche a sua insaputa (assetto chirurgico). Senza orderings resta il
+    # default storico [1..n] (copertura completa). ``orders`` scritto esplicito
+    # vince sempre. Vedi tabella in _validate per la ridondanza.
+    if "orders" in sweep_cfg:
+        orders = list(sweep_cfg["orders"])
+    elif orderings:
+        orders = []
+    else:
+        orders = list(range(1, len(axes) + 1))
+    orders_explicit = "orders" in sweep_cfg
     spec = StudySpec(
         study_id=sid,
         title=data.get("title"),
@@ -649,7 +692,7 @@ def parse_study_spec(
         stack_unit=stack_unit,
         axes_seed=axes_seed,
     )
-    _validate(spec, ctx)
+    _validate(spec, ctx, orders_explicit=orders_explicit)
     return spec
 
 

@@ -33,7 +33,6 @@ sweep:
   mode: envelope
   plateau: 5
   transition: 2.5
-  orders: [2]
   orderings:
     - [density, grain_duration]      # density lento, grain_duration veloce
     #- [grain_duration, density]      # grain_duration lento, density veloce
