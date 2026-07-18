@@ -39,12 +39,10 @@ axes:
   # ogni stream con X-linear lo aggiunge nel proprio override.
   interpolation: cubic 
   density:
-    path: density
     baseline: 20
     base: 100                      # pavimento generato: vaga tra 4 e 12 su 6 quote
-    range: [[.1,0],[.4,.2]] 
-  grain_duration:
-    path: grain.duration
+    range: [[.1,0],[.4,.2]]
+  grain.duration:
     baseline: .005
     range: [[0,0],[.4,0.001],[1,0.01]]
     base: [[.4,.001],[1,0.01]]
@@ -54,7 +52,7 @@ stack:
   density:
     base: [[0,.05],[.4,.15]]
     range: [[.1,0],[.4,.05]]
-  grain_duration:
+  grain.duration:
     range: [[.1,0],[.4,.05]]
     base: [[0,.025],[.4,.08]]
 
@@ -62,7 +60,7 @@ streams:
   fermo:
     axes:
       density: {range: 0}
-      grain_duration: {range: 0}
+      grain.duration: {range: 0}
 
   dens_1: {base: {pan: -50}}
   dens_1_1: {base: {pan: 64}, axes: {density: {base: [[0,100],[.5,100.5]], range: [[.1,0],[.4,.2],[1,1]]}}}

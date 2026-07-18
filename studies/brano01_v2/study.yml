@@ -27,7 +27,7 @@ samples_dir: samples
 
 base:
   onset: 0
-  sample: corpus.wav
+  sample: silenzi.wav
   time_mode: normalized
   grain:
     envelope: hanning
@@ -43,12 +43,10 @@ axes:
   # ogni stream con X-linear lo aggiunge nel proprio override.
   interpolation: cubic
   density:
-    path: density
     baseline: 20
     base: 50                      # pavimento generato: vaga tra 4 e 12 su 6 quote
     range: [[0.0317,0],[0.1267,.2],[.3,5],[0.4,.2],[.5,0],[.6,0.1],[.8,.4],[1,1]]
-  grain_duration:
-    path: grain.duration
+  grain.duration:
     baseline: .005
     base: [[0.1267,.001],[0.3167,0.01],[.33,0.01],[.8,0.00005],[1,0.0001]]
     range: [[0,0],[0.1267,0.001],[0.3167,0.01],[.8,0.0001],[.8,0.001]]
@@ -58,7 +56,7 @@ stack:
   density:
     base: [[0,.05],[0.1267,.15],[0.32,.5],[.5,.03],[.8,.1]]
     range: [[0.0317,0],[0.1267,.05],[.32,.15],[.5,.03],[1,.05]]
-  grain_duration:
+  grain.duration:
     base: [[0,.025],[0.1267,.08],[.4,0.08],[.5,0.5],[.8,0.07]]
     range: [[0.0317,0],[0.1267,.05],[.4,0.05],[.5,.1],[.8,.15]]
 
@@ -66,7 +64,7 @@ streams:
   fermo:
     axes:
       density: {range: 0}
-      grain_duration: {range: 0}
+      grain.duration: {range: 0}
 
   dens_1: {base: {pan: -50}}
   dens_1_1: {base: {pan: 64}, axes: {density: {base: [[0,50],[0.1583,50.5]], range: [[0.0317,0],[0.1267,.2],[0.3167,1],[0.4,.2],[.6,0.1],[.8,.4],[1,1]]}}}
