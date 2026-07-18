@@ -41,18 +41,21 @@ axes:                             # * almeno un asse
                                  # (N*plateau + (N-1)*transition) e l'asse step tiene-e-salta
                                  # sui confini di plateau, sincronizzato con gli altri.
 
-  density:                       # nome dell'asse (libero)
-    path: density                # * path YAML nell'engine
+  density:                       # nome dell'asse (libero). Se 'path' e' omesso,
+                                 # la chiave stessa e' il path engine — anche in
+                                 # dot-notation (es. 'grain.duration:').
+    path: density                # path YAML nell'engine; opzionale, alias della chiave
     baseline: 20                 # valore a riposo; obbligatorio se l'engine non ha default
     values: [5, 10, 20, 50]      # * i valori di test. UNA sola chiave-generatore per asse
                                  # tra {values, ramp, base} (vedi "Generatori" sotto).
                                  # values = lista esplicita (rimpiazza, non concatena).
     interpolation: step          # opzionale: override per-asse (default = quello di studio)
 
-  grain_duration:
-    path: grain.duration         # path annidato con notazione punto
+  grain.duration:                # chiave dotted = path engine, niente 'path' esplicito;
+                                 # i riferimenti in sweep.orderings/stack usano la
+                                 # stessa stringa dotted
     # baseline omesso → risolto dal default engine
-    n: 40                        # banda piatta: base/range/n/seed accanto a path
+    n: 40                        # banda piatta: base/range/n/seed accanto alla chiave
     base: [[0, .001], [1, .05]]  # la banda [base, base+range] genera i valori
     range: .002
     interpolation: cubic         # es. density a scalini + grain morbido nello stesso file
@@ -74,8 +77,8 @@ sweep:
                                  # sequenza esatta); e' ERRORE se, con orderings
                                  # popolato, non aggiunge nessuna combinazione nuova.
   orderings:                     # permutazioni esplicite (min 2 assi per voce)
-    - [density, grain_duration]                # primo = asse lento (outer), ultimo = veloce (inner)
-    - [grain_duration, density]                # stessa coppia, ordine invertito
+    - [density, grain.duration]                # primo = asse lento (outer), ultimo = veloce (inner)
+    - [grain.duration, density]                # stessa coppia, ordine invertito
 
 # Processo versions (attivo per presenza; richiede `stack:`): repliche dello
 # stack distribuite nel tempo, una per combinazione delle variabili — di
@@ -113,8 +116,16 @@ stack:
 # Regole del merge: i dict si fondono ricorsivamente, le liste rimpiazzano.
 # Le chiavi PUNTATE si espandono in dict annidati prima del merge, come in
 # `spread.over`: `axes.density.base.expr: X` equivale a
-# `axes: {density: {base: {expr: X}}}` (rami sovrapposti si fondono). Se questa
-# sezione è assente, sweep genera un'unica versione senza sotto-cartella.
+# `axes: {density: {base: {expr: X}}}` (rami sovrapposti si fondono).
+# Sotto `axes.`/`stack.` il primo identificatore è un NOME D'ASSE, che può
+# essere a sua volta dotted (`axes.grain.duration.values` raggiunge l'asse
+# `grain.duration`): il confine si risolve sugli assi dichiarati in `axes:`,
+# poi sul registro parametri engine (un override può introdurre un asse
+# dotted nuovo), altrimenti sul primo segmento. Due assi dichiarati con
+# prefisso comune (`grain` + `grain.duration`) rendono la forma puntata
+# ambigua → errore; lì si usa la forma annidata (`axes: {grain.duration:
+# {...}}`, sempre valida). Se questa sezione è assente, sweep genera
+# un'unica versione senza sotto-cartella.
 streams:
   base: {}                       # nessun override — identica alla base
 
@@ -800,6 +811,10 @@ streams:
     spread:
       n: 8                      # opzionale se una strategy possiede il conteggio
       over:                     # {path puntato nel documento: strategy}
+                                # sotto axes./stack. il primo identificatore è
+                                # un nome d'asse, anche dotted: stesso boundary
+                                # (assi dichiarati → registro engine) delle
+                                # chiavi puntate in streams (vedi sopra)
         base.pointer.start:
           ramp: {start: 0.1, step: 0.1}    # 0.1, 0.2, ... 0.8
         base.onset:

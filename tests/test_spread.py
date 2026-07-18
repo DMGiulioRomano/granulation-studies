@@ -44,6 +44,45 @@ def test_values_expansion_names_and_paths():
         assert "spread" not in entry
 
 
+def test_spread_over_dotted_axis_boundary():
+    # 'over' su un asse con nome dotted ('grain.duration', senza 'path'): il
+    # deep-set non deve spezzare il nome in axes.grain.duration ma fermarsi
+    # al confine dell'asse dichiarato.
+    streams = _streams(
+        v={
+            "spread": {
+                "over": {"axes.grain.duration.values": {"values": [[0.001], [0.01]]}},
+            },
+        }
+    )
+    out = expand_spreads(streams, axis_names=frozenset({"grain.duration"}))
+    assert out["v_1"]["axes"]["grain.duration"]["values"] == [0.001]
+    assert out["v_2"]["axes"]["grain.duration"]["values"] == [0.01]
+
+
+def test_spread_over_dotted_axis_end_to_end():
+    # Integrazione: spread su asse dotted attraverso resolve_streams.
+    data = {
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {"grain.duration": {"values": [0.001, 0.01]}},
+        "sweep": {"mode": "envelope", "orders": [1]},
+        "streams": {
+            "v": {
+                "spread": {
+                    "over": {
+                        "axes.grain.duration.values": {"values": [[0.002], [0.02]]}
+                    },
+                },
+            }
+        },
+    }
+    specs = resolve_streams(data)
+    by_id = {s.stream_id: s for s in specs}
+    assert by_id["v_1"].axis("grain.duration").values == [0.002]
+    assert by_id["v_2"].axis("grain.duration").values == [0.02]
+
+
 def test_common_override_preserved_on_every_generated():
     entry = _spread_entry(base={"volume": -12})
     out = expand_spreads(_streams(v=entry))

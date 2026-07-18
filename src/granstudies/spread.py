@@ -15,9 +15,10 @@ loop di deep-merge, tutto il resto della pipeline vede entry ordinarie. Lo
 from __future__ import annotations
 
 import copy
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
-from .errors import ErrCtx
+from . import bounds as bounds_mod
+from .errors import ErrCtx, SpecError
 from .expr import eval_expr, is_expr_node, parse_expr_node
 from .value_generators import (
     Y_GENERATOR_KEYS,
@@ -52,6 +53,54 @@ _STRATEGY_MARKERS = Y_GENERATOR_KEYS | _LET_BAND_KEYS | frozenset({"expr", "let"
 _SWEEP_OFF = {"orders": [], "orderings": []}
 
 
+# Blocchi i cui figli diretti sono nomi d'asse: il primo identificatore di un
+# path puntato li' sotto puo' essere dotted (asse 'grain.duration' senza
+# 'path', issue #32) e il suo confine va risolto, non spezzato su ogni punto.
+AXIS_NAME_BLOCKS = ("axes", "stack")
+
+
+def split_axis_key(
+    dotted_key: str,
+    axis_names: frozenset,
+    ctx: ErrCtx | None = None,
+) -> Tuple[str, List[str]]:
+    """Trova il confine del nome d'asse in una chiave dotted sotto axes/stack.
+
+    ``"grain.duration.values"`` con asse ``grain.duration`` dichiarato ->
+    ``("grain.duration", ["values"])``. Precedenza: (1) match sugli assi
+    dichiarati nel documento base; (2) match sul registro parametri engine
+    (``bounds.known_paths``), che permette a un override di *introdurre* un
+    asse dotted non ancora dichiarato; (3) fallback sintattico al primo
+    segmento (comportamento storico, copre chiavi riservate come
+    ``interpolation``/``seed`` e gli alias senza punto). Piu' match nello
+    stesso livello di precedenza — es. assi ``grain`` e ``grain.duration``
+    entrambi dichiarati — sono indecidibili: errore esplicito, mai scelta
+    silenziosa.
+    """
+    segs = dotted_key.split(".")
+    spans = range(1, len(segs) + 1)
+    for candidates in (
+        [j for j in spans if ".".join(segs[:j]) in axis_names],
+        [j for j in spans if ".".join(segs[:j]) in bounds_mod.known_paths()],
+    ):
+        if len(candidates) > 1:
+            names = [".".join(segs[:j]) for j in candidates]
+            err_kwargs = dict(
+                key=("streams",),
+                hint="usa la forma annidata (axes: {<nome.asse>: {...}}) "
+                "per sciogliere l'ambiguita'.",
+            )
+            msg = (
+                f"chiave puntata '{dotted_key}' ambigua: il nome d'asse "
+                f"puo' essere {' o '.join(repr(n) for n in names)}."
+            )
+            raise ctx.err(msg, **err_kwargs) if ctx else SpecError(msg, **err_kwargs)
+        if candidates:
+            j = candidates[0]
+            return ".".join(segs[:j]), segs[j:]
+    return segs[0], segs[1:]
+
+
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
     """Stessa semantica del deep-merge di ``study_spec`` (copia locale: e'
     ``study_spec`` a importare questo modulo, non viceversa)."""
@@ -64,13 +113,24 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
     return result
 
 
-def _deep_set(target: Dict[str, Any], dotted: str, value: Any) -> None:
+def _deep_set(
+    target: Dict[str, Any],
+    dotted: str,
+    value: Any,
+    axis_names: frozenset = frozenset(),
+    ctx: ErrCtx | None = None,
+) -> None:
     """Imposta ``value`` al path puntato, creando i dict intermedi.
 
     Un intermedio non-dict viene rimpiazzato: la strategy vince sull'override
     comune, come l'override vince sulla base nel deep-merge delle stream.
+    Sotto ``axes.``/``stack.`` il primo identificatore e' un nome d'asse
+    (eventualmente dotted): il confine e' risolto da ``split_axis_key``.
     """
     keys = dotted.split(".")
+    if keys[0] in AXIS_NAME_BLOCKS and len(keys) > 1:
+        axis, rest = split_axis_key(".".join(keys[1:]), axis_names, ctx)
+        keys = [keys[0], axis, *rest]
     node = target
     for k in keys[:-1]:
         if not isinstance(node.get(k), dict):
@@ -450,6 +510,7 @@ def expand_spreads(
     streams: Dict[str, Any],
     locs: Locations | None = None,
     pad_n: Dict[str, int] | None = None,
+    axis_names: frozenset = frozenset(),
 ) -> Dict[str, Any]:
     """Espande le entry-spread di ``streams:`` in entry ordinarie.
 
@@ -466,6 +527,9 @@ def expand_spreads(
     massimo) viene consumata in silenzio: la voce e' speciale *in tutte le
     istanze in cui esiste*, e qui non esiste. Senza ``pad_n`` il
     comportamento storico e' invariato.
+
+    ``axis_names`` (nomi d'asse del documento base) risolve il confine dei
+    nomi dotted nei path di ``over`` sotto ``axes.``/``stack.`` (issue #32).
     """
     plans = {
         name: _plan_entry(name, entry, locs, (pad_n or {}).get(name))
@@ -504,7 +568,13 @@ def expand_spreads(
         for i, gname in enumerate(names):
             override = copy.deepcopy(proto)
             for path, values in per_path.items():
-                _deep_set(override, path, values[i])
+                _deep_set(
+                    override,
+                    path,
+                    values[i],
+                    axis_names,
+                    ErrCtx(locs=locs, stream=name),
+                )
             if "sweep" not in override:
                 override["sweep"] = copy.deepcopy(_SWEEP_OFF)
             if gname in consumed:

@@ -10,14 +10,14 @@ from __future__ import annotations
 import itertools
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 import yaml
 
 from . import bounds as bounds_mod
 from . import yaml_loc
 from .errors import ErrCtx, SpecError
-from .spread import expand_spreads
+from .spread import AXIS_NAME_BLOCKS, expand_spreads, split_axis_key
 from .value_generators import (
     Y_GENERATOR_KEYS,
     band,
@@ -252,7 +252,7 @@ def _resolve_baseline(
     """
     if "baseline" in cfg:
         return cfg["baseline"]
-    path = cfg["path"]
+    path = cfg.get("path", name)
     if path == "pitch" or path.startswith("pitch."):
         raise ctx.err(
             f"Asse '{name}': path '{path}' e' unit-driven (pitch), "
@@ -286,7 +286,12 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
     return result
 
 
-def _expand_dotted_keys(override: Dict[str, Any]) -> Dict[str, Any]:
+def _expand_dotted_keys(
+    override: Dict[str, Any],
+    axis_names: frozenset = frozenset(),
+    ctx: ErrCtx | None = None,
+    literal_children: bool = False,
+) -> Dict[str, Any]:
     """Espande le chiavi puntate di un override di stream in dict annidati.
 
     ``{"axes.density.base.expr": X}`` -> ``{"axes": {"density": {"base":
@@ -297,22 +302,50 @@ def _expand_dotted_keys(override: Dict[str, Any]) -> Dict[str, Any]:
     era un no-op silenzioso (era la causa di ``fermo == mobile`` in
     ``study_versions_test``, issue #29).
 
+    Sotto ``axes:``/``stack:`` il primo identificatore e' un *nome d'asse*,
+    che puo' essere a sua volta dotted (asse ``grain.duration`` senza
+    ``path``, issue #32): il suo confine e' risolto da ``split_axis_key``
+    (assi dichiarati -> registro engine -> fallback sintattico), sia nella
+    forma tutta-puntata (``axes.grain.duration.values``) sia nelle chiavi
+    figlie dirette del blocco (``axes: {grain.duration.values: ...}``);
+    dentro la config dell'asse l'espansione riprende sintattica.
+
     Rami che si sovrappongono — una chiave puntata e una forma annidata sullo
     stesso path, o due chiavi puntate con prefisso comune — si **fondono** via
     ``_deep_merge`` nell'ordine di dichiarazione (l'ultima vince sui conflitti
     di foglia). Ricorsivo: una forma annidata puo' contenere a sua volta chiavi
     puntate. Le chiavi senza punto restano invariate.
     """
+
+    def nest(parts: List[str], leaf: Any) -> Any:
+        for p in reversed(parts):
+            leaf = {p: leaf}
+        return leaf
+
     out: Dict[str, Any] = {}
     for k, v in override.items():
         if isinstance(v, dict):
-            v = _expand_dotted_keys(v)
+            v = _expand_dotted_keys(
+                v,
+                axis_names,
+                ctx,
+                literal_children=(
+                    not literal_children and k in AXIS_NAME_BLOCKS
+                ),
+            )
         if isinstance(k, str) and "." in k:
-            branch: Any = v
-            parts = k.split(".")
-            for p in reversed(parts[1:]):
-                branch = {p: branch}
-            contribution = {parts[0]: branch}
+            if literal_children:
+                # Figlio diretto di axes/stack: la testa e' un nome d'asse.
+                axis, rest = split_axis_key(k, axis_names, ctx)
+                contribution = {axis: nest(rest, v)}
+            else:
+                parts = k.split(".")
+                if parts[0] in AXIS_NAME_BLOCKS and len(parts) > 1:
+                    # Forma tutta-puntata: dopo il blocco viene il nome d'asse.
+                    axis, rest = split_axis_key(".".join(parts[1:]), axis_names, ctx)
+                    contribution = {parts[0]: {axis: nest(rest, v)}}
+                else:
+                    contribution = {parts[0]: nest(parts[1:], v)}
         else:
             contribution = {k: v}
         out = _deep_merge(out, contribution)
@@ -411,12 +444,22 @@ def resolve_streams(
         )
     if not streams:
         return [parse_study_spec(data, sid, locs=locs)]
-    streams = expand_spreads(streams, locs, pad_n=spread_pad)
+    # Nomi d'asse del documento base: risolvono il confine dei nomi dotted
+    # nelle chiavi puntate degli override e nei path di spread.over (vedi
+    # ``split_axis_key``).
+    axis_names = frozenset(
+        k
+        for k, v in (data.get("axes") or {}).items()
+        if k not in _AXES_RESERVED_KEYS and isinstance(v, dict)
+    )
+    streams = expand_spreads(streams, locs, pad_n=spread_pad, axis_names=axis_names)
     result = []
     for stream_id, override in streams.items():
         # Le chiavi puntate scritte a mano nell'override (``axes.density.base.expr``)
         # si espandono in dict annidati prima del merge, come in ``spread.over``.
-        override = _expand_dotted_keys(override or {})
+        override = _expand_dotted_keys(
+            override or {}, axis_names, ErrCtx(locs=locs, stream=stream_id)
+        )
         merged = _deep_merge(data, override)
         _replace_generators(merged, override)
         merged.pop("streams", None)
@@ -578,13 +621,9 @@ def parse_study_spec(
                 axis=name,
                 hint=hint,
             )
-        if "path" not in cfg:
-            raise ctx.err(
-                f"Asse '{name}': manca 'path' (il parametro engine da muovere).",
-                key=("axes", name),
-                axis=name,
-                hint="es. 'path: density' o 'path: grain.duration'.",
-            )
+        # 'path' esplicito resta un alias; se omesso, la chiave dell'asse
+        # (anche in dot-notation, es. 'grain.duration') e' il path engine.
+        path = cfg.get("path", name)
         # Generatore Y riconosciuto dalla forma (values | ramp | base): chiave
         # canonica values|ramp|band, con i parametri della banda raccolti piatti.
         with ctx.wrapping(key=("axes", name), axis=name):
@@ -631,7 +670,7 @@ def parse_study_spec(
         axes.append(
             Axis(
                 name=name,
-                path=cfg["path"],
+                path=path,
                 baseline=_resolve_baseline(name, cfg, _defaults_cache, ctx),
                 values=values,
                 interpolation=cfg.get("interpolation", study_interpolation),
