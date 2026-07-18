@@ -3,7 +3,7 @@
 Sintassi completa con tutti i campi. I campi marcati `*` sono obbligatori.
 
 ```yaml
-study_id: study01_grain_density   # * identificatore, usato come nome cartella
+ study_id: study01                # * etichetta per i documenti generati (fallback: nome cartella STUDY)
 title: "Studio 01 — ..."          # libero, finisce nell'header dei file generati
 seed: 1988                        # seed globale engine (finisce nei documenti generati)
 duration: 30                      # durata di default (s) degli stream: ogni stream può

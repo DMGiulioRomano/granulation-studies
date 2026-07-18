@@ -1,4 +1,4 @@
-# Diario di ascolto — study01_grain_density
+# Diario di ascolto — study01
 
 Sintesi cronologica delle sessioni di ascolto. Aggiornato dall'AI su richiesta leggendo tutti i log giornalieri.
 

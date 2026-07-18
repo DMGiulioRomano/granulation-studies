@@ -3,12 +3,12 @@
 #
 # Uso tipico:
 #   make setup
-#   make sweep   STUDY=study01_grain_density
-#   make render  STUDY=study01_grain_density
-#   make describe STUDY=study01_grain_density
-#   make matrix  STUDY=study01_grain_density
-#   make compose STUDY=study01_grain_density
-#   make render-final STUDY=study01_grain_density
+#   make sweep   STUDY=base
+#   make render  STUDY=base
+#   make describe STUDY=base
+#   make matrix  STUDY=base
+#   make compose STUDY=base
+#   make render-final STUDY=base
 
 # Interprete di sistema per creare il venv: preferisci 3.11 (versione del
 # progetto), poi python3/python. Override esplicito: make setup PYTHON=...
@@ -33,7 +33,7 @@ help:
 	@echo "granulation-studies — target disponibili:"
 	@echo "  make setup                 venv + submodule engine + dipendenze"
 	@echo "  make tests                 esegue pytest (gate pre-commit)"
-	@echo "  make sweep STUDY=...        genera le varianti YAML  (STUDY = nome cartella in studies/, es. study01_grain_density)"
+	@echo "  make sweep STUDY=...        genera le varianti YAML  (STUDY = nome cartella in studies/, es. base)"
 	@echo "  make stack STUDY=...        genera il documento multi-stream (stack, puro)"
 	@echo "  make versions STUDY=...     genera il documento delle versioni (prodotto cartesiano)"
 	@echo "  make percorso STUDY=...     genera il documento del percorso (orchestrazione temporale)"

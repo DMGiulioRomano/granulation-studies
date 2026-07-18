@@ -10,7 +10,7 @@
     granstudies compose  STUDY      genera final.yml dal percorso/grafo
     granstudies render-final STUDY  renderizza il brano finale
 
-STUDY e' il nome della cartella sotto ``studies/`` (es. study01_grain_density).
+STUDY e' il nome della cartella sotto ``studies/`` (es. base).
 """
 from __future__ import annotations
 

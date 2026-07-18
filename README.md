@@ -32,14 +32,14 @@ Vedi `docs/methodology.md` per il modello concettuale completo e i formati file.
 ```bash
 make setup                              # venv + submodule + dipendenze
 # metti un file audio in samples/ (es. corpus.wav, vedi samples/README.md)
-make sweep   STUDY=study01_grain_density
-make stack   STUDY=study01_grain_density
-make render  STUDY=study01_grain_density
-make describe STUDY=study01_grain_density
-# cura generated/study01_grain_density/results.yml (kept/tags), poi compila states.yml
-make matrix  STUDY=study01_grain_density
-make compose STUDY=study01_grain_density
-make render-final STUDY=study01_grain_density
+make sweep   STUDY=base
+make stack   STUDY=base
+make render  STUDY=base
+make describe STUDY=base
+# cura generated/base/results.yml (kept/tags), poi compila states.yml
+make matrix  STUDY=base
+make compose STUDY=base
+make render-final STUDY=base
 ```
 
 ## Struttura

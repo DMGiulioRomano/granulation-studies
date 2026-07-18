@@ -13,7 +13,7 @@ Un solo stream, si ascolta la modifica di un solo parametro su di esso
 (`density` assoluta, `grain.dur`).
 
 Le zone qui sotto sono definite come stream `zona_ombra_*` in
-`studies/study01_grain_density/study.yml:49-105` (4 zone compartimentate,
+`studies/base/study.yml:49-105` (4 zone compartimentate,
 ciascuna generata via `spread` in 7 cugini che differiscono solo per
 `base.pointer.start`, secondi assoluti — mappa indice→secondi: `1=0.1
 2=0.25 3=0.4 4=0.55 5=0.8 6=0.915 7=1.1`, vedi commento `study.yml:57-58`).

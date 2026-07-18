@@ -26,12 +26,13 @@ cancella.
   densità che si muovono nel tempo (density come sweep, non fissa).
 - [ ] Chiarire Sessione 1 del 2026-07-14: "3 Hz (terzi)" — capire se
   intendevo terzi di tono o Hz di differenza.
-- [ ] Fare tutti gli ascolti dei grani di **study01 short** e **study01 long**.
-- [ ] Scrivere la parte **study01 meso** (ancora da fare) e poi farne gli ascolti.
-- [ ] Valutare se spostare il diario di ascolto (`ascolto/`) fuori da
-  `study01_grain_density`: metterlo nella working directory o direttamente
-  dentro `studies/`, invece di tenerlo dentro il singolo studio.
+- [ ] Fare tutti gli ascolti dei grani della scala **short** e della scala **long**.
+- [ ] Scrivere la scala **meso** (ancora da fare) e poi farne gli ascolti.
 
 ## Fatto
 
-(vuoto)
+- [x] 2026-07-18 — Diario di ascolto spostato in `studies/ascolto/` (unico per lo
+  studio) e struttura `studies/` appiattita: le scale sono cartelle dirette
+  (`base`, `short`, `long`, `stack`) invece che `study01_*`. Il repo è lo studio;
+  in futuro diventerà un template. `STUDY=base` sostituisce
+  `STUDY=study01_grain_density`.
