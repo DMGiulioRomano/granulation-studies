@@ -51,8 +51,7 @@ axes:
 # nel sample; nomi generati a indice (non configurabile), indice -> secondi:
 #   1=0.1  2=0.25  3=0.4  4=0.55  5=0.8  6=0.915  7=1.1
 spread:
-  over:
-    base.pointer.start.values: [0.1, 0.25, 0.4, 0.55, 0.8, 0.915, 1.1]
+  over.base.pointer.start.values: [0.1, 0.25, 0.4, 0.55, 0.8, 0.915, 1.1]
 
 streams:
   # Zone d'ombra di grain.duration (riepilogo.md, ascolto 2026-07-05): 4 zone
