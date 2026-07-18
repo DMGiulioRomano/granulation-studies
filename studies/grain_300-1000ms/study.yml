@@ -6,7 +6,7 @@
 # con plateau e transizioni sincronizzate (ascolto in sequenza continua).
 
 study_id: study01_grain_density
-title: "Studio 01 — densità e grana"
+title: "Studio 01 — densità e grana (grain 300-1000ms)"
 seed: 1988
 # Durata condivisa (secondi) del documento stack: il processo stack normalizza
 # i tempi dei suoi envelope su questa. Usata anche dalle varianti discrete se
@@ -43,7 +43,7 @@ axes:
     baseline: 20
   grain_duration:
     path: grain.duration
-    ramp: {start: .05, stop: 1, step: .05}
+    ramp: {start: .3, stop: 1, step: .025}
   distribution:
     path: distribution
     ramp: {start: 0, stop: 1, step: .25}
@@ -113,4 +113,3 @@ streams:
       over:
         base.pointer.start:
           values: [0.1, 0.25, 0.4, 0.55, 0.8, 0.915, 1.1]
-

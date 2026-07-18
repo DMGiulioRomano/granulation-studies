@@ -33,7 +33,9 @@ della cartella-scala.
 |----------|-------|----------|
 | `grain_1-10ms` | scala di riferimento, curata a mano (density + grain.duration 1-10 ms) | `grain_1-10ms` |
 | `grain_1-50smp` | grani corti, grain.duration in `samples` (1-50 campioni) | `grain_1-50smp` |
-| `grain_50-1000ms` | grani lunghi, grain.duration 50-1000 ms | `grain_50-1000ms` |
+| `grain_10-50ms` | grani corti, grain.duration 10-50 ms | `grain_10-50ms` |
+| `grain_50-300ms` | grani medio-lunghi, grain.duration 50-300 ms (step 5 ms) | `grain_50-300ms` |
+| `grain_300-1000ms` | grani lunghi, grain.duration 300-1000 ms (step 25 ms) | `grain_300-1000ms` |
 | `stack` | stream non-cartesiani (ascolto verticale) | `stack` |
 | `brano01` | brano musicale (ex `study_stack_test_5`) | `brano01` |
 | `brano01_v2` | versione a 10 min di brano01 (ex `study_stack_test_5_10min`) | `brano01_v2` |
