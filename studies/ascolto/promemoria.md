@@ -6,13 +6,13 @@ cancella.
 
 ## Da fare
 
-- [ ] Riascoltare le 4 zone d'ombra compartimentate (stream `zona_ombra_d05`,
-  `zona_ombra_d10_20`, `zona_ombra_d25_50`, `zona_ombra_d55_60` — study.yml:66-105)
+- [ ] Riascoltare le 4 zone d'ombra compartimentate (stream `zona_ombra_d01_10`,
+  `zona_ombra_d10_20`, `zona_ombra_d25_50`, `zona_ombra_d55_80` — study.yml:66-105)
   con i 7 cugini pointer.start (indice→secondi: 1=0.1 2=0.25 3=0.4 4=0.55 5=0.8
   6=0.915 7=1.1), sostituiscono la mappa precedente in `riepilogo.md`. In
-  particolare per `zona_ombra_d55_60` verificare l'estensione grain.dur fino a
+  particolare per `zona_ombra_d55_80` verificare l'estensione grain.dur fino a
   0.008 (prima non coperta, segnalata come "da verificare" nel vecchio riepilogo).
-- [ ] `zona_ombra_d55_60`: la ramp density ora arriva a **80**
+- [ ] `zona_ombra_d55_80`: la ramp density ora arriva a **80**
   (`study.yml:101`, valori 55 e 80). Ho sentito finora solo fino a density 60;
   density 80 è ancora da sentire.
 - [ ] Ascolto differenza di density tra due stream in stack (versions),
@@ -26,11 +26,16 @@ cancella.
   densità che si muovono nel tempo (density come sweep, non fissa).
 - [ ] Chiarire Sessione 1 del 2026-07-14: "3 Hz (terzi)" — capire se
   intendevo terzi di tono o Hz di differenza.
-- [ ] Fare tutti gli ascolti dei grani della scala **short** e della scala **long**.
+- [ ] Fare tutti gli ascolti dei grani della scala **grain_1-50smp** e della scala **grain_50-1000ms**.
 - [ ] Scrivere la scala **meso** (ancora da fare) e poi farne gli ascolti.
 
 ## Fatto
 
+- [x] 2026-07-18 — Cartelle scala rinominate in base al range di grain.duration:
+  `base`→`grain_1-10ms`, `short`→`grain_1-50smp`, `long`→`grain_50-1000ms`
+  (`stack` invariata). Stream `zona_ombra_d05`→`zona_ombra_d01_10` (era già
+  density 1-10, il nome non rifletteva il range) e `zona_ombra_d55_60`→
+  `zona_ombra_d55_80` in tutti e tre gli study.yml.
 - [x] 2026-07-18 — Diario di ascolto spostato in `studies/ascolto/` (unico per lo
   studio) e struttura `studies/` appiattita: le scale sono cartelle dirette
   (`base`, `short`, `long`, `stack`) invece che `study01_*`. Il repo è lo studio;

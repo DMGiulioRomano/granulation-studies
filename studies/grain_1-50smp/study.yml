@@ -63,9 +63,9 @@ streams:
   # dict vuoto eredita mode/plateau/transition/orderings dal blocco sweep:
   # globale (righe 49-67), stessi ordinamenti e timing di `base`.
 
-  # Zona 1 — density 5: unico caso che include anche la transizione stretta
+  # Zona 1 — density 1-10: unico caso che include anche la transizione stretta
   # 0.001->0.0035 oltre al plateau di zona d'ombra 0.0035-0.005.
-  zona_ombra_d05:
+  zona_ombra_d01_10:
     axes.density.ramp.step: 1
     sweep: {}
     spread:

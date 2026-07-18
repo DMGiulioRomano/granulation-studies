@@ -31,9 +31,9 @@ della cartella-scala.
 
 | Cartella | Cos'è | `STUDY=` |
 |----------|-------|----------|
-| `base` | scala di riferimento, curata a mano (density + grain.duration) | `base` |
-| `short` | grani corti (grain.duration in `samples`) | `short` |
-| `long` | grani lunghi | `long` |
+| `grain_1-10ms` | scala di riferimento, curata a mano (density + grain.duration 1-10 ms) | `grain_1-10ms` |
+| `grain_1-50smp` | grani corti, grain.duration in `samples` (1-50 campioni) | `grain_1-50smp` |
+| `grain_50-1000ms` | grani lunghi, grain.duration 50-1000 ms | `grain_50-1000ms` |
 | `stack` | stream non-cartesiani (ascolto verticale) | `stack` |
 | `brano01` | brano musicale (ex `study_stack_test_5`) | `brano01` |
 | `brano01_v2` | versione a 10 min di brano01 (ex `study_stack_test_5_10min`) | `brano01_v2` |
@@ -52,7 +52,7 @@ studies/ascolto/
 
 Un solo file per giorno: `YYYY-MM-DD.md`. Se in una giornata ci sono più
 sessioni di ascolto, non si creano file separati né suffissi — si aggiungono
-come sezioni `## Sessione N — <tema> (scala: base, sample: ...)` dentro lo
+come sezioni `## Sessione N — <tema> (scala: grain_1-10ms, sample: ...)` dentro lo
 stesso file, in ordine cronologico. La **scala** (`base`/`short`/`long`/`stack`)
 e il `sample` stanno nell'heading di sessione, non nel frontmatter.
 

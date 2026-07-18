@@ -44,7 +44,7 @@ axes:
     baseline: 20           
   grain_duration:
     path: grain.duration
-    ramp: {start: .001, stop: .01, step: .00025}   # 17 valori
+    ramp: {start: .05, stop: 1, step: .05}
 
 streams:
   # Zone d'ombra di grain.duration (riepilogo.md, ascolto 2026-07-05): 4 zone
@@ -61,9 +61,9 @@ streams:
   # dict vuoto eredita mode/plateau/transition/orderings dal blocco sweep:
   # globale (righe 49-67), stessi ordinamenti e timing di `base`.
 
-  # Zona 1 — density 5: unico caso che include anche la transizione stretta
+  # Zona 1 — density 1-10: unico caso che include anche la transizione stretta
   # 0.001->0.0035 oltre al plateau di zona d'ombra 0.0035-0.005.
-  zona_ombra_d05:
+  zona_ombra_d01_10:
     axes.density.ramp.step: 1
     sweep: {}
     spread:
@@ -95,7 +95,7 @@ streams:
   # Zona 4 — density 55-80: zona d'ombra piu' larga ~0.003-0.008, include
   # l'estensione oltre 0.008 ancora da verificare (riepilogo.md riga 28-29).
   # Ascoltata finora solo fino a density 60; density 80 ancora da sentire.
-  zona_ombra_d55_60:
+  zona_ombra_d55_80:
     axes:
       density:
         ramp: {start: 55, stop: 80}             # 2 valori
@@ -104,3 +104,14 @@ streams:
       over:
         base.pointer.start:
           values: [0.1, 0.25, 0.4, 0.55, 0.8, 0.915, 1.1]
+
+  zona_ombra_d100_500:
+    axes:
+      density:
+        ramp: {start: 100, stop: 500, step: 50}             # 2 valori
+    sweep: {}
+    spread:
+      over:
+        base.pointer.start:
+          values: [0.1, 0.25, 0.4, 0.55, 0.8, 0.915, 1.1]
+

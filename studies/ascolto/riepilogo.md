@@ -13,7 +13,7 @@ Un solo stream, si ascolta la modifica di un solo parametro su di esso
 (`density` assoluta, `grain.dur`).
 
 Le zone qui sotto sono definite come stream `zona_ombra_*` in
-`studies/base/study.yml:49-105` (4 zone compartimentate,
+`studies/grain_1-10ms/study.yml:49-105` (4 zone compartimentate,
 ciascuna generata via `spread` in 7 cugini che differiscono solo per
 `base.pointer.start`, secondi assoluti — mappa indice→secondi: `1=0.1
 2=0.25 3=0.4 4=0.55 5=0.8 6=0.915 7=1.1`, vedi commento `study.yml:57-58`).
@@ -28,8 +28,8 @@ marcata `⚠︎ da riascoltare` (le zone vanno rifatte da capo, vedi
 
 | stream (study.yml) | tipo | density | grain.dur | percetto |
 |---------------------|------|---------|-----------|----------|
-| `zona_ombra_d05` (:66) | transizione | 5 | 0.001→0.0035 | ogni passo di 0.00025 si sente |
-| `zona_ombra_d05` (:66) | plateau | 5 | 0.0035–0.005 | zona d'ombra (poca differenza percepita) |
+| `zona_ombra_d01_10` (:66) | transizione | 5 | 0.001→0.0035 | ogni passo di 0.00025 si sente |
+| `zona_ombra_d01_10` (:66) | plateau | 5 | 0.0035–0.005 | zona d'ombra (poca differenza percepita) |
 | `zona_ombra_d10_20` (:74) | plateau | 10 | 0.00375–0.00475 | zona d'ombra |
 | `zona_ombra_d10_20` (:74) | plateau | 15 | 0.00325–0.00425 e 0.0045–0.0055 | zona d'ombra (due fasce) |
 | `zona_ombra_d10_20` (:74) | plateau | 20 | 0.00325–0.0045 | zona d'ombra |
@@ -39,11 +39,11 @@ marcata `⚠︎ da riascoltare` (le zone vanno rifatte da capo, vedi
 | `zona_ombra_d25_50` (:85) | plateau | 40 | 0.00325–0.00475 | zona d'ombra |
 | `zona_ombra_d25_50` (:85) | plateau | 45 | 0.003–0.00475 | zona d'ombra |
 | `zona_ombra_d25_50` (:85) | plateau | 50 | 0.003–0.005 | zona d'ombra |
-| `zona_ombra_d55_60` (:97) | plateau | 55 | 0.003–0.00775 | zona d'ombra, forse oltre (da verificare 0.008–0.01, ora coperto dalla ramp fino a 0.008) |
-| `zona_ombra_d55_60` (:97) | plateau | 60 | 0.003–0.00775 | zona d'ombra (= density 55) |
-| `zona_ombra_d55_60` (:97) | ⚠︎ da riascoltare | 80 | — | la ramp arriva a **80** (`study.yml:101 ramp {start: 55, stop: 80}`, 2 valori: 55 e 80); ascoltata finora solo fino a density 60 — density 80 ancora da sentire |
+| `zona_ombra_d55_80` (:97) | plateau | 55 | 0.003–0.00775 | zona d'ombra, forse oltre (da verificare 0.008–0.01, ora coperto dalla ramp fino a 0.008) |
+| `zona_ombra_d55_80` (:97) | plateau | 60 | 0.003–0.00775 | zona d'ombra (= density 55) |
+| `zona_ombra_d55_80` (:97) | ⚠︎ da riascoltare | 80 | — | la ramp arriva a **80** (`study.yml:101 ramp {start: 55, stop: 80}`, 2 valori: 55 e 80); ascoltata finora solo fino a density 60 — density 80 ancora da sentire |
 
-> Nota `zona_ombra_d05`: l'override `axes.density.ramp.step: 1`
+> Nota `zona_ombra_d01_10`: l'override `axes.density.ramp.step: 1`
 > (`study.yml:67`) sulla ramp globale `{start: 1, stop: 10, step: 5}`
 > (`study.yml:42`) fa sì che lo stream ora spazzi density **1–10** a passo 1,
 > non solo density 5. Le due righe qui sopra registrano il solo slice density 5
