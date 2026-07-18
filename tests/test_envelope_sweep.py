@@ -354,7 +354,10 @@ def test_all_step_per_axis_collapses_like_top_level():
 
 # --- orderings espliciti -------------------------------------------------------
 
-def _spec_orderings(orderings):
+def _spec_orderings(orderings, orders=None):
+    sweep = {"mode": "envelope", "orderings": orderings, "plateau": 5, "transition": 5}
+    if orders is not None:
+        sweep["orders"] = orders
     return parse_study_spec({
         "study_id": "s",
         "base": {"sample": "x.wav"},
@@ -363,8 +366,7 @@ def _spec_orderings(orderings):
             "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05, 0.2]},
             "pan": {"path": "pan", "baseline": 0.0, "values": [-1.0, 0.0, 1.0]},
         },
-        "sweep": {"mode": "envelope", "orders": [3], "orderings": orderings,
-                  "plateau": 5, "transition": 5},
+        "sweep": sweep,
     })
 
 
@@ -396,8 +398,58 @@ def test_orderings_outer_axis_is_slowest():
 
 
 def test_orderings_no_duplicate_with_combinations():
-    # Se un ordering coincide con la combinazione lessicografica, non deve comparire due volte.
-    spec = _spec_orderings([["density", "grain_duration", "pan"]])
+    # Se un ordering coincide con la combinazione lessicografica automatica non
+    # deve comparire due volte: la tripla (density, grain_duration, pan) e' sia
+    # ordering esplicito sia unica combinazione di order 3, ma le coppie di
+    # order 2 sono comunque nuove (orders non e' ridondante).
+    spec = _spec_orderings([["density", "grain_duration", "pan"]], orders=[2, 3])
     variants = generate_envelope_variants(spec)
     names = [v.name for v in variants]
     assert names.count("e3__density__grain_duration__pan") == 1
+
+
+def test_orders_absent_with_orderings_only_orderings():
+    # orders assente + orderings popolato: assetto chirurgico, solo gli orderings
+    # (nessuna combinazione automatica extra).
+    spec = _spec_orderings([["density", "grain_duration"]])
+    names = [v.name for v in generate_envelope_variants(spec)]
+    assert names == ["e2__density__grain_duration"]
+
+
+def test_orders_absent_no_orderings_full_coverage():
+    # orders assente + orderings assente: default storico [1..n], copertura piena.
+    spec = _spec_orderings([])
+    orders = spec.orders
+    assert orders == [1, 2, 3]
+
+
+def test_orders_empty_explicit_with_orderings_is_error():
+    with pytest.raises(Exception, match="ridondante"):
+        _spec_orderings([["density", "grain_duration"]], orders=[])
+
+
+def test_orders_fully_deduped_by_orderings_is_error():
+    # orders:[2] con 2 soli assi coincide con l'unica coppia gia' in orderings.
+    with pytest.raises(Exception, match="ridondante"):
+        parse_study_spec({
+            "study_id": "s",
+            "base": {"sample": "x.wav"},
+            "axes": {
+                "density": {"path": "density", "baseline": 20, "values": [5, 50]},
+                "grain_duration": {"path": "grain.duration", "baseline": 0.05, "values": [0.01, 0.05]},
+            },
+            "sweep": {"mode": "envelope", "orders": [2],
+                      "orderings": [["density", "grain_duration"]],
+                      "plateau": 5, "transition": 5},
+        })
+
+
+def test_orders_empty_no_orderings_is_silence():
+    # orders:[] + orderings vuoto = silenzio dello sweep, valido (caso stack).
+    spec = _spec_orderings([], orders=[])
+    assert generate_envelope_variants(spec) == []
+
+
+def test_ordering_single_axis_is_error():
+    with pytest.raises(Exception, match="meno di 2 assi"):
+        _spec_orderings([["density"]])

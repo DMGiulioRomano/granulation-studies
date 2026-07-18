@@ -68,8 +68,15 @@ sweep:
                                  # Lo sweep fa SOLO il prodotto cartesiano (N^k plateau).
                                  # Per muovere assi INSIEME (accoppiati) si usa il
                                  # processo `stack:` (stessa strategy-X, stesso n).
-  orders: [1, 2, 3]             # ordini da generare: 1=OAT, 2=coppie, 3=terzine…
-  orderings:                     # permutazioni esplicite (funziona per e2, e3, qualsiasi ordine)
+  orders: [1, 2, 3]             # ordini automatici: 1=OAT, 2=coppie, 3=terzine…
+                                 # DEFAULT condizionato se `orders` e' assente:
+                                 #   - senza orderings -> [1..n] (copertura piena)
+                                 #   - con orderings   -> [] (solo gli orderings)
+                                 # `orders: []` esplicito + orderings vuoto = silenzio.
+                                 # `orders` e' additivo agli orderings (dedup per
+                                 # sequenza esatta); e' ERRORE se, con orderings
+                                 # popolato, non aggiunge nessuna combinazione nuova.
+  orderings:                     # permutazioni esplicite (min 2 assi per voce)
     - [density, grain.duration]                # primo = asse lento (outer), ultimo = veloce (inner)
     - [grain.duration, density]                # stessa coppia, ordine invertito
 
