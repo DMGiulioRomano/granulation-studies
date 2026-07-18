@@ -84,6 +84,25 @@ def test_stream_ramp_override_replaces_inherited_values():
     ]
 
 
+def test_stream_override_on_dotted_axis_key_stays_literal():
+    # Un asse con chiave dotted ('grain.duration', senza 'path') deve poter
+    # essere overridato da uno stream in forma annidata: la chiave figlia
+    # diretta di 'axes:' e' un nome d'asse letterale, non va spezzata
+    # dall'espansione puntata.
+    data = {
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {"grain.duration": {"values": [0.001, 0.01]}},
+        "sweep": {"mode": "envelope", "orders": [1]},
+        "streams": {
+            "prova": {"axes": {"grain.duration": {"values": [0.003, 0.005]}}}
+        },
+    }
+    spec = resolve_streams(data)[0]
+    assert spec.axis("grain.duration").values == [0.003, 0.005]
+    assert [ax.name for ax in spec.axes] == ["grain.duration"]
+
+
 def test_stream_ramp_partial_override_merges_fields():
     # Stesso marcatore (ramp su ramp): l'override parziale fonde i campi,
     # start/stop restano dalla base. Semantica merge (decisa esplicitamente).
@@ -138,6 +157,43 @@ def test_validate_rejects_empty_axes():
 
 
 # --- single source of truth: baseline opzionale --------------------------------
+
+def test_dotted_axis_key_derives_path():
+    # Chiave asse in dot-notation senza 'path': il path e' la chiave stessa.
+    spec = parse_study_spec(
+        {
+            "study_id": "s",
+            "base": {"sample": "x.wav"},
+            "axes": {
+                "density": {"baseline": 20, "values": [5, 50]},
+                "grain.duration": {"baseline": 0.05, "values": [0.01, 0.2]},
+            },
+            "sweep": {"orders": [1, 2]},
+        }
+    )
+    assert spec.axis("density").path == "density"
+    assert spec.axis("grain.duration").path == "grain.duration"
+
+
+def test_explicit_path_still_wins_as_alias():
+    spec = parse_study_spec(_spec_dict())
+    assert spec.axis("a").path == "density"
+    assert spec.axis("b").path == "volume"
+
+
+def test_dotted_key_without_baseline_resolves_engine_default():
+    spec = parse_study_spec(
+        {
+            "study_id": "s",
+            "base": {"sample": "x.wav"},
+            "axes": {
+                "grain.duration": {"values": [0.01, 0.2]},
+            },
+            "sweep": {"orders": [1]},
+        }
+    )
+    assert spec.axis("grain.duration").baseline == 0.05
+
 
 def test_baseline_omitted_resolves_engine_default():
     # grain.duration ha default engine 0.05: omettere baseline lo risolve.

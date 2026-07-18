@@ -92,12 +92,10 @@ axes:
     assert "step" in e.msg
 
 
-def test_missing_path_is_spec_error():
+def test_missing_path_derives_from_axis_key():
     data, locs = loads("study_id: s\nbase: {}\naxes:\n  a: {baseline: 20, values: [1]}\n")
-    with pytest.raises(SpecError) as exc:
-        parse_study_spec(data, "s", locs=locs)
-    assert exc.value.axis == "a"
-    assert "path" in exc.value.msg
+    spec = parse_study_spec(data, "s", locs=locs)
+    assert spec.axis("a").path == "a"
 
 
 def test_parse_without_locs_still_works():

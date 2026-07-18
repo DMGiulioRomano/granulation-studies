@@ -220,7 +220,7 @@ def _resolve_baseline(
     """
     if "baseline" in cfg:
         return cfg["baseline"]
-    path = cfg["path"]
+    path = cfg.get("path", name)
     if path == "pitch" or path.startswith("pitch."):
         raise ctx.err(
             f"Asse '{name}': path '{path}' e' unit-driven (pitch), "
@@ -254,7 +254,15 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
     return result
 
 
-def _expand_dotted_keys(override: Dict[str, Any]) -> Dict[str, Any]:
+# Blocchi i cui figli diretti sono nomi d'asse: una chiave dotted li' sotto
+# (es. 'grain.duration', asse senza 'path') e' un identificatore letterale,
+# non un path da espandere.
+_DOTTED_LITERAL_BLOCKS = ("axes", "stack")
+
+
+def _expand_dotted_keys(
+    override: Dict[str, Any], literal_children: bool = False
+) -> Dict[str, Any]:
     """Espande le chiavi puntate di un override di stream in dict annidati.
 
     ``{"axes.density.base.expr": X}`` -> ``{"axes": {"density": {"base":
@@ -265,6 +273,13 @@ def _expand_dotted_keys(override: Dict[str, Any]) -> Dict[str, Any]:
     era un no-op silenzioso (era la causa di ``fermo == mobile`` in
     ``study_versions_test``, issue #29).
 
+    Eccezione (``literal_children``): i figli diretti di ``axes:``/``stack:``
+    sono *nomi d'asse* e restano letterali anche se dotted (un asse
+    ``grain.duration`` senza ``path``); dentro la config dell'asse
+    l'espansione riprende normale. La forma tutta-puntata
+    (``axes.grain.duration.values``) resta ambigua per gli assi dotted: li'
+    va usata la forma annidata.
+
     Rami che si sovrappongono — una chiave puntata e una forma annidata sullo
     stesso path, o due chiavi puntate con prefisso comune — si **fondono** via
     ``_deep_merge`` nell'ordine di dichiarazione (l'ultima vince sui conflitti
@@ -274,8 +289,13 @@ def _expand_dotted_keys(override: Dict[str, Any]) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     for k, v in override.items():
         if isinstance(v, dict):
-            v = _expand_dotted_keys(v)
-        if isinstance(k, str) and "." in k:
+            v = _expand_dotted_keys(
+                v,
+                literal_children=(
+                    not literal_children and k in _DOTTED_LITERAL_BLOCKS
+                ),
+            )
+        if isinstance(k, str) and "." in k and not literal_children:
             branch: Any = v
             parts = k.split(".")
             for p in reversed(parts[1:]):
@@ -546,13 +566,9 @@ def parse_study_spec(
                 axis=name,
                 hint=hint,
             )
-        if "path" not in cfg:
-            raise ctx.err(
-                f"Asse '{name}': manca 'path' (il parametro engine da muovere).",
-                key=("axes", name),
-                axis=name,
-                hint="es. 'path: density' o 'path: grain.duration'.",
-            )
+        # 'path' esplicito resta un alias; se omesso, la chiave dell'asse
+        # (anche in dot-notation, es. 'grain.duration') e' il path engine.
+        path = cfg.get("path", name)
         # Generatore Y riconosciuto dalla forma (values | ramp | base): chiave
         # canonica values|ramp|band, con i parametri della banda raccolti piatti.
         with ctx.wrapping(key=("axes", name), axis=name):
@@ -599,7 +615,7 @@ def parse_study_spec(
         axes.append(
             Axis(
                 name=name,
-                path=cfg["path"],
+                path=path,
                 baseline=_resolve_baseline(name, cfg, _defaults_cache, ctx),
                 values=values,
                 interpolation=cfg.get("interpolation", study_interpolation),
