@@ -43,6 +43,15 @@ marcata `⚠︎ da riascoltare` (le zone vanno rifatte da capo, vedi
 | `zona_ombra_d55_80` (:97) | plateau | 60 | 0.003–0.00775 | zona d'ombra (= density 55) |
 | `zona_ombra_d55_80` (:97) | ⚠︎ da riascoltare | 80 | — | la ramp arriva a **80** (`study.yml:101 ramp {start: 55, stop: 80}`, 2 valori: 55 e 80); ascoltata finora solo fino a density 60 — density 80 ancora da sentire |
 
+Scala `grain_10-50ms` (ascolto 2026-07-18), sweep `grain.duration` 10-50 ms:
+
+| stream (study.yml) | tipo | asse mosso | valore/range | percetto |
+|---------------------|------|------------|---------------|----------|
+| base (sweep step) | plateau | grain.duration step | ≈ 1 ms | differenza tra un valore e il successivo percepita ma minima, non ha carattere musicale (dettaglio timbrico) |
+| base (sweep step) | transizione | grain.duration step | 1→2.5 ms | il salto tra valori diventa percettivamente rilevante |
+| base (sweep step) | plateau | grain.duration step | ≈ 2.5 ms | differenze importanti tra un valore e il successivo |
+| base | plateau/transizione | grain.duration | 10→30-50 ms, a density bassa (grain-rate ≲ 30 Hz) | a volte sensazione di sdoppiamento in due voci distinte (assente/più debole a grain.duration ≈ 10 ms); le due voci tendono a fondersi avvicinandosi a grain-rate ~30 Hz; soglia precisa in density/grain.duration ancora da individuare, da riascoltare |
+
 > Nota `zona_ombra_d01_10`: l'override `axes.density.ramp.step: 1`
 > (`study.yml:67`) sulla ramp globale `{start: 1, stop: 10, step: 5}`
 > (`study.yml:42`) fa sì che lo stream ora spazzi density **1–10** a passo 1,

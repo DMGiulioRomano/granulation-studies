@@ -24,6 +24,13 @@ cancella.
 - [ ] Ascolto sweep con il parametro `distribution`: riprendere ad usarlo e
   sentire come si comporta il movimento della distribution a diverse
   densità che si muovono nel tempo (density come sweep, non fissa).
+- [ ] Indagare `distribution` su tutte le altre scale di grain.duration, non
+  solo `grain_10-50ms` (dove il 2026-07-18 sono emersi lo sdoppiamento in due
+  voci a bassa density, l'effetto "radio che perde il segnale" tra roughness
+  e banda audio, e la differenza step/cubic — vedi ascolto/2026-07-18.md,
+  sessioni 3-5): ripetere lo stesso protocollo su `grain_1-10ms`,
+  `grain_1-50smp`, `grain_50-1000ms` e `stack`, per capire quali effetti sono
+  specifici del range 10-50ms e quali sono generali a `distribution`.
 - [ ] Chiarire Sessione 1 del 2026-07-14: "3 Hz (terzi)" — capire se
   intendevo terzi di tono o Hz di differenza.
 - [ ] Fare tutti gli ascolti dei grani della scala **grain_1-50smp** e della scala **grain_50-1000ms**.
