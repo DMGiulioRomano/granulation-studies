@@ -11,6 +11,13 @@ distribuisce i tempi, spread distribuisce valori nella popolazione di stream
 Puro pre-processing: ``resolve_streams`` chiama ``expand_spreads`` prima del
 loop di deep-merge, tutto il resto della pipeline vede entry ordinarie. Lo
 ``study.yml`` sorgente non viene mai riscritto.
+
+Il blocco ``spread:`` puo' anche stare al top-level del documento (sibling di
+``base:``/``axes:``/``sweep:``, issue #34): e' il default che ogni entry con
+la chiave ``spread`` eredita via deep-merge prima dell'espansione — lo stesso
+meccanismo con cui ``sweep: {}`` riattiva il blocco ``sweep:`` globale.
+L'attivazione resta esplicita: una entry senza chiave ``spread`` non espande
+nulla, anche col blocco globale presente.
 """
 from __future__ import annotations
 
@@ -506,11 +513,51 @@ def _is_spread(entry: Any) -> bool:
     return isinstance(entry, dict) and "spread" in entry
 
 
+def _with_global_spread(
+    streams: Dict[str, Any],
+    global_spread: Any,
+    locs: Locations | None = None,
+) -> Dict[str, Any]:
+    """Fonde il blocco globale ``spread:`` nelle entry che dichiarano la chiave.
+
+    Stesso meccanismo di ``sweep:``: il globale e' il default, ``spread: {}``
+    (o ``spread:`` nullo) per-stream lo eredita intero, un blocco parziale lo
+    ritocca via deep-merge (le liste rimpiazzano). Una entry SENZA la chiave
+    resta un singolo stream: l'attivazione e' esplicita, il globale da solo
+    non espande nulla. La validazione resta post-merge, per-entry
+    (``_validate_spread``): il globale da solo puo' essere parziale (es. solo
+    ``n``) e completarsi negli stream. Un valore-spread non-dict nella entry
+    passa invariato: l'errore di schema resta quello di sempre, col contesto
+    dello stream.
+    """
+    if global_spread is None:
+        return streams
+    if not isinstance(global_spread, dict):
+        raise ErrCtx(locs=locs).err(
+            f"spread: il blocco globale deve essere un dict con 'over' "
+            f"(e opzionalmente 'n'), trovato {global_spread!r}.",
+            key=("spread",),
+            hint="il blocco globale e' il default che le entry con 'spread:' "
+            "ereditano via deep-merge, come per 'sweep:'.",
+        )
+    if not global_spread:
+        return streams
+    out: Dict[str, Any] = {}
+    for name, entry in streams.items():
+        if _is_spread(entry):
+            local = entry["spread"] if entry["spread"] is not None else {}
+            if isinstance(local, dict):
+                entry = {**entry, "spread": _deep_merge(global_spread, local)}
+        out[name] = entry
+    return out
+
+
 def expand_spreads(
     streams: Dict[str, Any],
     locs: Locations | None = None,
     pad_n: Dict[str, int] | None = None,
     axis_names: frozenset = frozenset(),
+    global_spread: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Espande le entry-spread di ``streams:`` in entry ordinarie.
 
@@ -530,7 +577,14 @@ def expand_spreads(
 
     ``axis_names`` (nomi d'asse del documento base) risolve il confine dei
     nomi dotted nei path di ``over`` sotto ``axes.``/``stack.`` (issue #32).
+
+    ``global_spread`` (il blocco ``spread:`` top-level del documento, issue
+    #34) e' il default che ogni entry con la chiave ``spread`` eredita via
+    deep-merge prima dell'espansione: ``spread: {}`` lo riattiva intero, un
+    blocco parziale lo ritocca, una entry senza chiave non espande nulla.
+    Senza blocco globale il comportamento storico e' invariato.
     """
+    streams = _with_global_spread(streams, global_spread, locs)
     plans = {
         name: _plan_entry(name, entry, locs, (pad_n or {}).get(name))
         for name, entry in streams.items()
@@ -584,15 +638,19 @@ def expand_spreads(
 
 
 def spread_counts(
-    streams: Dict[str, Any], locs: Locations | None = None
+    streams: Dict[str, Any],
+    locs: Locations | None = None,
+    global_spread: Dict[str, Any] | None = None,
 ) -> Dict[str, int]:
     """``n`` effettivo di ogni entry-spread di ``streams:``.
 
     Serve al percorso per il padding stabile: valutato sul documento di ogni
     istanza (dopo l'iniezione), il massimo per entry diventa il ``pad_n`` di
     ``expand_spreads``. Stessa risoluzione di ``_plan_entry``, senza generare
-    i valori.
+    i valori; ``global_spread`` e' lo stesso default per-entry di
+    ``expand_spreads`` (il conteggio va risolto sul blocco gia' ereditato).
     """
+    streams = _with_global_spread(streams, global_spread, locs)
     out: Dict[str, int] = {}
     for name, entry in streams.items():
         if not _is_spread(entry):

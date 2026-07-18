@@ -698,7 +698,9 @@ def generate_percorso_document(
         data_k = inject_combo(base_data, combo)
         data_k["duration"] = durations[k]
         docs.append(data_k)
-        for entry, n in spread_counts(data_k.get("streams") or {}, locs).items():
+        for entry, n in spread_counts(
+            data_k.get("streams") or {}, locs, global_spread=data_k.get("spread")
+        ).items():
             pad_n[entry] = max(pad_n.get(entry, 0), n)
 
     width = len(str(len(docs)))

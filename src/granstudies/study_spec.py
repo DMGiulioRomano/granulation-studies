@@ -421,7 +421,9 @@ def resolve_streams(
 
     Se ``streams:`` è assente, ritorna un singolo spec senza stream_id.
     Le entry-spread vengono espanse in entry ordinarie prima del merge
-    (``spread.expand_spreads``): da qui in poi ogni stream, generato o
+    (``spread.expand_spreads``), col blocco ``spread:`` top-level del
+    documento come default ereditabile per-entry (issue #34, lo stesso
+    meccanismo di ``sweep:``): da qui in poi ogni stream, generato o
     scritto a mano, e' un override come gli altri. Con ``locs`` gli errori
     di parse portano file e riga; la rete di sicurezza sotto etichetta con
     lo stream anche i ``ValueError`` nudi non ancora migrati a ``SpecError``.
@@ -452,7 +454,13 @@ def resolve_streams(
         for k, v in (data.get("axes") or {}).items()
         if k not in _AXES_RESERVED_KEYS and isinstance(v, dict)
     )
-    streams = expand_spreads(streams, locs, pad_n=spread_pad, axis_names=axis_names)
+    streams = expand_spreads(
+        streams,
+        locs,
+        pad_n=spread_pad,
+        axis_names=axis_names,
+        global_spread=data.get("spread"),
+    )
     result = []
     for stream_id, override in streams.items():
         # Le chiavi puntate scritte a mano nell'override (``axes.density.base.expr``)
