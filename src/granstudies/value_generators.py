@@ -424,8 +424,9 @@ def expand_env(spec: Threshold, *, seed: int, path: str, depth: int = 0) -> Thre
     ``range`` si decorrelano da soli, un seed esplicito congela il sottoalbero.
     """
     if is_expr_node(spec):
-        # Nodo-expr: aritmetica su scalari ed Env statici (niente seed, niente
-        # ricorsione — le forme in ``let`` sono statiche per contratto).
+        # Nodo-expr: aritmetica su scalari ed Env (niente seed — deterministico;
+        # gli expr annidati in ``let`` si risolvono dentro ``eval_expr``, con
+        # cicli e profondita' guardati la', non da MAX_ENV_DEPTH).
         try:
             text, let = parse_expr_node(spec)
             out = eval_expr(text, let)

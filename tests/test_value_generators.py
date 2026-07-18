@@ -585,6 +585,21 @@ def test_expand_env_expr_node_scalar():
     assert expand_env({"expr": "2 * 25"}, seed=0, path="base") == 50
 
 
+def test_expand_env_expr_node_nested_let():
+    # expr annidato in let (issue #28): 's' fattorizza una sagoma calcolata
+    node = {
+        "expr": "s * 2",
+        "let": {"env": [[0, 1], [1, 2]], "s": {"expr": "env + 1"}},
+    }
+    assert expand_env(node, seed=0, path="base") == [[0, 4], [1, 6]]
+
+
+def test_expand_env_expr_node_nested_cycle_carries_path():
+    node = {"expr": "a", "let": {"a": {"expr": "b"}, "b": {"expr": "a"}}}
+    with pytest.raises(ValueError, match=r"base.*ciclo"):
+        expand_env(node, seed=0, path="base")
+
+
 def test_expand_params_routes_expr_node_in_band_base():
     params = {
         "base": {"expr": "env + 1", "let": {"env": [[0, 0], [1, 1]]}},

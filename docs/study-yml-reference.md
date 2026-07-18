@@ -423,11 +423,37 @@ axes:
   Le forme devono abitare lo stesso mondo: **step con continua è errore**
   (discontinuità pesata, fuori dal v1). Il morphing a scatti si scrive con
   forme step (o scalari) e `w` step.
-- **`let`** dichiara i nomi in scope: scalari o forme **statiche** di Env
-  (`[a, b]`, `[[t, v], ...]`, `{type, points, curve}`). Un nodo-generatore
-  dentro `let` è errore: i due meccanismi non si annidano — con una sola
-  eccezione, la **banda-let** della strategy `expr` dello spread (un
-  pescaggio random per stream generato, vedi «La strategy `expr`»).
+- **`let`** dichiara i nomi in scope: scalari, forme **statiche** di Env
+  (`[a, b]`, `[[t, v], ...]`, `{type, points, curve}`), oppure altri
+  **nodi-expr** (issue #28) — così una sagoma calcolata si fattorizza senza
+  pre-calcolare i breakpoint a mano. Un nodo-generatore dentro `let` resta
+  errore: i due meccanismi non si annidano — con una sola eccezione, la
+  **banda-let** della strategy `expr` dello spread (un pescaggio random per
+  stream generato, vedi «La strategy `expr`»).
+- **expr annidati in `let`** — le regole di scoping:
+  - un expr annidato vede i **fratelli** dello stesso `let` e i nomi esterni
+    (nella strategy `expr` dello spread anche `i`, `n` e le bande-let);
+    l'**ordine di dichiarazione non conta** — la risoluzione è per
+    dipendenze;
+  - può avere il **proprio `let`**: scope lessicale, i nomi interni
+    **ombreggiano** gli esterni (e un nome ridefinito non vede il nome che
+    ombreggia: sarebbe un auto-riferimento, quindi ciclo);
+  - un **ciclo** (`a` dipende da `b`, `b` da `a` — o un auto-riferimento) è
+    errore di valutazione chiaro, con la catena nel messaggio;
+  - guardia di **profondità 8**, come i generatori annidati: vale sia per i
+    `let` dentro `let` sia per la catena di dipendenze tra variabili.
+
+  ```yaml
+  axes:
+    density:
+      n: 4
+      base:
+        expr: "shape * 50"
+        let:
+          env: [[0, 1], [0.1583, 1.5]]
+          shape: {expr: "min(env, 1.2)"}   # sagoma calcolata, riferita a un fratello
+      range: 0
+  ```
 - **Env ⊙ scalare** agisce **sulle y**, i tempi restano intatti; con la forma
   dict, `type`/`curve` si preservano. L'ordine conta dove deve
   (`100 - env`, `env / 2`). **Env ⊙ Env non è supportato** (errore).
@@ -562,7 +588,9 @@ versions:
   (`let: {d: 0}`). Il default tiene lo studio valido anche senza il blocco;
   una variabile che nessuna espressione referenzia è un errore di parse
   (guardia anti-refuso). L'iniezione vale ovunque un nodo-expr viva: bande di
-  Y, camminate-X, parametri statici dello stream.
+  Y, camminate-X, parametri statici dello stream — anche **annidato** nel
+  `let` di un altro nodo-expr (issue #28): il nodo annidato che nomina la
+  variabile la riceve nel *proprio* `let`, ombreggiando il default locale.
 - Ogni versione replica **tutti** gli stream dello stack, spostati sulla
   posizione della versione e con lo `stream_id` suffissato con l'etichetta
   della combinazione (`mobile__f=50__d=1`). Envelope, camminate e seed passano
@@ -810,7 +838,10 @@ più nello scope: `i`, l'indice 0-based dello stream generato, e `n`, il
 conteggio totale (`i / (n - 1)` è il progresso normalizzato). Il risultato —
 scalare o Env intero — va così com'è sul path. Ridefinire `i` o `n` in `let`
 è errore; il conteggio non è mai posseduto da `expr` (serve `spread.n` o una
-strategy sorella che lo possiede).
+strategy sorella che lo possiede). Gli **expr annidati** in `let` (vedi «Il
+nodo-expr») vedono anche `i`, `n` e le bande-let: convivono nello stesso
+`let` — la banda pesca, l'expr annidato calcola, l'espressione principale
+combina.
 
 ```yaml
 spread:
