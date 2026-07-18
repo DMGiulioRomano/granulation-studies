@@ -2,7 +2,7 @@ import pytest
 
 from granstudies import yaml_loc
 from granstudies.errors import SpecError
-from granstudies.spread import expand_spreads
+from granstudies.spread import expand_spreads, spread_counts
 from granstudies.study_spec import resolve_streams
 
 
@@ -1168,3 +1168,179 @@ def test_without_pad_n_out_of_range_entry_stays_ordinary():
     streams = _streams(v=entry, v_9={"base": {"volume": -90}})
     out = expand_spreads(streams)
     assert "v_9" in out
+
+
+# --- blocco globale spread:, eredita' per-stream (issue #34) -----------------------
+
+_GLOBAL = {"over": {"base.pointer.start.values": [0.1, 0.25, 0.4]}}
+
+
+def test_global_empty_dict_inherits_whole_block():
+    out = expand_spreads(_streams(z={"spread": {}}), global_spread=_GLOBAL)
+    assert list(out) == ["z_1", "z_2", "z_3"]
+    assert [out[k]["base"]["pointer"]["start"] for k in out] == [0.1, 0.25, 0.4]
+
+
+def test_global_null_spread_value_inherits_like_empty_dict():
+    # ``spread:`` senza valore (None in YAML) equivale a ``spread: {}``,
+    # come gia' per ``sweep:``.
+    out = expand_spreads(_streams(z={"spread": None}), global_spread=_GLOBAL)
+    assert list(out) == ["z_1", "z_2", "z_3"]
+
+
+def test_global_partial_override_replaces_leaf():
+    # deep merge come per sweep: la chiave dello stream rimpiazza la foglia
+    # globale (le liste rimpiazzano)
+    entry = {"spread": {"over": {"base.pointer.start.values": [0.9, 1.0]}}}
+    out = expand_spreads(_streams(z=entry), global_spread=_GLOBAL)
+    assert list(out) == ["z_1", "z_2"]
+    assert [out[k]["base"]["pointer"]["start"] for k in out] == [0.9, 1.0]
+
+
+def test_global_partial_override_merges_sibling_paths():
+    # un path nuovo nello stream si aggiunge a quello globale (deep merge di over)
+    entry = {"spread": {"over": {"base.volume.values": [-6, -3, 0]}}}
+    out = expand_spreads(_streams(z=entry), global_spread=_GLOBAL)
+    assert [out[k]["base"]["pointer"]["start"] for k in out] == [0.1, 0.25, 0.4]
+    assert [out[k]["base"]["volume"] for k in out] == [-6, -3, 0]
+
+
+def test_global_may_be_partial_and_completed_per_stream():
+    # il globale porta solo n; la strategy vive nello stream (la validazione
+    # e' post-merge, per-entry)
+    entry = {"spread": {"over": {"base.onset": {"ramp": {"start": 0, "step": 2}}}}}
+    out = expand_spreads(_streams(z=entry), global_spread={"n": 3})
+    assert [out[k]["base"]["onset"] for k in out] == [0, 2, 4]
+
+
+def test_stream_n_completes_global_band():
+    g = {"over": {"base.volume": {"base": -12, "range": 6}}}
+    out = expand_spreads(_streams(z={"spread": {"n": 3}}), global_spread=g)
+    assert list(out) == ["z_1", "z_2", "z_3"]
+    assert all(-12 <= out[k]["base"]["volume"] <= -6 for k in out)
+
+
+def test_global_present_stream_without_key_not_expanded():
+    # attivazione esplicita, come sweep: senza chiave 'spread' niente cugini
+    out = expand_spreads(
+        _streams(z={"sweep": {}}, w={"base": {"volume": -6}}), global_spread=_GLOBAL
+    )
+    assert list(out) == ["z", "w"]
+    assert "spread" not in out["z"]
+
+
+def test_global_patch_still_applies():
+    streams = _streams(z={"spread": {}}, z_2={"base": {"volume": -20}})
+    out = expand_spreads(streams, global_spread=_GLOBAL)
+    assert list(out) == ["z_1", "z_2", "z_3"]
+    assert out["z_2"]["base"]["volume"] == -20
+    assert out["z_2"]["base"]["pointer"]["start"] == 0.25
+
+
+def test_no_global_empty_spread_still_raises():
+    # senza blocco globale ``spread: {}`` resta l'errore di sempre
+    with pytest.raises(SpecError, match="over"):
+        expand_spreads(_streams(z={"spread": {}}))
+
+
+def test_global_not_a_dict_raises():
+    with pytest.raises(SpecError, match="globale"):
+        expand_spreads(_streams(z={"spread": {}}), global_spread=[0.1, 0.25])
+
+
+def test_global_with_non_dict_entry_spread_keeps_schema_error():
+    # il valore-spread non-dict della entry non viene fuso: l'errore di
+    # schema resta quello storico, col contesto dello stream
+    with pytest.raises(SpecError) as exc:
+        expand_spreads(_streams(z={"spread": 8}), global_spread=_GLOBAL)
+    assert exc.value.stream == "z"
+
+
+def test_global_inherited_error_carries_stream():
+    # blocco ereditato invalido (n senza over): l'errore appartiene alla entry
+    with pytest.raises(SpecError) as exc:
+        expand_spreads(_streams(z={"spread": {}}), global_spread={"n": 3})
+    assert exc.value.stream == "z"
+
+
+def test_spread_counts_with_global():
+    counts = spread_counts(
+        _streams(z={"spread": {}}, solo={}), global_spread=_GLOBAL
+    )
+    assert counts == {"z": 3}
+
+
+def _global_doc():
+    return {
+        "study_id": "s",
+        "duration": 30,
+        "base": {"onset": 0, "sample": "c.wav"},
+        "axes": {"a": {"path": "density", "baseline": 20, "values": [5, 50]}},
+        "spread": {"over": {"base.pointer.start.values": [0.1, 0.25, 0.4]}},
+        "streams": {
+            "solo": {},
+            "z": {"sweep": {}, "spread": {}},
+        },
+    }
+
+
+def test_resolve_streams_inherits_global_spread():
+    specs = resolve_streams(_global_doc())
+    assert [s.stream_id for s in specs] == ["solo", "z_1", "z_2", "z_3"]
+    by_id = {s.stream_id: s for s in specs}
+    assert by_id["z_2"].base["pointer"]["start"] == 0.25
+    # lo stream senza chiave spread resta singolo, senza espansione
+    assert "pointer" not in by_id["solo"].base
+
+
+def test_resolve_streams_global_spread_partial_override():
+    doc = _global_doc()
+    doc["streams"]["z"] = {"spread": {"over": {"base.pointer.start.values": [0.9]}}}
+    specs = resolve_streams(doc)
+    assert [s.stream_id for s in specs] == ["solo", "z_1"]
+    assert specs[1].base["pointer"]["start"] == 0.9
+
+
+def test_no_global_brano01_v2_shape_unchanged():
+    # Retrocompatibilita': la sagoma di brano01_v2 — spread per-stream con
+    # expr/let e patch omonime, NESSUN blocco globale — resta identica.
+    streams = _streams(
+        fermo={},
+        dens_1={"base": {"pan": -50}},
+        dens={
+            "spread": {
+                "n": 4,
+                "over": {
+                    "axes.density.base": {
+                        "expr": "env + v * (i + 1)",
+                        "let": {"env": [[0, 0], [0.1583, 0.5]], "v": 50},
+                    },
+                    "base.pan": {"expr": "i * a", "let": {"a": -20}},
+                },
+            },
+        },
+    )
+    out = expand_spreads(streams)
+    assert list(out) == ["fermo", "dens_1", "dens_2", "dens_3", "dens_4"]
+    assert "spread" not in out["fermo"] and "axes" not in out["fermo"]
+    assert out["dens_1"]["base"]["pan"] == -50      # patch vince sulla strategy
+    assert out["dens_2"]["base"]["pan"] == -20
+    assert out["dens_3"]["axes"]["density"]["base"] == [[0, 150], [0.1583, 150.5]]
+
+
+def test_cmd_stack_expanded_artifact_with_global_spread(tmp_path, monkeypatch):
+    # lo "yaml di aiuto" eredita il blocco globale come resolve_streams
+    import yaml as _yaml
+
+    doc = _doc()
+    doc["stack"] = {}
+    doc["spread"] = doc["streams"]["v"].pop("spread")
+    doc["streams"]["v"] = {"spread": {}}
+    cli, study, gdir = _cli_study(tmp_path, monkeypatch, doc)
+    assert cli.cmd_stack(study) == 0
+    artifact = gdir / "yaml" / "streams_expanded.yml"
+    assert artifact.exists()
+    expanded = _yaml.safe_load(artifact.read_text())
+    assert list(expanded) == ["base", "v_1", "v_2", "v_3"]
+    assert expanded["v_2"]["base"]["onset"] == 2
+    assert all("spread" not in (e or {}) for e in expanded.values())
