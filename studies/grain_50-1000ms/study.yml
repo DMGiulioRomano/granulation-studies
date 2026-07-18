@@ -32,7 +32,6 @@ sweep:
   mode: envelope
   plateau: 5
   transition: 2.5
-  orders: [2]
   orderings:
     - [density, grain_duration]      # density lento, grain_duration veloce
     #- [grain_duration, density]      # grain_duration lento, density veloce
@@ -41,10 +40,14 @@ axes:
   density:
     ramp: {start: 1, stop: 10, step: 5}
     path: density
-    baseline: 20           
+    baseline: 20
   grain_duration:
     path: grain.duration
     ramp: {start: .05, stop: 1, step: .05}
+  distribution:
+    path: distribution
+    ramp: {start: 0, stop: 1, step: .25}
+
 
 streams:
   # Zone d'ombra di grain.duration (riepilogo.md, ascolto 2026-07-05): 4 zone
@@ -72,8 +75,7 @@ streams:
 
   # Zona 2 — density 10-20: zona d'ombra ~0.0032-0.0055.
   zona_ombra_d10_20:
-    axes:
-      density:
+    axes.density:
         ramp: {start: 10, stop: 20}            # 3 valori
     sweep: {}
     spread:
@@ -83,8 +85,7 @@ streams:
 
   # Zona 3 — density 25-50: zona d'ombra ~0.003-0.005, stabile su tutta la banda.
   zona_ombra_d25_50:
-    axes:
-      density:
+    axes.density:
         ramp: {start: 25, stop: 50}            # 6 valori
     sweep: {}
     spread:
@@ -96,8 +97,7 @@ streams:
   # l'estensione oltre 0.008 ancora da verificare (riepilogo.md riga 28-29).
   # Ascoltata finora solo fino a density 60; density 80 ancora da sentire.
   zona_ombra_d55_80:
-    axes:
-      density:
+    axes.density:
         ramp: {start: 55, stop: 80}             # 2 valori
     sweep: {}
     spread:
@@ -106,8 +106,7 @@ streams:
           values: [0.1, 0.25, 0.4, 0.55, 0.8, 0.915, 1.1]
 
   zona_ombra_d100_500:
-    axes:
-      density:
+    axes.density:
         ramp: {start: 100, stop: 500, step: 50}             # 2 valori
     sweep: {}
     spread:
