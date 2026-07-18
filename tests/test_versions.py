@@ -147,6 +147,22 @@ def test_inject_only_where_referenced():
     assert "let" not in fermo or "d" not in (fermo.get("let") or {})
 
 
+def test_inject_reaches_nested_expr_let():
+    # expr annidato in let (issue #28): il nodo annidato che nomina la
+    # variabile riceve l'iniezione nel *proprio* let, ombreggiando il default
+    data = _study({"d": {"values": [1, 2]}})
+    data["axes"]["density"]["base"] = {
+        "expr": "g * 2",
+        "let": {"g": {"expr": "d + 1", "let": {"d": 0}}},
+    }
+    out = inject_combo(data, {"d": 10})
+    node = out["axes"]["density"]["base"]
+    assert node["let"]["g"]["let"]["d"] == 10
+    from granstudies.expr import eval_expr
+
+    assert eval_expr(node["expr"], node["let"]) == 22
+
+
 def test_inject_does_not_mutate_input():
     data = _study({"d": {"values": [1]}})
     snapshot = copy.deepcopy(data)

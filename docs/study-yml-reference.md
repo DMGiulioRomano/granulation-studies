@@ -588,7 +588,9 @@ versions:
   (`let: {d: 0}`). Il default tiene lo studio valido anche senza il blocco;
   una variabile che nessuna espressione referenzia è un errore di parse
   (guardia anti-refuso). L'iniezione vale ovunque un nodo-expr viva: bande di
-  Y, camminate-X, parametri statici dello stream.
+  Y, camminate-X, parametri statici dello stream — anche **annidato** nel
+  `let` di un altro nodo-expr (issue #28): il nodo annidato che nomina la
+  variabile la riceve nel *proprio* `let`, ombreggiando il default locale.
 - Ogni versione replica **tutti** gli stream dello stack, spostati sulla
   posizione della versione e con lo `stream_id` suffissato con l'etichetta
   della combinazione (`mobile__f=50__d=1`). Envelope, camminate e seed passano
