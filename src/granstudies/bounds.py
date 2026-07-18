@@ -34,6 +34,11 @@ _MANUAL_BOUNDS: Dict[str, Tuple[float, float]] = {
 }
 
 
+def known_paths() -> frozenset:
+    """Tutti i path dotted noti (registry engine + manuali), senza import engine."""
+    return frozenset(_PATH_TO_ENGINE_KEY) | frozenset(_MANUAL_BOUNDS)
+
+
 def bounds_for(
     path: str,
     output_sr: Optional[int] = None,

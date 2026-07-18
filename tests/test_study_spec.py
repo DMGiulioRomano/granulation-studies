@@ -103,6 +103,84 @@ def test_stream_override_on_dotted_axis_key_stays_literal():
     assert [ax.name for ax in spec.axes] == ["grain.duration"]
 
 
+def test_fully_dotted_override_reaches_dotted_axis():
+    # Forma tutta-puntata su un asse dotted dichiarato: il confine del nome
+    # d'asse si risolve col longest-match sugli assi del documento base.
+    data = {
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {"grain.duration": {"values": [0.001, 0.01]}},
+        "sweep": {"mode": "envelope", "orders": [1]},
+        "streams": {"prova": {"axes.grain.duration.values": [0.003, 0.005]}},
+    }
+    spec = resolve_streams(data)[0]
+    assert spec.axis("grain.duration").values == [0.003, 0.005]
+    assert [ax.name for ax in spec.axes] == ["grain.duration"]
+
+
+def test_fully_dotted_override_new_axis_via_engine_registry():
+    # Asse non dichiarato nella base: il confine si risolve sul registro
+    # parametri engine ('grain.duration' e' un path noto), quindi l'override
+    # introduce l'asse dotted invece di un asse fantasma 'grain'.
+    data = {
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {"density": {"baseline": 20, "values": [5, 50]}},
+        "sweep": {"mode": "envelope", "orders": [1]},
+        "streams": {"prova": {"axes.grain.duration.values": [0.003, 0.005]}},
+    }
+    spec = resolve_streams(data)[0]
+    assert spec.axis("grain.duration").values == [0.003, 0.005]
+    assert sorted(ax.name for ax in spec.axes) == ["density", "grain.duration"]
+
+
+def test_fully_dotted_override_ambiguous_axis_raises():
+    # Due assi dichiarati con prefisso comune ('grain' alias + 'grain.duration'):
+    # la forma tutta-puntata e' indecidibile -> errore esplicito, mai scelta
+    # silenziosa.
+    from granstudies.errors import SpecError
+
+    data = {
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {
+            "grain": {"path": "density", "baseline": 20, "values": [5, 50]},
+            "grain.duration": {"values": [0.001, 0.01]},
+        },
+        "sweep": {"mode": "envelope", "orders": [1]},
+        "streams": {"prova": {"axes.grain.duration.values": [0.003, 0.005]}},
+    }
+    with pytest.raises(SpecError) as exc:
+        resolve_streams(data)
+    assert exc.value.stream == "prova"
+    assert "annidata" in (exc.value.hint or "")
+
+
+def test_dotted_child_key_inside_axes_block_finds_boundary():
+    # Chiave dotted come figlia diretta di 'axes:': il confine si risolve
+    # anche li' (asse 'density' dichiarato + resto 'baseline' annidato).
+    data = {
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {"density": {"baseline": 20, "values": [5, 50]}},
+        "sweep": {"mode": "envelope", "orders": [1]},
+        "streams": {"prova": {"axes": {"density.baseline": 30}}},
+    }
+    spec = resolve_streams(data)[0]
+    assert spec.axis("density").baseline == 30
+
+
+def test_fully_dotted_override_reaches_dotted_axis_in_stack():
+    # Forma tutta-puntata sotto 'stack.': stesso longest-match degli assi.
+    from granstudies.study_spec import _expand_dotted_keys
+
+    out = _expand_dotted_keys(
+        {"stack.grain.duration.seed": 7},
+        axis_names=frozenset({"grain.duration"}),
+    )
+    assert out == {"stack": {"grain.duration": {"seed": 7}}}
+
+
 def test_stream_ramp_partial_override_merges_fields():
     # Stesso marcatore (ramp su ramp): l'override parziale fonde i campi,
     # start/stop restano dalla base. Semantica merge (decisa esplicitamente).

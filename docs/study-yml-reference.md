@@ -110,10 +110,15 @@ stack:
 # Le chiavi PUNTATE si espandono in dict annidati prima del merge, come in
 # `spread.over`: `axes.density.base.expr: X` equivale a
 # `axes: {density: {base: {expr: X}}}` (rami sovrapposti si fondono).
-# Eccezione: i figli diretti di `axes:`/`stack:` sono nomi d'asse letterali —
-# un asse dotted (`grain.duration`) si overrida in forma annidata
-# (`axes: {grain.duration: {...}}`), non con la forma tutta-puntata. Se questa
-# sezione è assente, sweep genera un'unica versione senza sotto-cartella.
+# Sotto `axes.`/`stack.` il primo identificatore è un NOME D'ASSE, che può
+# essere a sua volta dotted (`axes.grain.duration.values` raggiunge l'asse
+# `grain.duration`): il confine si risolve sugli assi dichiarati in `axes:`,
+# poi sul registro parametri engine (un override può introdurre un asse
+# dotted nuovo), altrimenti sul primo segmento. Due assi dichiarati con
+# prefisso comune (`grain` + `grain.duration`) rendono la forma puntata
+# ambigua → errore; lì si usa la forma annidata (`axes: {grain.duration:
+# {...}}`, sempre valida). Se questa sezione è assente, sweep genera
+# un'unica versione senza sotto-cartella.
 streams:
   base: {}                       # nessun override — identica alla base
 
@@ -799,6 +804,10 @@ streams:
     spread:
       n: 8                      # opzionale se una strategy possiede il conteggio
       over:                     # {path puntato nel documento: strategy}
+                                # sotto axes./stack. il primo identificatore è
+                                # un nome d'asse, anche dotted: stesso boundary
+                                # (assi dichiarati → registro engine) delle
+                                # chiavi puntate in streams (vedi sopra)
         base.pointer.start:
           ramp: {start: 0.1, step: 0.1}    # 0.1, 0.2, ... 0.8
         base.onset:
