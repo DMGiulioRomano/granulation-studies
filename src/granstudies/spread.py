@@ -454,6 +454,34 @@ def _expand_over_dotted(over: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _expand_spread_dotted(spread: Dict[str, Any]) -> Dict[str, Any]:
+    """Espande le chiavi puntate ``over.<path>`` al primo livello di ``spread:``.
+
+    Simmetrico a ``_expand_over_dotted``, un livello sopra: ``{"over.base.
+    pointer.start.values": [...]}`` -> ``{"over": {"base.pointer.start.
+    values": [...]}}``, cosi' la notazione a punti disponibile dentro ``over``
+    (issue: chiavi non ammesse su ``over.*`` scritto flat) vale anche per la
+    chiave ``over`` stessa. Frammenti multipli (``over.a``, ``over.b``) e una
+    forma ``over: {...}`` gia' annidata si fondono nello stesso dict.
+    """
+    out: Dict[str, Any] = {}
+    for k, v in spread.items():
+        if isinstance(k, str) and k.startswith("over.") and len(k) > len("over."):
+            rest = k[len("over."):]
+            slot = out.setdefault("over", {})
+            if isinstance(slot, dict):
+                if isinstance(slot.get(rest), dict) and isinstance(v, dict):
+                    slot[rest] = {**slot[rest], **v}
+                else:
+                    slot[rest] = v
+                continue
+        if k == "over" and isinstance(v, dict) and isinstance(out.get("over"), dict):
+            out["over"] = {**out["over"], **v}
+            continue
+        out[k] = v
+    return out
+
+
 def _validate_spread(name: str, spread: Any, ctx: ErrCtx) -> Dict[str, Any]:
     if not isinstance(spread, dict):
         raise ctx.err(
@@ -461,6 +489,7 @@ def _validate_spread(name: str, spread: Any, ctx: ErrCtx) -> Dict[str, Any]:
             f"trovato {spread!r}.",
             key=("spread",),
         )
+    spread = _expand_spread_dotted(spread)
     extra = set(spread) - _SPREAD_KEYS
     if extra:
         raise ctx.err(
