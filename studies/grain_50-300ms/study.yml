@@ -33,26 +33,23 @@ sweep:
   plateau: 5
   transition: 2.5
   orderings:
-    - [density, grain_duration]      # density lento, grain_duration veloce
-    #- [grain_duration, density]      # grain_duration lento, density veloce
+    - [density, grain.duration]      # density lento, grain.duration veloce
+    #- [grain.duration, density]      # grain.duration lento, density veloce
 axes:
   interpolation: step
   density:
     ramp: {start: 1, stop: 10, step: 5}
-    path: density
     baseline: 20
-  grain_duration:
-    path: grain.duration
+  grain.duration:
     ramp: {start: .05, stop: .3, step: .005}
   distribution:
-    path: distribution
     ramp: {start: 0, stop: 1, step: .25}
 
 
 streams:
   # Zone d'ombra di grain.duration (riepilogo.md, ascolto 2026-07-05): 4 zone
   # rappresentative, ciascuna compartimentata su un sotto-range preciso di
-  # density/grain_duration invece del prodotto cartesiano globale. Ogni zona
+  # density/grain.duration invece del prodotto cartesiano globale. Ogni zona
   # e' uno spread su base.pointer.start (secondi assoluti: pointer.loop_unit
   # scavalca il time_mode:normalized dello stream solo per pointer.start/loop,
   # vedi PGE src/pge/controllers/pointer_controller.py:174-186), che genera 7
