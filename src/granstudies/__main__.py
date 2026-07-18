@@ -97,7 +97,7 @@ def _write_expanded_streams(study: str, data: Dict[str, Any]) -> None:
     out = os.path.join(gen_dir(study), "yaml")
     os.makedirs(out, exist_ok=True)
     path = os.path.join(out, "streams_expanded.yml")
-    _dump(path, expand_spreads(streams))
+    _dump(path, expand_spreads(streams, global_spread=data.get("spread")))
     print(f"[spread] streams espansi -> {path}")
 
 
