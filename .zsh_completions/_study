@@ -1,6 +1,14 @@
 function study {
   local s="$1" stream="$2"
   [[ -z "$s" ]] && { echo "uso: study <STUDY> [STREAM]" >&2; return 1 }
+  # STREAM filtra solo dentro sweep/envelope/<stream>*: sugli studi senza
+  # blocco `sweep:` (stack/versions/percorso) non ha alcun effetto sulla
+  # generazione dei .sv, che restano documenti multi-stream unici — passarlo
+  # produce silenziosamente "0 sessioni totali" (vedi ascolto 2026-07-21).
+  if [[ -n "$stream" ]] && ! grep -q '^sweep:' studies/"$s"/study.yml 2>/dev/null; then
+    echo "study: '$s' non ha un blocco 'sweep:', STREAM='$stream' verra' ignorato (0 sessioni .sv)." >&2
+    return 1
+  fi
   make all-study STUDY="$s" $([[ -n "$stream" ]] && echo STREAM="$stream") \
     && make sv STUDY="$s" $([[ -n "$stream" ]] && echo STREAM="$stream") || return 1
   # stack/versions/percorso: un .sv per stem del documento multi-stream.
