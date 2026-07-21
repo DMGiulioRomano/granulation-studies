@@ -29,11 +29,11 @@ cancella.
   voci a bassa density, l'effetto "radio che perde il segnale" tra roughness
   e banda audio, e la differenza step/cubic — vedi ascolto/2026-07-18.md,
   sessioni 3-5): ripetere lo stesso protocollo su `1-10ms`,
-  `1-50smp`, `50-1000ms` e `stack`, per capire quali effetti sono
+  `1-50smp`, `50-300ms`, `300-1000ms` e `stack`, per capire quali effetti sono
   specifici del range 10-50ms e quali sono generali a `distribution`.
 - [ ] Chiarire Sessione 1 del 2026-07-14: "3 Hz (terzi)" — capire se
   intendevo terzi di tono o Hz di differenza.
-- [ ] Fare tutti gli ascolti dei grani della scala **1-50smp** e della scala **50-1000ms**.
+- [ ] Fare tutti gli ascolti dei grani della scala **1-50smp** e delle scale **50-300ms** / **300-1000ms**.
 - [ ] Scrivere la scala **meso** (ancora da fare) e poi farne gli ascolti.
 
 ## Fatto
