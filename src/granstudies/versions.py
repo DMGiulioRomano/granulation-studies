@@ -314,14 +314,17 @@ def _inject(node: Any, combo: Dict[str, Any]) -> None:
             _inject(v, combo)
 
 
-def generate_versions_document(
+def _build_versions(
     data: Dict[str, Any],
     study_id: str | None = None,
     locs: Locations | None = None,
     *,
     output_sr: Optional[int] = 48000,
-) -> Dict[str, Any]:
-    """Il documento engine multi-stream con le versioni sulla timeline.
+) -> tuple[str, List[tuple[str, Dict[str, Any]]]]:
+    """Gli stream di tutte le versioni, ognuno con l'etichetta del suo gruppo.
+
+    Cuore condiviso da ``generate_versions_document`` (un documento solo) e
+    ``generate_versions_documents`` (uno per gruppo).
 
     Per ogni combinazione: iniezione nello scope, risoluzione degli stream
     (``resolve_streams``, il parse di sempre), costruzione via
@@ -374,9 +377,11 @@ def generate_versions_document(
             acc += d
     base_data = {k: v for k, v in data.items() if k != "versions"}
 
-    built: List[Dict[str, Any]] = []
+    outer = next(iter(vars))  # prima variabile = esterna/lenta: il gruppo
+    built: List[tuple[str, Dict[str, Any]]] = []
     for k, combo in enumerate(combos):
         label = "__".join(f"{name}={_fmt(v)}" for name, v in combo.items())
+        group = f"{outer}={_fmt(combo[outer])}"
         data_k = inject_combo(base_data, combo)
         if durations is not None:
             data_k["duration"] = durations[k]
@@ -384,10 +389,75 @@ def generate_versions_document(
             s = build_stack_stream(spec, output_sr=output_sr)
             s["stream_id"] = f"{s['stream_id']}__{label}"
             s["onset"] = (s.get("onset") or 0) + onsets[k]
-            built.append(s)
+            built.append((group, s))
+    return sid, built
+
+
+def _versions_document(
+    data: Dict[str, Any], sid: str, streams: List[Dict[str, Any]], title: str
+) -> Dict[str, Any]:
     return build_multi_document(
-        built,
-        title=f"{sid} :: stack :: versions",
+        streams,
+        title=title,
         seed=data.get("seed"),
-        duration=max(s["onset"] + s["duration"] for s in built),
+        duration=max(s["onset"] + s["duration"] for s in streams),
     )
+
+
+def generate_versions_document(
+    data: Dict[str, Any],
+    study_id: str | None = None,
+    locs: Locations | None = None,
+    *,
+    output_sr: Optional[int] = 48000,
+) -> Dict[str, Any]:
+    """Tutte le versioni in un solo documento (timeline completa).
+
+    E' la vista non spezzata: la produzione passa da
+    ``generate_versions_documents``.
+    """
+    sid, built = _build_versions(data, study_id, locs, output_sr=output_sr)
+    return _versions_document(
+        data, sid, [s for _, s in built], f"{sid} :: stack :: versions"
+    )
+
+
+def generate_versions_documents(
+    data: Dict[str, Any],
+    study_id: str | None = None,
+    locs: Locations | None = None,
+    *,
+    output_sr: Optional[int] = 48000,
+) -> List[tuple[str, Dict[str, Any]]]:
+    """Un documento per valore della **variabile esterna** (la prima dichiarata).
+
+    Il prodotto cartesiano di ``versions:`` cresce in fretta e un documento
+    unico diventa un audio da decine di minuti, ingestibile da aprire e da
+    ascoltare. Il raggruppamento non ha bisogno di sintassi nuova: la prima
+    variabile e' gia' quella esterna/lenta (v. ``version_combos``), quindi
+    fa da confine naturale di file. Con ``d`` x ``g`` escono N_d documenti,
+    ciascuno con le sole combo di quel ``d``.
+
+    Ogni documento e' **ribasato a zero** (si sottrae l'onset minimo del
+    gruppo), cosi' apre da solo senza silenzio iniziale; le posizioni
+    relative dentro il gruppo — comprese quelle dettate da ``versions.onset``
+    esplicito, sovrapposizioni e buchi inclusi — restano intatte.
+
+    Ritorna coppie ``(etichetta, documento)`` con etichetta ``"d=3"``,
+    nell'ordine delle versioni.
+    """
+    sid, built = _build_versions(data, study_id, locs, output_sr=output_sr)
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    for group, s in built:
+        groups.setdefault(group, []).append(s)
+    out = []
+    for group, streams in groups.items():
+        off = min(s["onset"] for s in streams)
+        for s in streams:
+            s["onset"] -= off
+        out.append(
+            (group, _versions_document(
+                data, sid, streams, f"{sid} :: stack :: versions :: {group}"
+            ))
+        )
+    return out
