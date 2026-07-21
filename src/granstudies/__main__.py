@@ -394,7 +394,8 @@ def cmd_compose(study: str, seed: int | None, steps: int | None, start: str | No
     return 0
 
 
-def _cmd_sv_document(study: str, g: str, layout: str, total: list, process: str) -> None:
+def _cmd_sv_document(study: str, g: str, layout: str, total: list, process: str,
+                     axis_paths: list | None = None) -> None:
     """Emette i .sv di un documento multi-stream (``stack``/``versions``/
     ``percorso``): uno contro il mix, uno contro gli stem. Ogni processo vive
     nella propria cartella e i suoi stem hanno il prefisso ``<process>__``."""
@@ -411,7 +412,7 @@ def _cmd_sv_document(study: str, g: str, layout: str, total: list, process: str)
         return
     suffix = f"_{layout}" if layout == "single" else ""
     out = os.path.join(g, "sv", process, f"{study}_{process}" + suffix + ".sv")
-    stack_to_sv(variant, audio, out, layout=layout)
+    stack_to_sv(variant, audio, out, layout=layout, axis_paths=axis_paths)
     total.append(out)
     print(f"[sv] {out}")
 
@@ -419,7 +420,8 @@ def _cmd_sv_document(study: str, g: str, layout: str, total: list, process: str)
     # Il prefisso degli stem e' quello del processo (versions__/percorso__),
     # non il letterale 'stack__' (issue #29).
     stems_out = os.path.join(g, "sv", process, f"{study}_{process}_stems.sv")
-    if stack_stems_to_sv(variant, audio_dir, stems_out, process=process):
+    if stack_stems_to_sv(variant, audio_dir, stems_out, process=process,
+                         axis_paths=axis_paths):
         total.append(stems_out)
         print(f"[sv] {stems_out}")
 
@@ -438,9 +440,12 @@ def cmd_sv(study: str, layout: str, markers: bool = True, stream: str | None = N
     # (i marker sono plateau-di-sweep).
     if stream is None:
         processes = ("stack", "versions", "percorso")
+        # I path degli assi: servono a disegnare anche gli assi *statici*
+        # (numero nudo nello stream, nessun envelope) come retta a due punti.
+        axis_paths = [ax.path for ax in _load_spec(study).axes]
         for process in processes:
             if process in data:
-                _cmd_sv_document(study, g, layout, total, process)
+                _cmd_sv_document(study, g, layout, total, process, axis_paths)
         if any(p in data for p in processes) and "sweep" not in data:
             print(f"[sv] {len(total)} sessioni totali")
             return 0

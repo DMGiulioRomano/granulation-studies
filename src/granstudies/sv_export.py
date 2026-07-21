@@ -16,7 +16,7 @@ from __future__ import annotations
 import bz2
 import os
 import xml.etree.ElementTree as ET
-from typing import Any, List, Literal, Tuple
+from typing import Any, List, Literal, Optional, Tuple
 
 # Plot style per tipo di interpolazione dell'envelope.
 # I valori sono gli interi dell'enum PlotStyle di TimeValueLayer (svgui),
@@ -87,6 +87,42 @@ def _find_envelopes(obj: Any, prefix: str = "") -> List[Tuple[str, List, str]]:
             results.extend(_find_envelopes(v, f"{prefix}.{k}"))
         return results
     return []
+
+
+def _dig(obj: Any, path: str) -> Any:
+    """Valore di un path dotted (``grain.duration``) o ``None`` se assente."""
+    for key in path.split("."):
+        if not isinstance(obj, dict) or key not in obj:
+            return None
+        obj = obj[key]
+    return obj
+
+
+def _stream_envelopes(stream: Any,
+                      axis_paths: Optional[List[str]] = None
+                      ) -> List[Tuple[str, List, str]]:
+    """Envelope di uno stream, piu' una retta per ogni asse *statico*.
+
+    Un asse che non si muove nel documento e' un numero nudo nello stream
+    (``density: 10.0``), non un nodo envelope: senza questo, il suo valore
+    sparisce dal .sv e non e' piu' leggibile accanto agli assi mobili. Qui ogni
+    path d'asse rimasto scalare produce un envelope sintetico a **due**
+    breakpoint, ``[[0, v], [1, v]]``: SV disegna un segmento fra due punti, con
+    un punto solo il layer resta vuoto — il secondo punto e' l'unico modo di
+    vedere la retta. I tempi sono normalizzati come tutti gli altri envelope,
+    quindi seguono onset/durata dello stream a valle.
+    """
+    found = _find_envelopes(stream)
+    if not axis_paths:
+        return found
+    moving = {path for path, _pts, _t in found}
+    for path in axis_paths:
+        if path in moving:
+            continue
+        value = _dig(stream, path)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            found.append((path, [[0.0, value], [1.0, value]], "linear"))
+    return found
 
 
 def _plateau_starts(envelopes: List[Tuple[str, List, str, float, float]]) -> List[float]:
@@ -337,7 +373,8 @@ def variant_to_sv(variant_yaml_path: str, audio_path: str, out_path: str,
     return out_path
 
 
-def _stack_envelopes(doc: Any) -> List[Tuple[str, List, str, float, float]]:
+def _stack_envelopes(doc: Any, axis_paths: Optional[List[str]] = None
+                     ) -> List[Tuple[str, List, str, float, float]]:
     """Envelope di *tutti* gli stream del documento stack, con path prefissato.
 
     A differenza del singolo file sweep (un solo stream), il documento stack
@@ -356,7 +393,7 @@ def _stack_envelopes(doc: Any) -> List[Tuple[str, List, str, float, float]]:
         sid = stream.get("stream_id", "stream")
         onset = float(stream.get("onset", 0.0))
         stream_duration = float(stream.get("duration", doc.get("duration", 1.0)))
-        for path, points, env_type in _find_envelopes(stream):
+        for path, points, env_type in _stream_envelopes(stream, axis_paths):
             out.append((f"{sid}/{path}", points, env_type, onset, stream_duration))
     return out
 
@@ -514,7 +551,8 @@ def _build_sv_xml_stems(stems: List[Tuple[str, str, int, float, float, List[Tupl
 
 
 def stack_stems_to_sv(
-    stack_yaml_path: str, audio_dir: str, out_path: str, process: str = "stack"
+    stack_yaml_path: str, audio_dir: str, out_path: str, process: str = "stack",
+    axis_paths: Optional[List[str]] = None,
 ) -> str | None:
     """.sv con un pane per stem audio (un file audio per stream), non per il mix.
 
@@ -562,7 +600,7 @@ def stack_stems_to_sv(
                 onset = float(stream.get("onset", 0) or 0)
                 duration = float(stream.get("duration", doc.get("duration", 1.0)))
                 end = max(end, onset + duration)
-                for path, points, env_type in _find_envelopes(stream):
+                for path, points, env_type in _stream_envelopes(stream, axis_paths):
                     envelopes.append((f"{stream_id}/{path}", points, env_type, onset, duration))
             stems.append((base_name, os.path.abspath(audio_path), _sample_rate(audio_path), 0.0, end, envelopes))
             continue
@@ -581,7 +619,7 @@ def stack_stems_to_sv(
                 audio_path, onset, os.path.join(audio_dir, "padded")
             )
         envelopes = [(f"{stream_id}/{path}", points, env_type, onset, duration)
-                     for path, points, env_type in _find_envelopes(stream)]
+                     for path, points, env_type in _stream_envelopes(stream, axis_paths)]
         stems.append((stream_id, os.path.abspath(audio_path), _sample_rate(audio_path), onset, duration, envelopes))
 
     compressed = _build_sv_xml_stems(stems)
@@ -592,7 +630,8 @@ def stack_stems_to_sv(
 
 
 def stack_to_sv(stack_yaml_path: str, audio_path: str, out_path: str,
-                layout: Layout = "multi") -> str:
+                layout: Layout = "multi",
+                axis_paths: Optional[List[str]] = None) -> str:
     """Scrive un .sv per il documento multi-stream ``stack.yml`` contro il suo audio.
 
     Un solo file per lo stack (gli stream sono sommati in un audio): gli envelope
@@ -606,7 +645,7 @@ def stack_to_sv(stack_yaml_path: str, audio_path: str, out_path: str,
         doc = yaml.safe_load(fh)
 
     duration = float(doc.get("duration", 1.0))
-    envelopes = _stack_envelopes(doc)
+    envelopes = _stack_envelopes(doc, axis_paths)
 
     sr = _sample_rate(audio_path)
     compressed = _build_sv_xml(os.path.abspath(audio_path), sr, duration,
