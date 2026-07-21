@@ -219,6 +219,28 @@ def test_stack_envelopes_prefixes_stream_id_and_skips_scalars():
     assert paths == ["base/density", "voce_b/density"]
 
 
+def test_stack_envelopes_draws_static_axes_as_two_point_line():
+    """Con i path degli assi, un asse scalare diventa una retta a due punti.
+
+    Due punti e non uno: SV disegna un segmento fra breakpoint, con un punto
+    solo il layer resterebbe vuoto.
+    """
+    from granstudies.sv_export import _stack_envelopes
+    doc = {"streams": [
+        {"stream_id": "base",
+         "density": {"type": "step", "points": [[0.0, 5], [1.0, 50]]},
+         "grain": {"duration": 0.004}},          # asse statico
+        {"stream_id": "drone",
+         "density": 8, "grain": {"duration": 0.05}, "volume": -6},  # non-asse
+    ]}
+    envs = _stack_envelopes(doc, ["density", "grain.duration"])
+    by_path = {p: pts for p, pts, _t, _o, _d in envs}
+    assert by_path["base/grain.duration"] == [[0.0, 0.004], [1.0, 0.004]]
+    assert by_path["drone/density"] == [[0.0, 8], [1.0, 8]]
+    assert by_path["base/density"] == [[0.0, 5], [1.0, 50]]   # mobile: intatto
+    assert "drone/volume" not in by_path                       # non e' un asse
+
+
 def test_multi_groups_envelopes_by_stream_prefix():
     # Path con prefisso stream/ (export stack): gli assi di uno stream finiscono
     # nello stesso pane; stream diversi in pane diversi.

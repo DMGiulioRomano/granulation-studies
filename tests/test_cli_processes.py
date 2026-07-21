@@ -126,9 +126,9 @@ def test_cmd_sv_exports_versions_document(tmp_path, monkeypatch):
     calls = []
     import granstudies.sv_export as sv_export
     monkeypatch.setattr(sv_export, "stack_to_sv",
-                        lambda variant, audio, out, layout: calls.append(("doc", variant, out)))
+                        lambda variant, audio, out, layout, axis_paths=None: calls.append(("doc", variant, out)))
     monkeypatch.setattr(sv_export, "stack_stems_to_sv",
-                        lambda variant, audio_dir, out, process="stack": False)
+                        lambda variant, audio_dir, out, process="stack", axis_paths=None: False)
 
     assert cli.cmd_sv(study, layout="multi") == 0
     variants = [c[1] for c in calls]
@@ -218,11 +218,11 @@ def test_cmd_sv_exports_percorso_document(tmp_path, monkeypatch):
     stem_processes = []
     import granstudies.sv_export as sv_export
     monkeypatch.setattr(sv_export, "stack_to_sv",
-                        lambda variant, audio, out, layout: calls.append(("doc", variant, out)))
+                        lambda variant, audio, out, layout, axis_paths=None: calls.append(("doc", variant, out)))
     # Registra il 'process' con cui viene chiamato: e' il fix del bug PR #30
     # (il prefisso stem dev'essere quello del processo, non 'stack' cablato).
     monkeypatch.setattr(sv_export, "stack_stems_to_sv",
-                        lambda variant, audio_dir, out, process="stack": stem_processes.append(process) or False)
+                        lambda variant, audio_dir, out, process="stack", axis_paths=None: stem_processes.append(process) or False)
 
     assert cli.cmd_sv(study, layout="multi") == 0
     variants = [c[1] for c in calls]

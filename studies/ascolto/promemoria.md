@@ -25,21 +25,29 @@ cancella.
   sentire come si comporta il movimento della distribution a diverse
   densità che si muovono nel tempo (density come sweep, non fissa).
 - [ ] Indagare `distribution` su tutte le altre scale di grain.duration, non
-  solo `grain_10-50ms` (dove il 2026-07-18 sono emersi lo sdoppiamento in due
+  solo `10-50ms` (dove il 2026-07-18 sono emersi lo sdoppiamento in due
   voci a bassa density, l'effetto "radio che perde il segnale" tra roughness
   e banda audio, e la differenza step/cubic — vedi ascolto/2026-07-18.md,
-  sessioni 3-5): ripetere lo stesso protocollo su `grain_1-10ms`,
-  `grain_1-50smp`, `grain_50-1000ms` e `stack`, per capire quali effetti sono
+  sessioni 3-5): ripetere lo stesso protocollo su `1-10ms`,
+  `1-50smp`, `50-300ms`, `300-1000ms` e `stack`, per capire quali effetti sono
   specifici del range 10-50ms e quali sono generali a `distribution`.
 - [ ] Chiarire Sessione 1 del 2026-07-14: "3 Hz (terzi)" — capire se
   intendevo terzi di tono o Hz di differenza.
-- [ ] Fare tutti gli ascolti dei grani della scala **grain_1-50smp** e della scala **grain_50-1000ms**.
+- [ ] Fare tutti gli ascolti dei grani della scala **1-50smp** e delle scale **50-300ms** / **300-1000ms**.
 - [ ] Scrivere la scala **meso** (ancora da fare) e poi farne gli ascolti.
 
 ## Fatto
 
+- [x] 2026-07-21 — Prefisso `grain_` tolto da tutte le cartelle scala
+  (`grain_1-10ms`→`1-10ms`, ecc.): era ridondante, è sempre grain.duration.
+  Le varianti stack prendono il prefisso `stack_` + range: nuova
+  `stack_1-50smp` (7 punti di lettura insieme, `versions` su density e grana).
+  La cartella `stack` senza suffisso resta quella delle curve non cartesiane.
+- [x] 2026-07-21 — Il `.sv` di stack/versions disegna anche gli assi **statici**
+  come retta a due breakpoint: prima un asse fermo (numero nudo, nessun
+  envelope) spariva dai pane.
 - [x] 2026-07-18 — Cartelle scala rinominate in base al range di grain.duration:
-  `base`→`grain_1-10ms`, `short`→`grain_1-50smp`, `long`→`grain_50-1000ms`
+  `base`→`1-10ms`, `short`→`1-50smp`, `long`→`50-1000ms`
   (`stack` invariata). Stream `zona_ombra_d05`→`zona_ombra_d01_10` (era già
   density 1-10, il nome non rifletteva il range) e `zona_ombra_d55_60`→
   `zona_ombra_d55_80` in tutti e tre gli study.yml.

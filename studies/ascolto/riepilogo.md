@@ -13,7 +13,7 @@ Un solo stream, si ascolta la modifica di un solo parametro su di esso
 (`density` assoluta, `grain.dur`).
 
 Le zone qui sotto sono definite come stream `zona_ombra_*` in
-`studies/grain_1-10ms/study.yml:49-105` (4 zone compartimentate,
+`studies/1-10ms/study.yml:49-105` (4 zone compartimentate,
 ciascuna generata via `spread` in 7 cugini che differiscono solo per
 `base.pointer.start`, secondi assoluti — mappa indice→secondi: `1=0.1
 2=0.25 3=0.4 4=0.55 5=0.8 6=0.915 7=1.1`, vedi commento `study.yml:57-58`).
@@ -43,7 +43,7 @@ marcata `⚠︎ da riascoltare` (le zone vanno rifatte da capo, vedi
 | `zona_ombra_d55_80` (:97) | plateau | 60 | 0.003–0.00775 | zona d'ombra (= density 55) |
 | `zona_ombra_d55_80` (:97) | ⚠︎ da riascoltare | 80 | — | la ramp arriva a **80** (`study.yml:101 ramp {start: 55, stop: 80}`, 2 valori: 55 e 80); ascoltata finora solo fino a density 60 — density 80 ancora da sentire |
 
-Scala `grain_10-50ms` (ascolto 2026-07-18), sweep `grain.duration` 10-50 ms:
+Scala `10-50ms` (ascolto 2026-07-18), sweep `grain.duration` 10-50 ms:
 
 | stream (study.yml) | tipo | asse mosso | valore/range | percetto |
 |---------------------|------|------------|---------------|----------|

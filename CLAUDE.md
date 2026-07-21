@@ -31,15 +31,23 @@ della cartella-scala.
 
 | Cartella | Cos'è | `STUDY=` |
 |----------|-------|----------|
-| `grain_1-10ms` | scala di riferimento, curata a mano (density + grain.duration 1-10 ms) | `grain_1-10ms` |
-| `grain_1-50smp` | grani corti, grain.duration in `samples` (1-50 campioni) | `grain_1-50smp` |
-| `grain_10-50ms` | grani corti, grain.duration 10-50 ms | `grain_10-50ms` |
-| `grain_50-300ms` | grani medio-lunghi, grain.duration 50-300 ms (step 5 ms) | `grain_50-300ms` |
-| `grain_300-1000ms` | grani lunghi, grain.duration 300-1000 ms (step 25 ms) | `grain_300-1000ms` |
+| `1-10ms` | scala di riferimento, curata a mano (density + grain.duration 1-10 ms) | `1-10ms` |
+| `1-50smp` | grani corti, grain.duration in `samples` (1-50 campioni) | `1-50smp` |
+| `10-50ms` | grani corti, grain.duration 10-50 ms | `10-50ms` |
+| `50-300ms` | grani medio-lunghi, grain.duration 50-300 ms (step 5 ms) | `50-300ms` |
+| `300-1000ms` | grani lunghi, grain.duration 300-1000 ms (step 25 ms) | `300-1000ms` |
 | `stack` | stream non-cartesiani (ascolto verticale) | `stack` |
+| `stack_1-50smp` | stack: 7 punti di lettura insieme, grain.duration 1-50 campioni; `versions` su density e grana | `stack_1-50smp` |
 | `brano01` | brano musicale (ex `study_stack_test_5`) | `brano01` |
 | `brano01_v2` | versione a 10 min di brano01 (ex `study_stack_test_5_10min`) | `brano01_v2` |
 | `ascolto` | diario di ascolto dello studio — non è uno `STUDY` | — |
+
+**Naming.** Il nome della cartella è il **range di grain.duration** e basta
+(`1-10ms`, `1-50smp`): il prefisso `grain_` era ridondante — è sempre
+grain.duration. Le varianti di **stack** (più stream ascoltati insieme)
+prendono il prefisso `stack_` seguito dallo stesso range: `stack_1-50smp`.
+La cartella `stack` senza suffisso resta quella storica delle curve non
+cartesiane, non legata a un range.
 
 ## Diario di ascolto
 
@@ -54,8 +62,8 @@ studies/ascolto/
 
 Un solo file per giorno: `YYYY-MM-DD.md`. Se in una giornata ci sono più
 sessioni di ascolto, non si creano file separati né suffissi — si aggiungono
-come sezioni `## Sessione N — <tema> (scala: grain_1-10ms, sample: ...)` dentro lo
-stesso file, in ordine cronologico. La **scala** (`base`/`short`/`long`/`stack`)
+come sezioni `## Sessione N — <tema> (scala: 1-10ms, sample: ...)` dentro lo
+stesso file, in ordine cronologico. La **scala** (il nome della cartella, es. `1-10ms`/`1-50smp`/`stack_1-50smp`)
 e il `sample` stanno nell'heading di sessione, non nel frontmatter.
 
 Il log è **prosa libera**. Nel descrivere un oggetto in ascolto, il filo

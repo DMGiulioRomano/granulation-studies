@@ -1,0 +1,64 @@
+# gl-ls
+# Studio 01 (stack) — grani 1-50 samples, ascolto verticale a 7 punti di lettura.
+#
+# Sette stream identici salvo `pointer.start` (i 7 cugini dello spread gia' in
+# uso in grain_1-50smp) suonano INSIEME. All'inizio density e grain.duration
+# sono uguali per tutti: l'unica differenza fra gli stream e' il punto in cui
+# il puntatore legge il sample.
+#
+# Il blocco `versions:` muove poi i due parametri: ogni combinazione (d, g)
+# replica i 7 cugini piu' avanti nella timeline, cosi' si ascolta in sequenza
+# come cambia l'impasto verticale al variare di density e grana.
+
+study_id: study01_stack_1-50smp
+title: "Studio 01 (stack) — grani 1-50 samples, 7 punti di lettura"
+seed: 1988
+duration: 30
+samples_dir: samples
+
+base:
+  onset: 0
+  sample: silenzi.wav
+  time_mode: normalized
+  volume: -12                 # 7 stream sommati: headroom
+  grain:
+    envelope: hanning
+    duration_unit: samples
+  pointer:
+    loop_unit: absolute
+    speed_ratio: 0
+
+# Density e grana sono costanti dentro la versione (n: 1, range: 0): il valore
+# arriva dalle variabili `d`/`g` iniettate da `versions:`. I default nel `let`
+# tengono lo studio valido anche senza il blocco (make stack).
+axes:
+  density:
+    baseline: 10
+    n: 1
+    base: {expr: "d", let: {d: 10}}
+    range: 0
+  grain.duration:
+    baseline: 25
+    n: 1
+    base: {expr: "g", let: {g: 25}}
+    range: 0
+
+stack: {}
+
+# I 7 punti di lettura del sample (secondi assoluti), indice -> secondi:
+#   1=0.1  2=0.25  3=0.4  4=0.55  5=0.8  6=0.915  7=1.1
+spread:
+  over:
+    base.pointer.start.values: [0.1, 0.25, 0.4, 0.55, 0.8, 0.915, 1.1]
+
+streams:
+  # Unico stream logico: lo spread lo moltiplica per 7. Nessun sweep — questo
+  # documento vive solo nello stack (ascolto verticale).
+  cugini:
+    spread: {}
+
+# Prima variabile = esterna/lenta (density), seconda = interna/veloce (grana).
+# 3 x 3 = 9 versioni concatenate, 30s ciascuna.
+versions:
+  d: {values: [5, 20, 50]}
+  g: {values: [1, 25, 50]}
