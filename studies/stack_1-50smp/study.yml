@@ -10,7 +10,7 @@
 # replica i 7 cugini piu' avanti nella timeline, cosi' si ascolta in sequenza
 # come cambia l'impasto verticale al variare di density e grana.
 
-study_id: study01_grain_1-50smp_stack
+study_id: study01_stack_1-50smp
 title: "Studio 01 (stack) — grani 1-50 samples, 7 punti di lettura"
 seed: 1988
 duration: 30
