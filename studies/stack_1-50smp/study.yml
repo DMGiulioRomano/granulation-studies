@@ -20,7 +20,7 @@ base:
   onset: 0
   sample: silenzi.wav
   time_mode: normalized
-  volume: -12                 # 7 stream sommati: headroom
+  volume: 0 #-12                 # 7 stream sommati: headroom
   grain:
     envelope: hanning
     duration_unit: samples
@@ -28,37 +28,76 @@ base:
     loop_unit: absolute
     speed_ratio: 0
 
-# Density e grana sono costanti dentro la versione (n: 1, range: 0): il valore
-# arriva dalle variabili `d`/`g` iniettate da `versions:`. I default nel `let`
-# tengono lo studio valido anche senza il blocco (make stack).
+# Density e grana non sono piu' costanti dentro la versione: le variabili
+# `d`/`g` iniettate da `versions:` diventano il *centro* di una banda che il
+# valore percorre a passo d'ubriaco (`drift`). I default nel `let` tengono lo
+# studio valido anche senza il blocco (make stack).
+#
+# Banda: base = centro * 0.7, range = centro * 0.6 -> [0.7c, 1.3c], cioe' +-30%
+# intorno al valore della versione. Proporzionale e non assoluta: a g=1 campione
+# la banda resta stretta, a g=50 si allarga da sola.
+#
+# `drift` = passo d'ubriaco: senza, ogni breakpoint e' un pescaggio indipendente
+# nella banda (salti, rumore bianco); con drift il primo valore si pesca, poi
+# ogni successivo e' `precedente +- passo`, dove il passo vale `step` * la
+# larghezza della banda corrente. Quindi step: 0.12 = ogni breakpoint si sposta
+# al massimo del 12% della banda rispetto al precedente: il valore *cammina*
+# invece di saltare. Sul bordo banda riflette (non si incolla).
+# Niente `n` negli assi: qui il conteggio lo possiede la camminata-X (blocco
+# `stack:` sotto), e i valori Y si pescano ai tempi reali che la X genera.
 axes:
   density:
     baseline: 10
-    n: 1
-    base: {expr: "d", let: {d: 10}}
-    range: 0
+    base: {expr: "d * 0.7", let: {d: 10}}
+    range: {expr: "d * 0.6", let: {d: 10}}
+    drift: {step: 0.12}
   grain.duration:
     baseline: 25
-    n: 1
-    base: {expr: "g", let: {g: 25}}
-    range: 0
+    base: {expr: "g * 0.7", let: {g: 25}}
+    range: {expr: "g * 0.6", let: {g: 25}}
+    drift: {step: 0.12}
 
-stack: {}
+# La camminata-X: quanti breakpoint al secondo genera ogni asse (banda in Hz,
+# anch'essa a passo d'ubriaco, cosi' nemmeno il ritmo dei cambi e' periodico).
+# Density lenta (strutturale, ~1 valore ogni 0.5-2 s), grana veloce (4-10 al
+# secondo): i due assi si muovono su scale temporali diverse invece di
+# pulsare insieme.
+stack:
+  density:
+    base: 0.5
+    range: 1.5
+    drift: {step: 0.15}
+  grain.duration:
+    base: 4
+    range: 6
+    drift: {step: 0.15}
 
 # I 7 punti di lettura del sample (secondi assoluti), indice -> secondi:
 #   1=0.1  2=0.25  3=0.4  4=0.55  5=0.8  6=0.915  7=1.1
 spread:
   over:
-    base.pointer.start.values: [0.1, 0.25, 0.4, 0.55, 0.8, 0.915, 1.1]
+    base.pointer.start:
+      values: [0.1, 0.25, 0.4, 0.55, 0.8, 0.915, 1.1]
+    base.pan:
+      expr: "i * 27"
 
 streams:
   # Unico stream logico: lo spread lo moltiplica per 7. Nessun sweep — questo
   # documento vive solo nello stack (ascolto verticale).
   cugini:
-    spread: {}
+    spread:
+      over: 
+        axes.density.base:
+          expr: "env + i/10"
+          let:  
+            env:
+              base: 0.2
+              range: 1.5
+              drift: {step: .15}
+
 
 # Prima variabile = esterna/lenta (density), seconda = interna/veloce (grana).
 # 3 x 3 = 9 versioni concatenate, 30s ciascuna.
 versions:
-  d: {values: [5, 20, 50]}
-  g: {values: [1, 25, 50]}
+  d: {ramp: {start: 3, stop: 20, step: 3}}
+  g: {ramp: {start: 4, stop: 50, step: 6}}
