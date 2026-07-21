@@ -264,17 +264,28 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
     display = ET.SubElement(root, "display")
     ET.SubElement(display, "window", {"width": "1728", "height": "1057"})
 
-    # multi: un pane per *gruppo* di envelope. Il gruppo e' la parte del path
-    # prima di '/' (lo stream_id, presente solo negli export stack): cosi' gli
-    # assi di uno stesso stream stanno in un pane unico. Per lo sweep i path non
-    # hanno '/', quindi ogni envelope e' un gruppo a se' -> un pane per envelope,
-    # identico a prima.
-    from itertools import groupby
-
+    # multi: un pane per *gruppo* di envelope. Il gruppo e' la voce logica: la
+    # parte del path prima di '/' (lo stream_id, presente solo negli export
+    # stack) tagliata al primo '__'. Cosi' gli assi di uno stesso stream stanno
+    # in un pane unico e le versioni di una stessa voce (cugini_1__d=3__g=4,
+    # cugini_1__d=6__g=4, ...) ci finiscono insieme invece di aprire un pane per
+    # combinazione — lo stesso criterio per nome-base gia' usato dal ramo stems
+    # (``stack_stems_to_sv``) e dal post-merge del render (``merge_stems_by_base``).
+    # Per lo sweep i path non hanno ne' '/' ne' '__': ogni envelope resta un
+    # gruppo a se', un pane per envelope, identico a prima.
+    #
+    # Raggruppamento per dict, non con itertools.groupby: gli stream di
+    # ``versions`` sono ordinati per combinazione (cugini_1..7, poi di nuovo
+    # cugini_1..7 per la combo successiva), quindi le occorrenze di una voce non
+    # sono consecutive e groupby — che raggruppa solo elementi adiacenti — ne
+    # farebbe un gruppo per ognuna, tornando a un pane per combinazione.
     def _group_key(item: Tuple[str, str, str]) -> str:
-        return item[2].split("/", 1)[0]
+        return item[2].split("/", 1)[0].split("__", 1)[0]
 
-    multi_groups = [list(g) for _k, g in groupby(layer_ids, key=_group_key)]
+    grouped: "dict[str, List[Tuple[str, str, str]]]" = {}
+    for item in layer_ids:
+        grouped.setdefault(_group_key(item), []).append(item)
+    multi_groups = list(grouped.values())
 
     n_panes = 1 + (1 if layout == "single" else len(multi_groups))
     pane_height = str(max(150, 912 // n_panes))
