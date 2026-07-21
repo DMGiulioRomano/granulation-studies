@@ -38,6 +38,13 @@ cancella.
 
 ## Fatto
 
+- [x] 2026-07-21 — Funzione `study` (`.zsh_completions/_study`): passare uno
+  `STREAM` a uno studio senza blocco `sweep:` (es. `study stack_1-50smp
+  cugini`) faceva saltare in silenzio l'intero ramo `stack`/`versions` in
+  `cmd_sv`, con `[sv] 0 sessioni totali` invece dei `.sv` attesi — `STREAM`
+  filtra solo dentro `sweep/envelope/<stream>*`, non ha senso su documenti
+  multi-stream. Ora la funzione avvisa e si ferma se lo `study.yml` non ha
+  `sweep:` e viene passato uno `stream`.
 - [x] 2026-07-21 — Prefisso `grain_` tolto da tutte le cartelle scala
   (`grain_1-10ms`→`1-10ms`, ecc.): era ridondante, è sempre grain.duration.
   Le varianti stack prendono il prefisso `stack_` + range: nuova
