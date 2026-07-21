@@ -93,14 +93,17 @@ VERSIONS_DOC = {
 }
 
 
-def test_cmd_versions_writes_concatenated_document(tmp_path, monkeypatch):
+def test_cmd_versions_writes_one_document_per_outer_value(tmp_path, monkeypatch):
+    """Un file per valore della variabile esterna, ognuno ribasato a zero."""
     study = _write_study(tmp_path, monkeypatch, VERSIONS_DOC)
     monkeypatch.setattr(cli, "gen_dir", lambda s: os.path.join(str(tmp_path), "generated", s))
     assert cli.cmd_versions(study) == 0
-    out = os.path.join(str(tmp_path), "generated", study, "yaml", "versions", "versions.yml")
-    with open(out) as fh:
-        doc = yaml.safe_load(fh)
-    ids = [s["stream_id"] for s in doc["streams"]]
-    assert ids == ["fermo__d=1", "mobile__d=1", "fermo__d=2", "mobile__d=2"]
-    assert [s["onset"] for s in doc["streams"]] == [0, 0, 10, 10]
-    assert doc["duration"] == 20
+    d = os.path.join(str(tmp_path), "generated", study, "yaml", "versions")
+    assert sorted(os.listdir(d)) == ["versions__d=1.yml", "versions__d=2.yml"]
+    for label in ("1", "2"):
+        with open(os.path.join(d, f"versions__d={label}.yml")) as fh:
+            doc = yaml.safe_load(fh)
+        ids = [s["stream_id"] for s in doc["streams"]]
+        assert ids == [f"fermo__d={label}", f"mobile__d={label}"]
+        assert [s["onset"] for s in doc["streams"]] == [0, 0]
+        assert doc["duration"] == 10

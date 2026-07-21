@@ -15,6 +15,7 @@ STUDY e' il nome della cartella sotto ``studies/`` (es. base).
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import os
 import sys
@@ -226,12 +227,20 @@ def cmd_versions(study: str) -> int:
     sid = raw.get("study_id") or study
     _write_expanded_streams(study, raw)
     out = os.path.join(gen_dir(study), "yaml")
-    target = os.path.join(out, "versions", "versions.yml")
-    before = os.path.getmtime(target) if os.path.exists(target) else None
+    d = os.path.join(out, "versions")
+    # Un documento per valore della variabile esterna: si aggiorna solo
+    # quello che cambia (mtime fermo a contenuto identico -> il render salta).
+    before = {
+        p: os.path.getmtime(p)
+        for p in glob.glob(os.path.join(d, "*.yml"))
+    }
     written = write_versions(raw, sid, out, locs=locs)
-    changed = before != os.path.getmtime(written[0])
-    stato = "aggiornato" if changed else "invariato"
-    print(f"[versions] documento versions ({stato}) -> {written[0]}")
+    changed = sum(
+        1 for p in written if before.get(p) != os.path.getmtime(p)
+    )
+    print(
+        f"[versions] {len(written)} documenti ({changed} aggiornati) -> {d}"
+    )
     return 0
 
 
@@ -396,34 +405,37 @@ def cmd_compose(study: str, seed: int | None, steps: int | None, start: str | No
 
 def _cmd_sv_document(study: str, g: str, layout: str, total: list, process: str,
                      axis_paths: list | None = None) -> None:
-    """Emette i .sv di un documento multi-stream (``stack``/``versions``/
-    ``percorso``): uno contro il mix, uno contro gli stem. Ogni processo vive
-    nella propria cartella e i suoi stem hanno il prefisso ``<process>__``."""
+    """Emette i .sv dei documenti multi-stream di un processo (``stack``/
+    ``versions``/``percorso``): per ogni documento uno contro il mix, uno
+    contro gli stem. Ogni processo vive nella propria cartella; ``versions``
+    ci mette piu' documenti (uno per valore della variabile esterna), stack e
+    percorso uno solo. Il prefisso degli stem e' il **basename** del
+    documento (``versions__d=3__<stream>.aif``), non il nome del processo."""
     from .sv_export import stack_to_sv, stack_stems_to_sv
 
-    variant = os.path.join(g, "yaml", process, f"{process}.yml")
-    audio_dir = os.path.join(g, "audio", process)
-    audio = os.path.join(audio_dir, f"{process}.aif")
-    if not os.path.exists(variant):
+    variants = sorted(glob.glob(os.path.join(g, "yaml", process, "*.yml")))
+    if not variants:
         print(f"[sv] nessun documento {process}: esegui prima '{process}'.", file=sys.stderr)
         return
-    if not os.path.exists(audio):
-        print(f"[sv] audio {process} mancante: esegui prima 'render'.", file=sys.stderr)
-        return
-    suffix = f"_{layout}" if layout == "single" else ""
-    out = os.path.join(g, "sv", process, f"{study}_{process}" + suffix + ".sv")
-    stack_to_sv(variant, audio, out, layout=layout, axis_paths=axis_paths)
-    total.append(out)
-    print(f"[sv] {out}")
+    audio_dir = os.path.join(g, "audio", process)
+    for variant in variants:
+        base = os.path.splitext(os.path.basename(variant))[0]
+        audio = os.path.join(audio_dir, f"{base}.aif")
+        if not os.path.exists(audio):
+            print(f"[sv] audio {base} mancante: esegui prima 'render'.", file=sys.stderr)
+            continue
+        suffix = f"_{layout}" if layout == "single" else ""
+        out = os.path.join(g, "sv", process, f"{study}_{base}" + suffix + ".sv")
+        stack_to_sv(variant, audio, out, layout=layout, axis_paths=axis_paths)
+        total.append(out)
+        print(f"[sv] {out}")
 
-    # Un pane per stem (audio separato per stream): richiede 'render --stem'.
-    # Il prefisso degli stem e' quello del processo (versions__/percorso__),
-    # non il letterale 'stack__' (issue #29).
-    stems_out = os.path.join(g, "sv", process, f"{study}_{process}_stems.sv")
-    if stack_stems_to_sv(variant, audio_dir, stems_out, process=process,
-                         axis_paths=axis_paths):
-        total.append(stems_out)
-        print(f"[sv] {stems_out}")
+        # Un pane per stem (audio separato per stream): richiede 'render --stem'.
+        stems_out = os.path.join(g, "sv", process, f"{study}_{base}_stems.sv")
+        if stack_stems_to_sv(variant, audio_dir, stems_out, process=base,
+                             axis_paths=axis_paths):
+            total.append(stems_out)
+            print(f"[sv] {stems_out}")
 
 
 def cmd_sv(study: str, layout: str, markers: bool = True, stream: str | None = None,

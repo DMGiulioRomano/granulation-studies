@@ -12,6 +12,7 @@ import pytest
 from granstudies.errors import SpecError
 from granstudies.versions import (
     generate_versions_document,
+    generate_versions_documents,
     inject_combo,
     parse_versions,
     version_combos,
@@ -353,3 +354,41 @@ def test_onset_key_with_per_stream_durations_no_top_level():
     data["streams"]["mobile"] = {"duration": 6}
     doc = generate_versions_document(data, "vtest", output_sr=None)
     assert doc["duration"] == 40              # 30 + 10
+
+
+# --- split per variabile esterna -----------------------------------------------
+
+def _study_dg(versions):
+    """Fixture a due variabili: ``g`` deve essere referenziata da un'expr,
+    altrimenti scatta la guardia anti-refuso di ``parse_versions``."""
+    data = _study(versions)
+    data["axes"]["density"]["range"] = {"expr": "g", "let": {"g": 0}}
+    return data
+
+
+def test_split_one_document_per_outer_value():
+    """La prima variabile e' il confine di file: N_d documenti, ognuno con le
+    sole combo di quel d, ribasato a zero."""
+    data = _study_dg({"d": {"values": [1, 2]}, "g": {"values": [4, 5, 6]}})
+    docs = generate_versions_documents(data, "vtest", output_sr=None)
+    assert [label for label, _ in docs] == ["d=1", "d=2"]
+    for label, doc in docs:
+        ids = [s["stream_id"] for s in doc["streams"]]
+        assert len(ids) == 6                  # 3 valori di g x 2 stream
+        assert all(label in i for i in ids)
+        assert min(s["onset"] for s in doc["streams"]) == 0
+        assert doc["duration"] == 60          # 3 versioni x 20 s
+
+
+def test_split_preserves_relative_layout_with_explicit_onset():
+    """Con onset espliciti la ribasatura toglie solo l'offset del gruppo: i
+    buchi e le distanze interne restano quelli scritti."""
+    data = _study_dg({
+        "d": {"values": [1, 2]},
+        "g": {"values": [4, 5]},
+        "onset": {"values": [0, 25, 100, 140]},
+    })
+    docs = generate_versions_documents(data, "vtest", output_sr=None)
+    assert [sorted({s["onset"] for s in doc["streams"]}) for _, doc in docs] == [
+        [0, 25], [0, 40],
+    ]

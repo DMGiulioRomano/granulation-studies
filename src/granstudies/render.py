@@ -6,6 +6,7 @@ li renderizza in audio e partitura. Cosi' il loop di studio resta trasparente.
 """
 from __future__ import annotations
 
+import glob
 import os
 import warnings
 from typing import Any, Dict, List
@@ -129,22 +130,34 @@ def write_versions(
     locs=None,
     output_sr: int = 48000,
 ) -> List[str]:
-    """Scrive il documento delle versioni concatenate (blocco ``versions:``).
+    """Scrive i documenti delle versioni (blocco ``versions:``).
 
-    File proprio del processo (``out_dir/versions/versions.yml``): versions e'
-    un processo indipendente come sweep e stack — ``yaml/stack/stack.yml``
-    resta il materiale com'e' scritto, senza repliche. Riceve il documento
-    *grezzo* (non gli spec): il parse per-versione avviene dopo l'iniezione
-    delle variabili negli scope let.
+    Cartella propria del processo (``out_dir/versions/``): versions e' un
+    processo indipendente come sweep e stack — ``yaml/stack/stack.yml`` resta
+    il materiale com'e' scritto, senza repliche. Riceve il documento *grezzo*
+    (non gli spec): il parse per-versione avviene dopo l'iniezione delle
+    variabili negli scope let.
+
+    Un file per valore della variabile esterna (``versions__d=3.yml``, v.
+    ``generate_versions_documents``): il prodotto cartesiano intero in un
+    documento solo diventa un audio da decine di minuti che nessun visualizer
+    apre volentieri. I file di una run precedente che non appartengono piu'
+    alla griglia vengono rimossi, altrimenti il render continuerebbe a
+    trascinarseli.
     """
-    from .versions import generate_versions_document
+    from .versions import generate_versions_documents
 
-    doc = generate_versions_document(data, study_id, locs, output_sr=output_sr)
+    docs = generate_versions_documents(data, study_id, locs, output_sr=output_sr)
     d = os.path.join(out_dir, "versions")
     os.makedirs(d, exist_ok=True)
-    path = os.path.join(d, "versions.yml")
-    _dump(path, doc)
-    return [path]
+    written = []
+    for label, doc in docs:
+        path = os.path.join(d, f"versions__{label}.yml")
+        _dump(path, doc)
+        written.append(path)
+    for stale in set(glob.glob(os.path.join(d, "*.yml"))) - set(written):
+        os.remove(stale)
+    return written
 
 
 def write_percorso(

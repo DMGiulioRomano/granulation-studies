@@ -78,13 +78,12 @@ def test_cmd_stack_without_let_default_raises(tmp_path, monkeypatch):
 def test_cmd_versions_writes_document_in_own_dir(tmp_path, monkeypatch):
     study = _write_study(tmp_path, monkeypatch, DOC_WITH_DEFAULT)
     assert cli.cmd_versions(study) == 0
-    out = os.path.join(str(tmp_path), "generated", study, "yaml", "versions", "versions.yml")
+    out = os.path.join(str(tmp_path), "generated", study, "yaml", "versions", "versions__d=1.yml")
     with open(out) as fh:
         doc = yaml.safe_load(fh)
     ids = [s["stream_id"] for s in doc["streams"]]
-    assert ids == ["fermo__d=1", "mobile__d=1", "fermo__d=2", "mobile__d=2"]
-    assert [s["onset"] for s in doc["streams"]] == [0, 0, 10, 10]
-    assert doc["duration"] == 20
+    assert ids == ["fermo__d=1", "mobile__d=1"]
+    assert doc["duration"] == 10
     # Lo stack non viene scritto dal processo versions.
     stack_out = os.path.join(str(tmp_path), "generated", study, "yaml", "stack", "stack.yml")
     assert not os.path.exists(stack_out)
