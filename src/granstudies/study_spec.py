@@ -18,6 +18,7 @@ from . import bounds as bounds_mod
 from . import gainmap
 from . import yaml_loc
 from .errors import ErrCtx, SpecError
+from .group_let import apply_group_let
 from .spread import AXIS_NAME_BLOCKS, expand_spreads, split_axis_key
 from .value_generators import (
     Y_GENERATOR_KEYS,
@@ -458,6 +459,9 @@ def resolve_streams(
         for k, v in (data.get("axes") or {}).items()
         if k not in _AXES_RESERVED_KEYS and isinstance(v, dict)
     )
+    # Manopole di gruppo (`let:` per entry): risolte e iniettate PRIMA
+    # dell'espansione, cosi' tutte le voci del gruppo condividono il valore.
+    streams = apply_group_let(streams, locs)
     streams = expand_spreads(
         streams,
         locs,
