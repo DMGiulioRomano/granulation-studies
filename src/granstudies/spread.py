@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Tuple
 from . import bounds as bounds_mod
 from .errors import ErrCtx, SpecError
 from .expr import eval_expr, is_expr_node, parse_expr_node
+from .inject import inject
 from .value_generators import (
     Y_GENERATOR_KEYS,
     band,
@@ -39,7 +40,7 @@ from .value_generators import (
 from .yaml_loc import Locations
 
 # Chiavi ammesse nel blocco ``spread:``.
-_SPREAD_KEYS = frozenset({"n", "over"})
+_SPREAD_KEYS = frozenset({"n", "over", "let"})
 
 # Chiavi ammesse in una banda-let della strategy expr: la banda di sempre,
 # senza ``n`` (il conteggio e' dello spread).
@@ -493,9 +494,10 @@ def _validate_spread(name: str, spread: Any, ctx: ErrCtx) -> Dict[str, Any]:
     extra = set(spread) - _SPREAD_KEYS
     if extra:
         raise ctx.err(
-            f"spread: chiavi non ammesse {sorted(extra)} (solo n/over).",
+            f"spread: chiavi non ammesse {sorted(extra)} (solo n/over/let).",
             key=("spread",),
-            hint="le strategy vivono sotto 'over: {path: strategy}'.",
+            hint="le strategy vivono sotto 'over: {path: strategy}'; le "
+            "manopole di voce sotto 'let: {nome: strategy}'.",
         )
     over = spread.get("over")
     if not isinstance(over, dict) or not over:
@@ -508,9 +510,44 @@ def _validate_spread(name: str, spread: Any, ctx: ErrCtx) -> Dict[str, Any]:
     return _expand_over_dotted(over)
 
 
+def _let_values(
+    name: str, spread: Dict[str, Any], n: int, ctx: ErrCtx
+) -> Dict[str, List[Any]]:
+    """Valori per voce delle manopole di ``spread.let`` (``{nome: [n valori]}``).
+
+    Stesso vocabolario delle strategy di ``over``, ma solo le due forme che
+    NON possiedono il conteggio (n resta di ``over``/``spread.n``): ``expr``
+    con ``i``/``n`` (deterministico) e la banda (un pescaggio per voce).
+    ``values``/``ramp`` sono rifiutati: un conteggio proprio qui sarebbe
+    ridondante con ``over``.
+    """
+    block = spread.get("let")
+    if block is None:
+        return {}
+    if not isinstance(block, dict):
+        raise ctx.err(
+            f"spread: 'let' serve un dict {{nome: strategy}}, trovato {block!r}.",
+            key=("spread", "let"),
+            hint="es. \"let: {livello: {expr: 'i * 0.8'}}\".",
+        )
+    out: Dict[str, List[Any]] = {}
+    for var, cfg in block.items():
+        label = f"let:{var}"
+        marker, params = _strategy(name, label, cfg, ctx)
+        if marker in ("values", "ramp"):
+            raise ctx.err(
+                f"spread: 'let.{var}' usa '{marker}' — in 'let' valgono solo "
+                "'expr' (deterministico per voce) o la banda (un pescaggio per "
+                "voce); il conteggio e' di 'over'/'n'.",
+                key=("spread", "let", var),
+            )
+        out[var] = _strategy_values(name, label, marker, params, n, ctx)
+    return out
+
+
 def _plan_entry(
     name: str, entry: Dict[str, Any], locs: Locations | None, pad: int | None = None
-) -> tuple[List[str], Dict[str, List[Any]], List[str]]:
+) -> tuple[List[str], Dict[str, List[Any]], Dict[str, List[Any]], List[str]]:
     """(nomi generati, valori per path, nomi-fantasma) di una entry-spread.
 
     I nomi sono 1-based, zero-padded alla larghezza di ``n`` — o di ``pad``
@@ -531,11 +568,13 @@ def _plan_entry(
         path: _strategy_values(name, path, marker, params, n, ctx)
         for path, (marker, params) in strategies.items()
     }
+    # Manopole di voce: valori per voce iniettati per nome (non su un path).
+    per_let = _let_values(name, entry["spread"], n, ctx)
     top = max(n, pad or 0)
     width = len(str(top))
     names = [f"{name}_{i + 1:0{width}d}" for i in range(n)]
     ghosts = [f"{name}_{i + 1:0{width}d}" for i in range(n, top)]
-    return names, per_path, ghosts
+    return names, per_path, per_let, ghosts
 
 
 def _is_spread(entry: Any) -> bool:
@@ -622,7 +661,7 @@ def expand_spreads(
     # Le patch si individuano prima di costruire: una entry-patch che e' a sua
     # volta una spread e' ambigua (generatore o ritocco?) -> errore.
     consumed: set = set()
-    for name, (names, _, ghosts) in plans.items():
+    for name, (names, _, _, ghosts) in plans.items():
         for gname in names:
             if gname not in streams:
                 continue
@@ -646,7 +685,7 @@ def expand_spreads(
         if name not in plans:
             expanded[name] = entry
             continue
-        names, per_path, _ghosts = plans[name]
+        names, per_path, per_let, _ghosts = plans[name]
         proto = {k: v for k, v in entry.items() if k != "spread"}
         for i, gname in enumerate(names):
             override = copy.deepcopy(proto)
@@ -658,6 +697,10 @@ def expand_spreads(
                     axis_names,
                     ErrCtx(locs=locs, stream=name),
                 )
+            # Manopole di voce: iniettate per nome negli scope let dei nodi-expr
+            # del generato (non scritte su un path, come fa over).
+            if per_let:
+                inject(override, {var: vals[i] for var, vals in per_let.items()})
             if "sweep" not in override:
                 override["sweep"] = copy.deepcopy(_SWEEP_OFF)
             if gname in consumed:
