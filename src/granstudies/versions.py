@@ -40,8 +40,16 @@ from .expr import is_expr_node
 from . import gainmap
 from .stack import build_stack_stream
 from .study_spec import resolve_streams
+from .document_let import resolve_knobs
 from .sweep import _fmt
-from .value_generators import expand_params, band, ramp, stable_seed, y_generator
+from .value_generators import (
+    band,
+    expand_params,
+    is_generator_node,
+    ramp,
+    stable_seed,
+    y_generator,
+)
 from .yaml_builder import build_multi_document
 from .yaml_loc import Locations
 
@@ -122,32 +130,8 @@ def parse_versions(
                 key=key,
                 hint="dichiara 'values', 'ramp' o una banda ('base'/'range'/'n').",
             )
-        with ctx.wrapping(key=key):
-            gen_key, params = y_generator(cfg)
         seed = stable_seed(f"{sid}:versions:{name}")
-        with ctx.wrapping(key=key):
-            if gen_key == "values":
-                values: List[Any] = list(params)
-            elif gen_key == "ramp":
-                values = ramp(**expand_params(params, seed=seed))
-            else:  # band
-                if "n" not in params:
-                    raise ctx.err(
-                        f"versions: la banda della variabile '{name}' richiede "
-                        "'n' (qui non c'e' una camminata-X a possedere il "
-                        "conteggio).",
-                        key=key,
-                    )
-                band_params = dict(params)
-                band_params.setdefault("seed", seed)
-                values = band(
-                    **expand_params(band_params, seed=band_params["seed"])
-                )
-        if not values:
-            raise ctx.err(
-                f"versions: la variabile '{name}' non genera nessun valore.",
-                key=key,
-            )
+        values = _sequence_values(name, cfg, seed, ctx, key)
         if name not in referenced:
             raise ctx.err(
                 f"versions: la variabile '{name}' non e' referenziata da "
@@ -158,6 +142,52 @@ def parse_versions(
             )
         out[name] = values
     return out
+
+
+def _sequence_values(
+    name: str, cfg: Any, seed: int, ctx: ErrCtx, key: tuple
+) -> List[Any]:
+    """Sequenza di scalari di una manopola-versione (asse a singola manopola o
+    manopola co-variante di Forma 1).
+
+    ``values`` / lista nuda -> la lista; ``ramp`` -> la rampa; banda -> ``n``
+    pescaggi (``n`` obbligatorio: qui non c'e' camminata-X a possedere il
+    conteggio). Seed di default per decorrelare manopole diverse.
+    """
+    if isinstance(cfg, list):
+        values: List[Any] = list(cfg)
+    else:
+        if not isinstance(cfg, dict):
+            raise ctx.err(
+                f"versions: '{name}' deve avere un generatore (dict) o una "
+                f"lista, trovato {cfg!r}.",
+                key=key,
+                hint="dichiara 'values', 'ramp' o una banda ('base'/'range'/'n').",
+            )
+        with ctx.wrapping(key=key):
+            gen_key, params = y_generator(cfg)
+        with ctx.wrapping(key=key):
+            if gen_key == "values":
+                values = list(params)
+            elif gen_key == "ramp":
+                values = ramp(**expand_params(params, seed=seed))
+            else:  # band
+                if "n" not in params:
+                    raise ctx.err(
+                        f"versions: la banda di '{name}' richiede 'n' (qui non "
+                        "c'e' una camminata-X a possedere il conteggio).",
+                        key=key,
+                    )
+                band_params = dict(params)
+                band_params.setdefault("seed", seed)
+                values = band(
+                    **expand_params(band_params, seed=band_params["seed"])
+                )
+    if not values:
+        raise ctx.err(
+            f"versions: '{name}' non genera nessun valore.", key=key
+        )
+    return values
 
 
 def _timeline_sequence(
@@ -288,6 +318,173 @@ def version_combos(
     ]
 
 
+AxisState = tuple  # (label: str, knobs: Dict[str, value])
+
+
+def parse_version_axes(
+    data: Dict[str, Any], locs: Locations | None = None
+) -> Dict[str, List[AxisState]]:
+    """Il blocco ``versions:`` come assi ortogonali.
+
+    Ritorna ``{asse: [(label, {manopola: valore}), ...]}`` nell'ordine di
+    dichiarazione. Un asse e' o un fascio di manopole parallele (Forma 1:
+    ogni manopola una sequenza scalare, lunghezza = la piu' lunga, le corte
+    tengono l'ultimo) o un insieme di stati nominati (Forma 2: ogni stato un
+    bundle di manopole, i cui valori possono essere envelope). Un asse a
+    generatore singolo (``d: {values: ...}``) e' la forma piatta storica: una
+    manopola omonima dell'asse. Il prodotto cartesiano corre FRA gli assi
+    (``axis_combos``). Le chiavi riservate ``onset``/``duration``/``chunk``
+    non sono assi.
+    """
+    ctx = ErrCtx(locs=locs)
+    raw = data.get("versions")
+    if not isinstance(raw, dict) or not raw:
+        raise ctx.err(
+            "versions: serve un dict non vuoto {asse: ...}.",
+            key=("versions",),
+            hint="es. 'versions: {d: {values: [1, 2, 3]}}'.",
+        )
+    raw = {k: v for k, v in raw.items() if k not in _RESERVED_KEYS}
+    if not raw:
+        raise ctx.err(
+            "versions: servono assi oltre alle chiavi riservate "
+            "'onset'/'duration'/'chunk'.",
+            key=("versions",),
+            hint="dichiara almeno un asse, es. 'd: {values: [1, 2, 3]}'.",
+        )
+    sid = data.get("study_id") or "study"
+    referenced = _referenced_names(
+        {k: v for k, v in data.items() if k != "versions"}
+    )
+    out: Dict[str, List[AxisState]] = {}
+    knobs_all: set = set()
+    for axis, cfg in raw.items():
+        states = _parse_axis(axis, cfg, sid, ctx)
+        out[axis] = states
+        for _, knobs in states:
+            knobs_all |= set(knobs)
+    for knob in sorted(knobs_all):
+        if knob in _RESERVED_NAMES:
+            raise ctx.err(
+                f"versions: la manopola '{knob}' e' un nome riservato degli "
+                f"scope expr ({', '.join(sorted(_RESERVED_NAMES))}).",
+                key=("versions",),
+                hint="scegli un altro nome.",
+            )
+        if knob not in referenced:
+            raise ctx.err(
+                f"versions: la manopola '{knob}' non e' referenziata da "
+                "nessuna espressione del documento.",
+                key=("versions",),
+                hint=f"usala in un nodo-expr (es. \"expr: '{knob}'\") oppure "
+                "toglila dal blocco.",
+            )
+    return out
+
+
+def _parse_axis(axis: str, cfg: Any, sid: str, ctx: ErrCtx) -> List[AxisState]:
+    key = ("versions", axis)
+    # Asse a singola manopola (forma piatta storica): generatore o lista nuda.
+    if is_generator_node(cfg) or isinstance(cfg, list):
+        seed = stable_seed(f"{sid}:versions:{axis}")
+        values = _sequence_values(axis, cfg, seed, ctx, key)
+        return [(_fmt(v), {axis: v}) for v in values]
+    if not isinstance(cfg, dict) or not cfg:
+        raise ctx.err(
+            f"versions: l'asse '{axis}' deve essere un generatore, una lista, "
+            "o un dict di manopole co-varianti / stati nominati.",
+            key=key,
+        )
+    # Discriminatore Forma 1 (co-varianti) vs Forma 2 (stati): ogni entry e'
+    # una sequenza (generatore/lista) o un bundle (dict non-generatore).
+    kinds = {}
+    for name, v in cfg.items():
+        if isinstance(v, dict) and not is_generator_node(v):
+            kinds[name] = "bundle"
+        elif is_generator_node(v) or isinstance(v, list):
+            kinds[name] = "seq"
+        else:
+            raise ctx.err(
+                f"versions: l'asse '{axis}', entry '{name}': uno scalare nudo "
+                "e' ambiguo — una manopola co-variante vuole una sequenza "
+                "('values'/'ramp'/banda/lista), uno stato un bundle di manopole.",
+                key=("versions", axis, name),
+            )
+    kset = set(kinds.values())
+    if kset == {"seq"}:
+        return _forma1(axis, cfg, sid, ctx)
+    if kset == {"bundle"}:
+        return _forma2(axis, cfg, sid, ctx)
+    raise ctx.err(
+        f"versions: l'asse '{axis}' mescola manopole co-varianti (Forma 1) e "
+        "stati nominati (Forma 2) — un asse e' o l'uno o l'altro.",
+        key=key,
+        hint="separa le due cose in due assi distinti.",
+    )
+
+
+def _forma1(axis: str, cfg: Dict[str, Any], sid: str, ctx: ErrCtx) -> List[AxisState]:
+    """Manopole parallele: ognuna una sequenza, lunghezza = la piu' lunga, le
+    corte tengono l'ultimo valore."""
+    seqs: Dict[str, List[Any]] = {}
+    for knob, v in cfg.items():
+        seed = stable_seed(f"{sid}:versions:{axis}:{knob}")
+        seqs[knob] = _sequence_values(
+            knob, v, seed, ctx, ("versions", axis, knob)
+        )
+    length = max(len(s) for s in seqs.values())
+    return [
+        (
+            str(i + 1),
+            {knob: seq[min(i, len(seq) - 1)] for knob, seq in seqs.items()},
+        )
+        for i in range(length)
+    ]
+
+
+def _forma2(axis: str, cfg: Dict[str, Any], sid: str, ctx: ErrCtx) -> List[AxisState]:
+    """Stati nominati: ogni stato un bundle di manopole (valori anche envelope,
+    risolti come le manopole di gruppo). Bundle parziale: le manopole non
+    nominate restano al riposo di ``let:``."""
+    states: List[AxisState] = []
+    for state, bundle in cfg.items():
+        if not isinstance(bundle, dict) or not bundle:
+            raise ctx.err(
+                f"versions: l'asse '{axis}', stato '{state}' deve essere un "
+                "bundle non vuoto {manopola: valore}.",
+                key=("versions", axis, state),
+            )
+        resolved = resolve_knobs(
+            bundle,
+            f"{sid}:versions:{axis}:{state}",
+            ctx,
+            key_prefix=("versions", axis, state),
+        )
+        states.append((str(state), resolved))
+    return states
+
+
+def axis_combos(
+    axes: Dict[str, List[AxisState]], *, interleaved: bool = False
+) -> List[AxisState]:
+    """Prodotto cartesiano FRA gli assi: ``[(label, {manopola: valore}), ...]``.
+
+    Riusa ``version_combos`` (lessicografico o diagonale) sugli stati; ogni
+    combinazione fonde i bundle dei suoi assi e concatena le etichette
+    (``grana=1__densita=rada``). Su collisione di manopola fra due assi vince
+    l'ultimo dichiarato (assi ortogonali: non dovrebbero condividere manopole).
+    """
+    picks = version_combos(axes, interleaved=interleaved)
+    out: List[AxisState] = []
+    for pick in picks:
+        parts, merged = [], {}
+        for ax, (label, knobs) in pick.items():
+            parts.append(f"{ax}={label}")
+            merged.update(knobs)
+        out.append(("__".join(parts), merged))
+    return out
+
+
 def inject_combo(data: Dict[str, Any], combo: Dict[str, Any]) -> Dict[str, Any]:
     """Copia del documento con i valori della combinazione iniettati nei ``let``.
 
@@ -349,8 +546,8 @@ def _build_versions(
             f"versions: 'chunk' deve essere un intero >= 1, trovato {chunk!r}.",
             key=("versions", "chunk"),
         )
-    vars = parse_versions(data, locs=locs)
-    combos = version_combos(vars, interleaved=chunk is not None)
+    axes = parse_version_axes(data, locs=locs)
+    combos = axis_combos(axes, interleaved=chunk is not None)
     onsets, durations = parse_version_timeline(data, len(combos), locs=locs)
     if onsets is None:
         # Concatenazione: servono le durate di versione per posizionare.
@@ -377,11 +574,15 @@ def _build_versions(
     if chunk is not None:
         n_groups = -(-len(combos) // chunk)  # ceil
         pad = len(str(n_groups - 1))
-    outer = next(iter(vars))  # prima variabile = esterna/lenta: il gruppo di default
     built: List[tuple[str, Dict[str, Any]]] = []
-    for k, combo in enumerate(combos):
-        label = "__".join(f"{name}={_fmt(v)}" for name, v in combo.items())
-        group = f"chunk={k // chunk:0{pad}d}" if chunk is not None else f"{outer}={_fmt(combo[outer])}"
+    for k, (label, combo) in enumerate(combos):
+        # Gruppo di default: il primo asse (esterno/lento) — la prima parte
+        # dell'etichetta (``grana=1__densita=rada`` -> ``grana=1``).
+        group = (
+            f"chunk={k // chunk:0{pad}d}"
+            if chunk is not None
+            else label.split("__", 1)[0]
+        )
         data_k = inject_combo(base_data, combo)
         if durations is not None:
             data_k["duration"] = durations[k]
