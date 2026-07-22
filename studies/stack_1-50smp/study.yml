@@ -48,14 +48,17 @@ base:
 axes:
   density:
     baseline: 10
-    base: {expr: "d * 0.7", let: {d: 10}}
-    range: {expr: "d * 0.6", let: {d: 10}}
+    base:
+      range: 10
+      n: 5
+      drift: {step: 0.2}
+    range: {expr: "d * 0.6", let: {d: 25}}
     drift: {step: 0.12}
   grain.duration:
     baseline: 25
-    base: {expr: "g * 0.7", let: {g: 25}}
-    range: {expr: "g * 0.6", let: {g: 25}}
-    drift: {step: 0.12}
+    base: {expr: "g", let: {g: 25}}
+    #range: {expr: "g * 0.6", let: {g: 25}}
+    #drift: {step: 0.12}
 
 # La camminata-X: quanti breakpoint al secondo genera ogni asse (banda in Hz,
 # anch'essa a passo d'ubriaco, cosi' nemmeno il ritmo dei cambi e' periodico).
@@ -77,27 +80,41 @@ stack:
 spread:
   over:
     base.pointer.start:
-      values: [0.1, 0.25, 0.4, 0.55, 0.8, 0.915, 1.1]
+      values: [0.12, 0.25] #, 0.4, 0.55, 0.8, 0.915, 1.1]
     base.pan:
-      expr: "i * 27"
+      expr: "(1 - 2 * (i % 2))* 27"
 
 streams:
   # Unico stream logico: lo spread lo moltiplica per 7. Nessun sweep — questo
   # documento vive solo nello stack (ascolto verticale).
   cugini:
     spread:
-      over: 
-        axes.density.base:
-          expr: "env + i/10"
-          let:  
+      over:
+        axes.density.base.base:
+          # Il "trend" (range/n/drift) resta condiviso, dichiarato una volta
+          # sola in axes.density.base (top-level, sopra): qui lo spread patcha
+          # solo il centro di quel trend, un livello piu' a fondo. Il
+          # deep-merge finale ricompone axes.density.base come generatore
+          # annidato completo {range, n, drift, base: <per-cugino>}. `env`
+          # resta la banda-let di prima (random-walk TRA i 7 cugini).
+          expr: "env + i/(10-i)"
+          let:
             env:
-              base: 0.2
+              base:
+                expr: "d"
+                let: {d: 25}
               range: 1.5
               drift: {step: .15}
+        axes.grain.duration.base:
+          expr: "10 + 4"
+          #expr: "floor(d + i/(10-i))"
+          let:
+            d: 4
+          
 
 
 # Prima variabile = esterna/lenta (density), seconda = interna/veloce (grana).
 # 3 x 3 = 9 versioni concatenate, 30s ciascuna.
 versions:
-  d: {ramp: {start: 3, stop: 20, step: 3}}
   g: {ramp: {start: 4, stop: 50, step: 6}}
+  d: {ramp: {start: 20, stop: 3, step: 3}}
