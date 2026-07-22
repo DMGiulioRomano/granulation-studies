@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from . import bounds as bounds_mod
+from . import gainmap
 from .study_spec import StudySpec
 from .value_generators import band, band_at, expand_params, ramp
 from .x_strategies import resolve_x, walk, x_owns_n
@@ -168,17 +169,31 @@ def build_stack_stream(
 
 
 def generate_stack_document(
-    specs: List[StudySpec], *, output_sr: Optional[int] = 48000
+    specs: List[StudySpec],
+    *,
+    output_sr: Optional[int] = 48000,
+    samples_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Collassa gli stream di uno studio in un documento engine multi-stream.
 
     Un elemento di ``streams:`` per ogni spec (una per stream, da
     ``resolve_streams``), costruito da ``build_stack_stream``.
+
+    Col blocco ``gain_compensation:`` e un ``samples_dir`` risolto, gli stream
+    ricevono qui l'offset di ``volume`` che pareggia il mascheramento fra punti
+    di lettura diversi dello stesso buffer (v. ``gainmap``).
     """
     if not specs:
         raise ValueError("generate_stack_document: serve almeno uno spec.")
     built = [build_stack_stream(spec, output_sr=output_sr) for spec in specs]
     first = specs[0]
+    if first.gain_compensation and samples_dir:
+        gainmap.compensate(
+            built,
+            samples_dir=samples_dir,
+            output_sr=output_sr or 48000,
+            **first.gain_compensation,
+        )
     return build_multi_document(
         built,
         title=f"{first.study_id} :: stack",

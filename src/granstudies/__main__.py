@@ -201,7 +201,7 @@ def cmd_stack(study: str) -> int:
     out = os.path.join(gen_dir(study), "yaml")
     target = os.path.join(out, "stack", "stack.yml")
     before = os.path.getmtime(target) if os.path.exists(target) else None
-    written = write_stack(specs, out)
+    written = write_stack(specs, out, samples_dir=samples_dir(specs[0].samples_dir))
     changed = before != os.path.getmtime(written[0])
     stato = "aggiornato" if changed else "invariato"
     print(f"[stack] documento multi-stream ({len(specs)} stream, {stato}) -> {written[0]}")
@@ -234,7 +234,9 @@ def cmd_versions(study: str) -> int:
         p: os.path.getmtime(p)
         for p in glob.glob(os.path.join(d, "*.yml"))
     }
-    written = write_versions(raw, sid, out, locs=locs)
+    written = write_versions(
+        raw, sid, out, locs=locs, samples_dir=samples_dir(raw.get("samples_dir"))
+    )
     changed = sum(
         1 for p in written if before.get(p) != os.path.getmtime(p)
     )

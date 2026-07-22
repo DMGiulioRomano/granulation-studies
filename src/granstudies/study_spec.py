@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Tuple
 import yaml
 
 from . import bounds as bounds_mod
+from . import gainmap
 from . import yaml_loc
 from .errors import ErrCtx, SpecError
 from .spread import AXIS_NAME_BLOCKS, expand_spreads, split_axis_key
@@ -101,6 +102,9 @@ class StudySpec:
     stack_seed: int | None = None
     stack_unit: str | None = None
     axes_seed: int | None = None
+    # Blocco ``gain_compensation:`` top-level ({alpha, max_shift}), None =
+    # assente. Lo consuma ``gainmap.compensate`` sui documenti multi-stream.
+    gain_compensation: Dict[str, float] | None = None
 
     def axis(self, name: str) -> Axis:
         for ax in self.axes:
@@ -738,6 +742,7 @@ def parse_study_spec(
         stack_seed=stack_seed,
         stack_unit=stack_unit,
         axes_seed=axes_seed,
+        gain_compensation=gainmap.parse_config(data),
     )
     _validate(spec, ctx, orders_explicit=orders_explicit)
     return spec

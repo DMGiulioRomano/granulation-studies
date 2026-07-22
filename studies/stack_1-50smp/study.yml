@@ -57,7 +57,8 @@ axes:
   grain.duration:
     baseline: 25
     base: {expr: "g", let: {g: 25}}
-    #range: {expr: "g * 0.6", let: {g: 25}}
+    range: {expr: ".3 * g", let: {g: 3}}
+    interpolation: step
     #drift: {step: 0.12}
 
 # La camminata-X: quanti breakpoint al secondo genera ogni asse (banda in Hz,
@@ -71,8 +72,8 @@ stack:
     range: 1.5
     drift: {step: 0.15}
   grain.duration:
-    base: 4
-    range: 6
+    base: .3
+    range: 1
     drift: {step: 0.15}
 
 # I 7 punti di lettura del sample (secondi assoluti), indice -> secondi:
@@ -91,12 +92,6 @@ streams:
     spread:
       over:
         axes.density.base.base:
-          # Il "trend" (range/n/drift) resta condiviso, dichiarato una volta
-          # sola in axes.density.base (top-level, sopra): qui lo spread patcha
-          # solo il centro di quel trend, un livello piu' a fondo. Il
-          # deep-merge finale ricompone axes.density.base come generatore
-          # annidato completo {range, n, drift, base: <per-cugino>}. `env`
-          # resta la banda-let di prima (random-walk TRA i 7 cugini).
           expr: "env + i/(10-i)"
           let:
             env:
@@ -106,12 +101,11 @@ streams:
               range: 1.5
               drift: {step: .15}
         axes.grain.duration.base:
-          expr: "10 + 4"
-          #expr: "floor(d + i/(10-i))"
+          expr: "floor(d + i/(10-i))"
           let:
             d: 4
-          
-
+  cugini_2:
+    base.volume: -6
 
 # Prima variabile = esterna/lenta (density), seconda = interna/veloce (grana).
 # 3 x 3 = 9 versioni concatenate, 30s ciascuna.
