@@ -25,6 +25,7 @@ from .expr import eval_expr, is_expr_node
 from .inject import expr_names as _expr_names
 from .inject import inject as _inject
 from .inject import referenced_names as _referenced_names
+from .value_generators import expand_env, is_generator_node, stable_seed
 from .yaml_loc import Locations
 
 
@@ -53,21 +54,39 @@ def apply_document_let(
     if not block:
         return out
 
-    resolved = _resolve_knobs(block, ctx)
+    sid = data.get("study_id") or "study"
+    resolved = resolve_knobs(block, f"{sid}:let", ctx, key_prefix=("let",))
     _guard_referenced(block, resolved, out, ctx)
     _inject(out, resolved)
     return out
 
 
-def _resolve_knobs(block: Dict[str, Any], ctx: ErrCtx) -> Dict[str, Any]:
-    """Risolve i valori delle manopole. Scalari ed envelope (liste) sono gia'
-    valori di scope; i nodi-expr derivati si valutano contro le manopole gia'
-    risolte, a fixpoint (l'ordine di dichiarazione non conta)."""
+def resolve_knobs(
+    block: Dict[str, Any],
+    seed_prefix: str,
+    ctx: ErrCtx,
+    *,
+    key_prefix: tuple = ("let",),
+) -> Dict[str, Any]:
+    """Risolve i valori di un blocco di manopole (documento o gruppo).
+
+    Scalari ed envelope statici (liste) sono gia' valori di scope; una banda
+    (o ``ramp``/``values``) si compila in envelope una volta, con seed
+    ``stable_seed(f"{seed_prefix}:{nome}")`` — un pescaggio condiviso; i nodi-
+    expr derivati si valutano contro le manopole gia' risolte, a fixpoint
+    (l'ordine di dichiarazione non conta). ``key_prefix`` etichetta gli errori
+    (``("let",)`` per il documento, ``("streams", nome, "let")`` per un gruppo).
+    """
     resolved: Dict[str, Any] = {}
     pending: Dict[str, Any] = {}
     for name, val in block.items():
         if is_expr_node(val):
             pending[name] = val
+        elif is_generator_node(val):
+            with ctx.wrapping(key=key_prefix + (name,)):
+                resolved[name] = expand_env(
+                    val, seed=stable_seed(f"{seed_prefix}:{name}"), path=name
+                )
         else:
             resolved[name] = val  # scalare o envelope statico
 
@@ -79,7 +98,7 @@ def _resolve_knobs(block: Dict[str, Any], ctx: ErrCtx) -> Dict[str, Any]:
             scope = dict(resolved)
             scope.update(node.get("let") or {})
             if _expr_names(node["expr"]) <= set(scope) | {"pi", "e"}:
-                with ctx.wrapping(key=("let", name)):
+                with ctx.wrapping(key=key_prefix + (name,)):
                     resolved[name] = eval_expr(node["expr"], scope)
                 del pending[name]
                 progress = True
@@ -88,7 +107,7 @@ def _resolve_knobs(block: Dict[str, Any], ctx: ErrCtx) -> Dict[str, Any]:
         raise ctx.err(
             "let: manopole con dipendenze cicliche o irrisolvibili: "
             f"{sorted(pending)}.",
-            key=("let",),
+            key=key_prefix,
             hint="una manopola derivata puo' referenziare solo altre manopole.",
         )
     return resolved
