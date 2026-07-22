@@ -13,7 +13,7 @@
 study_id: study01_stack_1-50smp
 title: "Studio 01 (stack) — grani 1-50 samples, 7 punti di lettura"
 seed: 1988
-duration: 30
+duration: 50
 samples_dir: samples
 
 # I 7 cugini leggono punti diversi del buffer, che ha punti forti e punti
@@ -31,20 +31,20 @@ samples_dir: samples
 # di dettare legge al pezzo.
 gain_compensation:
   alpha: 0.7
-  max_shift: 18
+  max_shift: 12
 
 base:
   onset: 0
   sample: silenzi.wav
   time_mode: normalized
-  volume: 0 #-12                 # 7 stream sommati: headroom
+  volume: +10 #-12                 # 7 stream sommati: headroom
   grain:
     envelope: hanning
     duration_unit: samples
   pointer:
     loop_unit: absolute
     speed_ratio: 0
-
+  
 # Density e grana non sono piu' costanti dentro la versione: le variabili
 # `d`/`g` iniettate da `versions:` diventano il *centro* di una banda che il
 # valore percorre a passo d'ubriaco (`drift`). I default nel `let` tengono lo
@@ -66,7 +66,7 @@ axes:
   density:
     baseline: 10
     base:
-      range: 10
+      range: 1 
       n: 5
       drift: {step: 0.2}
     range: {expr: "d * 0.6", let: {d: 25}}
@@ -74,10 +74,17 @@ axes:
   grain.duration:
     baseline: 25
     base: {expr: "g", let: {g: 25}}
-    range: {expr: ".3 * g", let: {g: 3}}
+    range: {n: 6, base: {expr: ".3 * g", let: {g: 3}}, range: [0, 5]}
     interpolation: step
-    #drift: {step: 0.12}
-
+    drift: {step: 0.32}
+  distribution:
+    base: 0
+    range: .5
+    drift:
+      step:
+        base: 0
+        n: 8
+        range: .2
 # La camminata-X: quanti breakpoint al secondo genera ogni asse (banda in Hz,
 # anch'essa a passo d'ubriaco, cosi' nemmeno il ritmo dei cambi e' periodico).
 # Density lenta (strutturale, ~1 valore ogni 0.5-2 s), grana veloce (4-10 al
@@ -89,9 +96,13 @@ stack:
     range: 1.5
     drift: {step: 0.15}
   grain.duration:
-    base: .3
-    range: 1
+    base: .1
+    range: .1
     drift: {step: 0.15}
+  distribution:
+    base: .3
+    range: .1
+    drift: {step: .1}
 
 # I 7 punti di lettura del sample (secondi assoluti), indice -> secondi:
 #   1=0.1  2=0.25  3=0.4  4=0.55  5=0.8  6=0.915  7=1.1
@@ -118,12 +129,14 @@ streams:
               range: 1.5
               drift: {step: .15}
         axes.grain.duration.base:
-          expr: "floor(d + i/(10-i))"
+          expr: "floor(g + i/(10-i))"
           let:
-            d: 4
+            g: 4
+        stack.grain.duration.range:
+          expr: "i * .1"
 
 # Prima variabile = esterna/lenta (density), seconda = interna/veloce (grana).
 # 3 x 3 = 9 versioni concatenate, 30s ciascuna.
 versions:
   g: {ramp: {start: 4, stop: 50, step: 6}}
-  d: {ramp: {start: 20, stop: 3, step: 3}}
+  d: {ramp: {start: 0, stop: 20, step: 3}}
