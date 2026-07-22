@@ -12,6 +12,10 @@ duration: 30                      # durata di default (s) degli stream: ogni str
                                   #   propria o ereditata da qui.
 samples_dir: samples              # path relativo alla root del repo (default: samples/)
 
+gain_compensation:                # opzionale — pareggia il mascheramento fra stream che
+  alpha: 0.7                      #   leggono punti diversi dello stesso buffer.
+  max_shift: 24                   #   Assente = nessuna compensazione (vedi sotto).
+
 # Parametri fissi dello stream: tutto ciò che non è un asse.
 base:                             # *
   onset: 0
@@ -489,6 +493,47 @@ axes:
   è YAML valido ma fragile; con `{}` non lo è affatto.
 
 Design completo: `docs/plans/expr-env-arithmetic.md`.
+
+## Il blocco `gain_compensation:`
+
+```yaml
+gain_compensation:
+  alpha: 0.7        # 0 = niente, 1 = stream contemporanei appaiati (default 1)
+  max_shift: 24     # limite in dB alla correzione del singolo stream (default 24)
+```
+
+Stream che granulano lo **stesso** sample in punti di lettura diversi arrivano
+al mix con livelli molto diversi — il buffer ha punti forti e punti deboli — e
+chi sta sotto viene mascherato. Con `pointer.speed_ratio: 0` quel livello è
+prevedibile prima del render: l'RMS del buffer sulla finestra che il grano
+legge davvero, `[pointer.start, pointer.start + grain.duration)`. Il blocco
+attiva la stima e scrive un offset di `volume` per stream.
+
+Vale solo sui documenti **multi-stream** (`stack`, `versions`): la
+compensazione è relativa, uno stream da solo non maschera nessuno. Blocco
+assente = nessuna compensazione, documenti identici a prima.
+
+Tre regole, tutte osservabili nei documenti generati:
+
+- **Solo il differenziale, mai il livello d'insieme.** Il riferimento è la
+  media degli stream contemporanei, non una costante: resta udibile che un
+  grano più corto porta meno energia (percetto vero) e si appiattisce solo il
+  mascheramento reciproco, che è artefatto del buffer.
+- **Contemporanei = che si sovrappongono davvero** (`[onset, onset+duration)`).
+  Le versioni concatenate non suonano insieme, quindi ognuna si normalizza da
+  sé; su uno stack simultaneo la regola degenera nella media dei cugini.
+- **Si attenua, non si alza.** Gli offset vengono traslati in blocco perché il
+  massimo sia 0: il bound engine di `volume` è `[-120, +12]` dB e la base
+  tipica è 0, quindi alzare finirebbe contro il tetto. Lo shift è **uno solo
+  per studio**, non per documento, così i file di `versions` restano
+  confrontabili fra loro all'ascolto.
+
+`grain.duration` a envelope si riassume con la **mediana** dei breakpoint: una
+costante per documento basta (sul sample dello studio lascia ~0.9 dB di
+residuo su ~33 dB di mascheramento), mentre inseguire ogni breakpoint
+produrrebbe un envelope di volume che si muove alla velocità della camminata —
+un tremolo, non una correzione. Uno stream che legge silenzio non viene
+corretto e non entra nel riferimento degli altri.
 
 ## Il blocco `stack:`
 

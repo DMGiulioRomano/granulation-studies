@@ -16,6 +16,23 @@ seed: 1988
 duration: 30
 samples_dir: samples
 
+# I 7 cugini leggono punti diversi del buffer, che ha punti forti e punti
+# deboli: fra il piu' forte (0.25) e il piu' debole (0.8, quasi silenzio) ci
+# sono ~33 dB, e sotto quella distanza gli altri spariscono.
+#
+# `alpha` = quanta parte della distanza si chiude. A 1 il sample perde la sua
+# topografia: ogni punto di lettura suona uguale. A 0.7 resta udibile che un
+# punto e' piu' forte dell'altro senza che uno mascheri l'altro.
+#
+# `max_shift` = tetto in dB alla correzione del singolo cugino. Conta perche'
+# la compensazione porta tutti verso il piu' DEBOLE (si attenua, non si alza):
+# con 7 punti e max_shift 24 il punto a 0.8 s trascina giu' il materiale forte
+# di ~46 dB. Con 12 il calo si ferma a 30, con 6 a 18 — e il punto morto smette
+# di dettare legge al pezzo.
+gain_compensation:
+  alpha: 0.7
+  max_shift: 18
+
 base:
   onset: 0
   sample: silenzi.wav
@@ -57,7 +74,8 @@ axes:
   grain.duration:
     baseline: 25
     base: {expr: "g", let: {g: 25}}
-    #range: {expr: "g * 0.6", let: {g: 25}}
+    range: {expr: ".3 * g", let: {g: 3}}
+    interpolation: step
     #drift: {step: 0.12}
 
 # La camminata-X: quanti breakpoint al secondo genera ogni asse (banda in Hz,
@@ -71,8 +89,8 @@ stack:
     range: 1.5
     drift: {step: 0.15}
   grain.duration:
-    base: 4
-    range: 6
+    base: .3
+    range: 1
     drift: {step: 0.15}
 
 # I 7 punti di lettura del sample (secondi assoluti), indice -> secondi:
@@ -80,9 +98,9 @@ stack:
 spread:
   over:
     base.pointer.start:
-      values: [0.12, 0.25] #, 0.4, 0.55, 0.8, 0.915, 1.1]
+      values: [0.12, 0.25, 0.4, 0.55, 0.93, 1.1]
     base.pan:
-      expr: "(1 - 2 * (i % 2))* 27"
+      expr: "(1 - 2 * (i % 2))* (i*27)"
 
 streams:
   # Unico stream logico: lo spread lo moltiplica per 7. Nessun sweep — questo
@@ -91,12 +109,6 @@ streams:
     spread:
       over:
         axes.density.base.base:
-          # Il "trend" (range/n/drift) resta condiviso, dichiarato una volta
-          # sola in axes.density.base (top-level, sopra): qui lo spread patcha
-          # solo il centro di quel trend, un livello piu' a fondo. Il
-          # deep-merge finale ricompone axes.density.base come generatore
-          # annidato completo {range, n, drift, base: <per-cugino>}. `env`
-          # resta la banda-let di prima (random-walk TRA i 7 cugini).
           expr: "env + i/(10-i)"
           let:
             env:
@@ -106,12 +118,9 @@ streams:
               range: 1.5
               drift: {step: .15}
         axes.grain.duration.base:
-          expr: "10 + 4"
-          #expr: "floor(d + i/(10-i))"
+          expr: "floor(d + i/(10-i))"
           let:
             d: 4
-          
-
 
 # Prima variabile = esterna/lenta (density), seconda = interna/veloce (grana).
 # 3 x 3 = 9 versioni concatenate, 30s ciascuna.

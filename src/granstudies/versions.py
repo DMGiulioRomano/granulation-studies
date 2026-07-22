@@ -37,6 +37,7 @@ from typing import Any, Dict, List, Optional
 
 from .errors import ErrCtx
 from .expr import is_expr_node
+from . import gainmap
 from .stack import build_stack_stream
 from .study_spec import resolve_streams
 from .sweep import _fmt
@@ -345,6 +346,7 @@ def _build_versions(
     locs: Locations | None = None,
     *,
     output_sr: Optional[int] = 48000,
+    samples_dir: Optional[str] = None,
 ) -> tuple[str, List[tuple[str, Dict[str, Any]]]]:
     """Gli stream di tutte le versioni, ognuno con l'etichetta del suo gruppo.
 
@@ -427,6 +429,20 @@ def _build_versions(
             s["stream_id"] = f"{s['stream_id']}__{label}"
             s["onset"] = (s.get("onset") or 0) + onsets[k]
             built.append((group, s))
+    # La compensazione sta qui, *prima* del raggruppamento in documenti: il
+    # riferimento e' comunque per-versione (le versioni concatenate non si
+    # sovrappongono, quindi ognuna si normalizza da se'), ma la traslazione in
+    # sottrazione e' unica per l'intero prodotto cartesiano. Compensando dopo
+    # lo split, ogni file riceverebbe uno shift diverso e i gruppi non
+    # sarebbero piu' confrontabili fra loro all'ascolto.
+    gain = gainmap.parse_config(data)
+    if gain and samples_dir:
+        gainmap.compensate(
+            [s for _, s in built],
+            samples_dir=samples_dir,
+            output_sr=output_sr or 48000,
+            **gain,
+        )
     return sid, built
 
 
@@ -447,13 +463,16 @@ def generate_versions_document(
     locs: Locations | None = None,
     *,
     output_sr: Optional[int] = 48000,
+    samples_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Tutte le versioni in un solo documento (timeline completa).
 
     E' la vista non spezzata: la produzione passa da
     ``generate_versions_documents``.
     """
-    sid, built = _build_versions(data, study_id, locs, output_sr=output_sr)
+    sid, built = _build_versions(
+        data, study_id, locs, output_sr=output_sr, samples_dir=samples_dir
+    )
     return _versions_document(
         data, sid, [s for _, s in built], f"{sid} :: stack :: versions"
     )
@@ -465,6 +484,7 @@ def generate_versions_documents(
     locs: Locations | None = None,
     *,
     output_sr: Optional[int] = 48000,
+    samples_dir: Optional[str] = None,
 ) -> List[tuple[str, Dict[str, Any]]]:
     """Un documento per gruppo (default: per valore della **variabile esterna**).
 
@@ -488,7 +508,9 @@ def generate_versions_documents(
     Ritorna coppie ``(etichetta, documento)`` con etichetta ``"d=3"``,
     nell'ordine delle versioni.
     """
-    sid, built = _build_versions(data, study_id, locs, output_sr=output_sr)
+    sid, built = _build_versions(
+        data, study_id, locs, output_sr=output_sr, samples_dir=samples_dir
+    )
     groups: Dict[str, List[Dict[str, Any]]] = {}
     for group, s in built:
         groups.setdefault(group, []).append(s)

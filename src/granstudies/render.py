@@ -104,7 +104,13 @@ def _write_envelope(spec: StudySpec, out_dir: str, *, output_sr: int = 48000) ->
     return written
 
 
-def write_stack(specs: List[StudySpec], out_dir: str, *, output_sr: int = 48000) -> List[str]:
+def write_stack(
+    specs: List[StudySpec],
+    out_dir: str,
+    *,
+    output_sr: int = 48000,
+    samples_dir: str | None = None,
+) -> List[str]:
     """Scrive il documento multi-stream del processo stack.
 
     Un solo file (``out_dir/stack/stack.yml``): stack collassa gli stream, non
@@ -114,7 +120,9 @@ def write_stack(specs: List[StudySpec], out_dir: str, *, output_sr: int = 48000)
     altrimenti il floor di ``grain.duration`` clampato qui non e' quello che
     l'engine applichera' in render.
     """
-    doc = generate_stack_document(specs, output_sr=output_sr)
+    doc = generate_stack_document(
+        specs, output_sr=output_sr, samples_dir=samples_dir
+    )
     d = os.path.join(out_dir, "stack")
     os.makedirs(d, exist_ok=True)
     path = os.path.join(d, "stack.yml")
@@ -129,6 +137,7 @@ def write_versions(
     *,
     locs=None,
     output_sr: int = 48000,
+    samples_dir: str | None = None,
 ) -> List[str]:
     """Scrive i documenti delle versioni (blocco ``versions:``).
 
@@ -147,7 +156,9 @@ def write_versions(
     """
     from .versions import generate_versions_documents
 
-    docs = generate_versions_documents(data, study_id, locs, output_sr=output_sr)
+    docs = generate_versions_documents(
+        data, study_id, locs, output_sr=output_sr, samples_dir=samples_dir
+    )
     d = os.path.join(out_dir, "versions")
     os.makedirs(d, exist_ok=True)
     written = []
