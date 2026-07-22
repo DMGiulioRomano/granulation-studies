@@ -24,6 +24,7 @@ from typing import Any, Dict
 
 import yaml
 
+from .document_let import apply_document_let
 from .engine_bridge import REPO_ROOT
 from .errors import SpecError
 
@@ -68,6 +69,9 @@ def _load_specs(study: str, stream: str | None = None) -> list:
 
     path = os.path.join(study_dir(study), "study.yml")
     data, locs = load_with_locations(path)
+    # Manopole di documento (`let:` top-level): risolte e iniettate al load,
+    # prima del parse degli stream — il riposo che versions/percorso poi muovono.
+    data = apply_document_let(data, locs)
     sid = data.get("study_id") or study
     specs = resolve_streams(data, sid, locs=locs)
     if stream:
@@ -92,6 +96,10 @@ def _write_expanded_streams(study: str, data: Dict[str, Any]) -> None:
     from .render import _dump
     from .spread import expand_spreads
 
+    # Riflette le manopole di documento nel dump (no-op se gia' iniettate:
+    # apply_document_let rimuove il blocco 'let:'). Post-validazione, quindi
+    # gli errori di manopola sono gia' emersi con le posizioni via _load_specs.
+    data = apply_document_let(data)
     streams = data.get("streams") or {}
     if not any(isinstance(e, dict) and "spread" in e for e in streams.values()):
         return
@@ -224,6 +232,9 @@ def cmd_versions(study: str) -> int:
 
     path = os.path.join(study_dir(study), "study.yml")
     raw, locs = load_with_locations(path)
+    # Manopole di documento: il riposo va iniettato PRIMA che versions muova
+    # le variabili per-combo (il movimento ombreggia il riposo, non viceversa).
+    raw = apply_document_let(raw, locs)
     sid = raw.get("study_id") or study
     _write_expanded_streams(study, raw)
     out = os.path.join(gen_dir(study), "yaml")
@@ -261,6 +272,9 @@ def cmd_percorso(study: str) -> int:
 
     path = os.path.join(study_dir(study), "study.yml")
     raw, locs = load_with_locations(path)
+    # Manopole di documento: il riposo va iniettato PRIMA che il percorso muova
+    # le traiettorie nei let (il movimento ombreggia il riposo, non viceversa).
+    raw = apply_document_let(raw, locs)
     sid = raw.get("study_id") or study
     _write_expanded_streams(study, raw)
     out = os.path.join(gen_dir(study), "yaml")
