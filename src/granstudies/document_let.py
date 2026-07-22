@@ -39,10 +39,13 @@ def apply_document_let(
     manopola sia referenziata da almeno un'espressione, li inietta negli scope
     ``let`` per nome e rimuove il blocco dal documento.
     """
+    ctx = ErrCtx(locs=locs)
+    # Guardia anti-ombreggiamento sui tre livelli: gira al load, prima che
+    # l'iniezione consumi i nomi (documento e gruppo spariscono dopo).
+    _check_shadowing(data, ctx)
     block = data.get("let")
     if block is None:
         return data
-    ctx = ErrCtx(locs=locs)
     if not isinstance(block, dict):
         raise ctx.err(
             "let: serve un dict {manopola: valore}.",
@@ -111,6 +114,49 @@ def resolve_knobs(
             hint="una manopola derivata puo' referenziare solo altre manopole.",
         )
     return resolved
+
+
+def _knob_names(block: Any) -> set:
+    return set(block) if isinstance(block, dict) else set()
+
+
+def _check_shadowing(data: Dict[str, Any], ctx: ErrCtx) -> None:
+    """Ombreggiare un nome fra livelli e' errore (documento > gruppo > voce).
+
+    Documento e' antenato di ogni gruppo e di ogni ``spread.let``; il gruppo
+    e' antenato del proprio ``spread.let``. Due gruppi diversi sono fratelli:
+    lo stesso nome non collide. Gira al load, sul documento grezzo, prima che
+    l'iniezione consumi i nomi.
+    """
+    doc = _knob_names(data.get("let"))
+    for name, entry in (data.get("streams") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        group = _knob_names(entry.get("let"))
+        spread = entry.get("spread")
+        voice = _knob_names(spread.get("let")) if isinstance(spread, dict) else set()
+        for var in sorted(doc & group):
+            raise ctx.err(
+                f"let: il gruppo '{name}' ridichiara la manopola di documento "
+                f"'{var}' — ombreggiare fra livelli e' errore.",
+                key=("streams", name, "let", var),
+                hint="dai un nome diverso alla manopola di gruppo (un valore "
+                "diverso vuole un nome diverso, non una precedenza).",
+            )
+        for var in sorted(doc & voice):
+            raise ctx.err(
+                f"let: lo spread di '{name}' ridichiara la manopola di "
+                f"documento '{var}' — ombreggiare fra livelli e' errore.",
+                key=("streams", name, "spread", "let", var),
+                hint="dai un nome diverso alla manopola di voce.",
+            )
+        for var in sorted(group & voice):
+            raise ctx.err(
+                f"let: lo spread di '{name}' ridichiara la manopola di gruppo "
+                f"'{var}' — ombreggiare fra livelli e' errore.",
+                key=("streams", name, "spread", "let", var),
+                hint="dai un nome diverso alla manopola di voce.",
+            )
 
 
 def _guard_referenced(
