@@ -54,6 +54,15 @@ _RESERVED_NAMES = frozenset({"i", "n", "pi", "e"})
 # mappate 1:1 sull'ordine lessicografico delle versioni.
 _TIMELINE_KEYS = ("onset", "duration")
 
+# ``chunk`` (opzionale): un intero, non un generatore. Se presente, il
+# raggruppamento in documenti di ``generate_versions_documents`` non segue
+# piu' la prima variabile dichiarata ma taglia il prodotto cartesiano piatto
+# (nell'ordine lessicografico di ``version_combos``) in blocchi da ``chunk``
+# combinazioni: cosi' ogni documento attraversa entrambe le variabili invece
+# di fissarne una.
+_CHUNK_KEY = "chunk"
+_RESERVED_KEYS = _TIMELINE_KEYS + (_CHUNK_KEY,)
+
 
 def _expr_names(text: Any) -> frozenset:
     """I nomi referenziati da un'espressione (vuoto se non parsabile: gli
@@ -103,11 +112,12 @@ def parse_versions(
             key=("versions",),
             hint="es. 'versions: {d: {values: [1, 2, 3]}}'.",
         )
-    raw = {k: v for k, v in raw.items() if k not in _TIMELINE_KEYS}
+    raw = {k: v for k, v in raw.items() if k not in _RESERVED_KEYS}
     if not raw:
         raise ctx.err(
             "versions: servono variabili oltre alle chiavi riservate "
-            "'onset'/'duration' (sono loro a decidere quante versioni esistono).",
+            "'onset'/'duration'/'chunk' (sono loro a decidere quante "
+            "versioni esistono).",
             key=("versions",),
             hint="dichiara almeno una variabile, es. 'd: {values: [1, 2, 3]}'.",
         )
@@ -377,11 +387,21 @@ def _build_versions(
             acc += d
     base_data = {k: v for k, v in data.items() if k != "versions"}
 
-    outer = next(iter(vars))  # prima variabile = esterna/lenta: il gruppo
+    chunk = data.get("versions", {}).get(_CHUNK_KEY)
+    if chunk is not None:
+        if not isinstance(chunk, int) or isinstance(chunk, bool) or chunk < 1:
+            raise ctx.err(
+                f"versions: 'chunk' deve essere un intero >= 1, trovato "
+                f"{chunk!r}.",
+                key=("versions", "chunk"),
+            )
+        n_groups = -(-len(combos) // chunk)  # ceil
+        pad = len(str(n_groups - 1))
+    outer = next(iter(vars))  # prima variabile = esterna/lenta: il gruppo di default
     built: List[tuple[str, Dict[str, Any]]] = []
     for k, combo in enumerate(combos):
         label = "__".join(f"{name}={_fmt(v)}" for name, v in combo.items())
-        group = f"{outer}={_fmt(combo[outer])}"
+        group = f"chunk={k // chunk:0{pad}d}" if chunk is not None else f"{outer}={_fmt(combo[outer])}"
         data_k = inject_combo(base_data, combo)
         if durations is not None:
             data_k["duration"] = durations[k]
@@ -429,14 +449,19 @@ def generate_versions_documents(
     *,
     output_sr: Optional[int] = 48000,
 ) -> List[tuple[str, Dict[str, Any]]]:
-    """Un documento per valore della **variabile esterna** (la prima dichiarata).
+    """Un documento per gruppo (default: per valore della **variabile esterna**).
 
     Il prodotto cartesiano di ``versions:`` cresce in fretta e un documento
     unico diventa un audio da decine di minuti, ingestibile da aprire e da
-    ascoltare. Il raggruppamento non ha bisogno di sintassi nuova: la prima
-    variabile e' gia' quella esterna/lenta (v. ``version_combos``), quindi
-    fa da confine naturale di file. Con ``d`` x ``g`` escono N_d documenti,
-    ciascuno con le sole combo di quel ``d``.
+    ascoltare. Senza ``versions.chunk`` il raggruppamento usa la prima
+    variabile dichiarata (esterna/lenta, v. ``version_combos``) come confine
+    naturale di file: con ``d`` x ``g`` escono N_d documenti, ciascuno con
+    le sole combo di quel ``d`` — utile ma fissa una variabile per documento.
+
+    Con ``versions.chunk: N`` il raggruppamento ignora le variabili e taglia
+    il prodotto cartesiano piatto (ordine lessicografico di ``version_combos``)
+    in blocchi da N combinazioni consecutive: ogni documento attraversa cosi'
+    entrambe le variabili, invece di sentirne muovere una sola per file.
 
     Ogni documento e' **ribasato a zero** (si sottrae l'onset minimo del
     gruppo), cosi' apre da solo senza silenzio iniziale; le posizioni
