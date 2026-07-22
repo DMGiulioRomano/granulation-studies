@@ -1,24 +1,33 @@
 # gl-ls
-# Studio 01 (stack) — grani 1-50 samples, ascolto verticale a 7 punti di lettura.
+# Studio 01 (stack) — grani 1-50 samples, ascolto verticale a 6 punti di lettura.
 #
-# Sette stream identici salvo `pointer.start` (i 7 cugini dello spread gia' in
-# uso in grain_1-50smp) suonano INSIEME. All'inizio density e grain.duration
-# sono uguali per tutti: l'unica differenza fra gli stream e' il punto in cui
-# il puntatore legge il sample.
+# Sei stream identici salvo `pointer.start` (i cugini dello spread gia' in uso
+# in 1-50smp) suonano INSIEME. L'unica differenza strutturale fra loro e' il
+# punto in cui il puntatore legge il sample; density e grana partono uguali e
+# si separano solo per lo scarto che lo spread inietta a ogni cugino.
 #
-# Il blocco `versions:` muove poi i due parametri: ogni combinazione (d, g)
-# replica i 7 cugini piu' avanti nella timeline, cosi' si ascolta in sequenza
-# come cambia l'impasto verticale al variare di density e grana.
+# Il blocco `versions:` muove poi i due parametri: ogni combinazione (g, d)
+# replica i cugini piu' avanti nella timeline, cosi' si ascolta in sequenza
+# come cambia l'impasto verticale al variare di grana e density.
+#
+# Il documento e' scritto su TRE LIVELLI, cosi' da restare leggibile quando i
+# gruppi diventeranno piu' d'uno:
+#
+#   1. `axes:` top-level   — i default comuni a tutto il documento
+#   2. `axes:`/`stack:` dentro la entry `cugini` — la forma DI QUEL gruppo
+#   3. `spread.over`       — la differenziazione fra le voci del gruppo
+#
+# Un secondo gruppo si aggiunge come entry sorella di `cugini`, con il proprio
+# `axes:`/`stack:`: non tocca ne' il padre ne' i cugini.
 
 study_id: study01_stack_1-50smp
-title: "Studio 01 (stack) — grani 1-50 samples, 7 punti di lettura"
+title: "Studio 01 (stack) — grani 1-50 samples, 6 punti di lettura"
 seed: 1988
 duration: 50
 samples_dir: samples
 
-# I 7 cugini leggono punti diversi del buffer, che ha punti forti e punti
-# deboli: fra il piu' forte (0.25) e il piu' debole (0.8, quasi silenzio) ci
-# sono ~33 dB, e sotto quella distanza gli altri spariscono.
+# I cugini leggono punti diversi del buffer, che ha punti forti e punti deboli,
+# e sotto una certa distanza quelli deboli spariscono.
 #
 # `alpha` = quanta parte della distanza si chiude. A 1 il sample perde la sua
 # topografia: ogni punto di lettura suona uguale. A 0.7 resta udibile che un
@@ -26,86 +35,48 @@ samples_dir: samples
 #
 # `max_shift` = tetto in dB alla correzione del singolo cugino. Conta perche'
 # la compensazione porta tutti verso il piu' DEBOLE (si attenua, non si alza):
-# con 7 punti e max_shift 24 il punto a 0.8 s trascina giu' il materiale forte
-# di ~46 dB. Con 12 il calo si ferma a 30, con 6 a 18 — e il punto morto smette
-# di dettare legge al pezzo.
+# un punto quasi muto trascinerebbe giu' tutto il materiale forte. Il punto a
+# 0.8 s — il piu' debole, ~33 dB sotto il piu' forte — e' stato tolto dallo
+# spread; il tetto a 12 dB tiene comunque il calo entro un valore udibile.
 gain_compensation:
   alpha: 0.7
   max_shift: 12
 
+# Parametri fissi: tutto cio' che non e' un asse.
 base:
   onset: 0
   sample: silenzi.wav
   time_mode: normalized
-  volume: +10 #-12                 # 7 stream sommati: headroom
+  volume: +10 #-12                 # 6 stream sommati: headroom
   grain:
     envelope: hanning
     duration_unit: samples
   pointer:
     loop_unit: absolute
     speed_ratio: 0
-  
-# Density e grana non sono piu' costanti dentro la versione: le variabili
-# `d`/`g` iniettate da `versions:` diventano il *centro* di una banda che il
-# valore percorre a passo d'ubriaco (`drift`). I default nel `let` tengono lo
-# studio valido anche senza il blocco (make stack).
-#
-# Banda: base = centro * 0.7, range = centro * 0.6 -> [0.7c, 1.3c], cioe' +-30%
-# intorno al valore della versione. Proporzionale e non assoluta: a g=1 campione
-# la banda resta stretta, a g=50 si allarga da sola.
-#
-# `drift` = passo d'ubriaco: senza, ogni breakpoint e' un pescaggio indipendente
-# nella banda (salti, rumore bianco); con drift il primo valore si pesca, poi
-# ogni successivo e' `precedente +- passo`, dove il passo vale `step` * la
-# larghezza della banda corrente. Quindi step: 0.12 = ogni breakpoint si sposta
-# al massimo del 12% della banda rispetto al precedente: il valore *cammina*
-# invece di saltare. Sul bordo banda riflette (non si incolla).
-# Niente `n` negli assi: qui il conteggio lo possiede la camminata-X (blocco
-# `stack:` sotto), e i valori Y si pescano ai tempi reali che la X genera.
+
+# --- Livello 1: il padre ----------------------------------------------------
+# Solo i valori a riposo, comuni a ogni gruppo. La forma vive nei gruppi, non
+# qui: un `n` dichiarato a questo livello collide con la camminata-X di un
+# gruppo (il conteggio ha un solo proprietario), quindi il padre resta magro.
 axes:
   density:
     baseline: 10
-    base:
-      range: 1 
-      n: 5
-      drift: {step: 0.2}
-    range: {expr: "d * 0.6", let: {d: 25}}
-    drift: {step: 0.12}
   grain.duration:
     baseline: 25
-    base: {expr: "g", let: {g: 25}}
-    range: {n: 6, base: {expr: ".3 * g", let: {g: 3}}, range: [0, 5]}
-    interpolation: step
-    drift: {step: 0.32}
-  distribution:
-    base: 0
-    range: .5
-    drift:
-      step:
-        base: 0
-        n: 8
-        range: .2
-# La camminata-X: quanti breakpoint al secondo genera ogni asse (banda in Hz,
-# anch'essa a passo d'ubriaco, cosi' nemmeno il ritmo dei cambi e' periodico).
-# Density lenta (strutturale, ~1 valore ogni 0.5-2 s), grana veloce (4-10 al
-# secondo): i due assi si muovono su scale temporali diverse invece di
-# pulsare insieme.
-stack:
-  density:
-    base: 0.5
-    range: 1.5
-    drift: {step: 0.15}
-  grain.duration:
-    base: .1
-    range: .1
-    drift: {step: 0.15}
-  distribution:
-    base: .3
-    range: .1
-    drift: {step: .1}
 
-# I 7 punti di lettura del sample (secondi assoluti), indice -> secondi:
-#   1=0.1  2=0.25  3=0.4  4=0.55  5=0.8  6=0.915  7=1.1
+# Il processo stack si attiva per PRESENZA di questo blocco al top-level, anche
+# vuoto: e' il marcatore che dice "questo documento e' un ascolto verticale"
+# (e che `versions:` richiede). La camminata-X vera vive nel `stack:` di ogni
+# gruppo; qui non va nulla, cosi' nessun gruppo eredita un respiro non suo.
+stack: {}
+
+# I punti di lettura del sample (secondi assoluti). Sono 6: il punto a 0.8 s,
+# quasi silenzio, e' stato tolto perche' dettava legge alla compensazione di
+# guadagno. `n` dello spread viene da qui (lunghezza di `values`).
+# Il blocco e' top-level: e' il default che ogni entry con la chiave `spread`
+# eredita, cosi' un secondo gruppo ottiene gli stessi punti di lettura senza
+# riscriverli.
 spread:
   over:
     base.pointer.start:
@@ -114,11 +85,84 @@ spread:
       expr: "(1 - 2 * (i % 2))* (i*27)"
 
 streams:
-  # Unico stream logico: lo spread lo moltiplica per 7. Nessun sweep — questo
-  # documento vive solo nello stack (ascolto verticale).
+  # Unico gruppo del documento. Nessun sweep: questo studio vive solo nello
+  # stack (ascolto verticale).
   cugini:
+
+    # --- Livello 2: la forma di QUESTO gruppo -------------------------------
+    # Density e grana non sono costanti dentro la versione: le variabili `d`/`g`
+    # iniettate da `versions:` sono il *centro* di una banda che il valore
+    # percorre a passo d'ubriaco (`drift`). I default nei `let` tengono lo
+    # studio valido anche senza il blocco `versions:` (make stack).
+    #
+    # `drift` = passo d'ubriaco: senza, ogni breakpoint e' un pescaggio
+    # indipendente nella banda (salti, rumore bianco); con drift il primo
+    # valore si pesca, poi ogni successivo e' `precedente +- passo`, dove il
+    # passo vale `step` * la larghezza della banda corrente. Quindi
+    # step: 0.12 = ogni breakpoint si sposta al massimo del 12% della banda
+    # rispetto al precedente: il valore *cammina* invece di saltare. Sul bordo
+    # banda riflette (non si incolla).
+    #
+    # Niente `n` negli assi: qui il conteggio lo possiede la camminata-X
+    # (blocco `stack:` sotto), e i valori Y si pescano ai tempi reali che la X
+    # genera.
+    axes:
+      density:
+        # Il pavimento della banda e' a sua volta generato: 5 quote pescate in
+        # una banda larga 1, che cammina. Il suo `base` — cioe' il livello
+        # attorno a cui quelle 5 quote stanno — lo inietta lo spread, un valore
+        # per cugino (livello 3).
+        base:
+          range: 1
+          n: 5
+          drift: {step: 0.2}
+        range: {expr: "d * 0.6", let: {d: 25}}
+        drift: {step: 0.12}
+      grain.duration:
+        # `base` qui e' solo il fallback per uno stream non generato dallo
+        # spread: i cugini lo sovrascrivono tutti (livello 3).
+        base: {expr: "g", let: {g: 25}}
+        range: {n: 6, base: {expr: ".3 * g", let: {g: 3}}, range: [0, 5]}
+        interpolation: step
+        drift: {step: 0.32}
+      distribution:
+        base: 0
+        range: .5
+        drift:
+          step:
+            base: 0
+            n: 8
+            range: .2
+
+    # La camminata-X del gruppo: quanti breakpoint al secondo genera ogni asse
+    # (banda in Hz, anch'essa a passo d'ubriaco, cosi' nemmeno il ritmo dei
+    # cambi e' periodico). Density lenta (strutturale, ~1 valore ogni 0.5-2 s),
+    # grana veloce: i due assi si muovono su scale temporali diverse invece di
+    # pulsare insieme.
+    stack:
+      density:
+        base: 0.5
+        range: 1.5
+        drift: {step: 0.15}
+      grain.duration:
+        base: .1
+        range: .1
+        drift: {step: 0.15}
+      distribution:
+        base: .3
+        range: .1
+        drift: {step: .1}
+
+    # --- Livello 3: la differenziazione fra i cugini ------------------------
+    # Lo spread scrive un valore per cugino sui path qui sotto; `i` e' l'indice
+    # 0-based del cugino. `i/(10-i)` apre progressivamente lo scarto fra le
+    # voci: quasi nullo sui primi, marcato sugli ultimi.
     spread:
       over:
+        # Livello attorno a cui pesca il pavimento della banda density: un
+        # pescaggio random per cugino (banda-let `env`) piu' lo scarto d'indice.
+        # NB: `env` e' uno SCALARE per stream, non un envelope — la banda-let
+        # dello spread pesca un valore per voce, non una forma nel tempo.
         axes.density.base.base:
           expr: "env + i/(10-i)"
           let:
@@ -128,15 +172,19 @@ streams:
                 let: {d: 25}
               range: 1.5
               drift: {step: .15}
+        # La grana di partenza del cugino, quantizzata al campione.
         axes.grain.duration.base:
           expr: "floor(g + i/(10-i))"
           let:
             g: 4
+        # Ogni cugino ha un respiro-X della grana leggermente piu' largo del
+        # precedente: le voci non cambiano grana tutte insieme.
         stack.grain.duration.range:
           expr: "i * .1"
 
-# Prima variabile = esterna/lenta (density), seconda = interna/veloce (grana).
-# 3 x 3 = 9 versioni concatenate, 30s ciascuna.
+# Prima variabile = esterna/lenta (grana), seconda = interna/veloce (density).
+# 8 x 7 = 56 versioni concatenate, 50 s ciascuna, distribuite su 8 documenti
+# (uno per valore di `g`, 7 versioni ciascuno).
 versions:
   g: {ramp: {start: 4, stop: 50, step: 6}}
   d: {ramp: {start: 0, stop: 20, step: 3}}
