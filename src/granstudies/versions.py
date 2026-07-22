@@ -65,32 +65,11 @@ _CHUNK_KEY = "chunk"
 _RESERVED_KEYS = _TIMELINE_KEYS + (_CHUNK_KEY,)
 
 
-def _expr_names(text: Any) -> frozenset:
-    """I nomi referenziati da un'espressione (vuoto se non parsabile: gli
-    errori di sintassi emergono alla valutazione, con il loro contesto)."""
-    if not isinstance(text, str):
-        return frozenset()
-    try:
-        tree = ast.parse(text, mode="eval")
-    except SyntaxError:
-        return frozenset()
-    return frozenset(
-        node.id for node in ast.walk(tree) if isinstance(node, ast.Name)
-    )
-
-
-def _referenced_names(node: Any) -> set:
-    """Tutti i nomi referenziati dai nodi-expr di una struttura (ricorsivo)."""
-    names: set = set()
-    if is_expr_node(node):
-        names |= _expr_names(node.get("expr"))
-    if isinstance(node, dict):
-        for v in node.values():
-            names |= _referenced_names(v)
-    elif isinstance(node, list):
-        for v in node:
-            names |= _referenced_names(v)
-    return names
+# Gli helper d'iniezione vivono in ``inject`` (modulo neutro condiviso con
+# document_let e spread); qui restano con gli alias storici.
+from .inject import expr_names as _expr_names  # noqa: E402
+from .inject import inject as _inject  # noqa: E402
+from .inject import referenced_names as _referenced_names  # noqa: E402
 
 
 def parse_versions(
@@ -320,24 +299,6 @@ def inject_combo(data: Dict[str, Any], combo: Dict[str, Any]) -> Dict[str, Any]:
     out = copy.deepcopy(data)
     _inject(out, combo)
     return out
-
-
-def _inject(node: Any, combo: Dict[str, Any]) -> None:
-    if is_expr_node(node):
-        names = _expr_names(node.get("expr"))
-        relevant = {k: v for k, v in combo.items() if k in names}
-        if relevant:
-            let = node.get("let")
-            if not isinstance(let, dict):
-                let = {}
-                node["let"] = let
-            let.update(relevant)
-    if isinstance(node, dict):
-        for v in node.values():
-            _inject(v, combo)
-    elif isinstance(node, list):
-        for v in node:
-            _inject(v, combo)
 
 
 def _build_versions(

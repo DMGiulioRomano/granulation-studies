@@ -22,7 +22,9 @@ from typing import Any, Dict
 
 from .errors import ErrCtx
 from .expr import eval_expr, is_expr_node
-from .versions import _expr_names, _inject, _referenced_names
+from .inject import expr_names as _expr_names
+from .inject import inject as _inject
+from .inject import referenced_names as _referenced_names
 from .yaml_loc import Locations
 
 
