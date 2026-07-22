@@ -280,16 +280,31 @@ def parse_version_timeline(
     return out["onset"], out["duration"]
 
 
-def version_combos(vars: Dict[str, List[Any]]) -> List[Dict[str, Any]]:
-    """Prodotto cartesiano lessicografico delle variabili.
+def version_combos(
+    vars: Dict[str, List[Any]], *, interleaved: bool = False
+) -> List[Dict[str, Any]]:
+    """Prodotto cartesiano delle variabili.
 
-    L'ordine di dichiarazione conta: la prima variabile e' esterna (lenta),
-    l'ultima interna (veloce) — come gli ``orderings`` dello sweep.
+    Di default lessicografico: l'ordine di dichiarazione conta, la prima
+    variabile e' esterna (lenta), l'ultima interna (veloce) — come gli
+    ``orderings`` dello sweep. Con ``interleaved=True`` (attivato da
+    ``versions.chunk``, v. ``_build_versions``) nessuna variabile resta
+    ferma per un intero giro delle altre: le combinazioni sono ordinate per
+    somma degli indici crescente (traversata diagonale della griglia), cosi'
+    un ``chunk`` attraversa sempre entrambi gli assi invece di scorrere solo
+    quella interna a variabile esterna fissa.
     """
     names = list(vars)
+    if not interleaved:
+        return [
+            dict(zip(names, picked))
+            for picked in itertools.product(*(vars[n] for n in names))
+        ]
+    ranges = [range(len(vars[n])) for n in names]
+    idx_combos = sorted(itertools.product(*ranges), key=lambda idxs: (sum(idxs), idxs))
     return [
-        dict(zip(names, picked))
-        for picked in itertools.product(*(vars[n] for n in names))
+        dict(zip(names, (vars[n][i] for n, i in zip(names, idxs))))
+        for idxs in idx_combos
     ]
 
 
@@ -362,8 +377,17 @@ def _build_versions(
             key=("versions",),
             hint="aggiungi 'stack: {}' (anche vuoto) al documento.",
         )
+    raw_versions = data.get("versions") or {}
+    chunk = raw_versions.get(_CHUNK_KEY)
+    if chunk is not None and (
+        not isinstance(chunk, int) or isinstance(chunk, bool) or chunk < 1
+    ):
+        raise ctx.err(
+            f"versions: 'chunk' deve essere un intero >= 1, trovato {chunk!r}.",
+            key=("versions", "chunk"),
+        )
     vars = parse_versions(data, locs=locs)
-    combos = version_combos(vars)
+    combos = version_combos(vars, interleaved=chunk is not None)
     onsets, durations = parse_version_timeline(data, len(combos), locs=locs)
     if onsets is None:
         # Concatenazione: servono le durate di versione per posizionare.
@@ -387,14 +411,7 @@ def _build_versions(
             acc += d
     base_data = {k: v for k, v in data.items() if k != "versions"}
 
-    chunk = data.get("versions", {}).get(_CHUNK_KEY)
     if chunk is not None:
-        if not isinstance(chunk, int) or isinstance(chunk, bool) or chunk < 1:
-            raise ctx.err(
-                f"versions: 'chunk' deve essere un intero >= 1, trovato "
-                f"{chunk!r}.",
-                key=("versions", "chunk"),
-            )
         n_groups = -(-len(combos) // chunk)  # ceil
         pad = len(str(n_groups - 1))
     outer = next(iter(vars))  # prima variabile = esterna/lenta: il gruppo di default
