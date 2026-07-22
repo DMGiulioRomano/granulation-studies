@@ -45,6 +45,11 @@ help:
 	@echo "  make sv STUDY=...            CSV envelope per Sonic Visualiser"
 	@echo "  make all-study STUDY=...    pipeline completa (sweep→stack→render)"
 	@echo "  make clean / clean-all      pulizia output / output+venv"
+	@echo "  make kill-sonic             chiude tutte le istanze di Sonic Visualiser (senza salvare)"
+
+.PHONY: kill-sonic
+kill-sonic:
+	@pkill -x "Sonic Visualiser" 2>/dev/null && echo "Sonic Visualiser chiuso." || echo "Nessuna istanza di Sonic Visualiser in esecuzione."
 
 .PHONY: _require-study
 _require-study:
