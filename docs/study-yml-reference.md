@@ -12,6 +12,11 @@ duration: 30                      # durata di default (s) degli stream: ogni str
                                   #   propria o ereditata da qui.
 samples_dir: samples              # path relativo alla root del repo (default: samples/)
 
+let:                              # opzionale — manopole di documento: nomi condivisi,
+  g0: 4                           #   dichiarati una volta e letti per nome da piu' expr.
+  d0: 25                          #   Iniettate al load; versions/percorso le ombreggiano.
+                                  #   Vedi la sezione "Manopole: i blocchi let:" sotto.
+
 gain_compensation:                # opzionale — pareggia il mascheramento fra stream che
   alpha: 0.7                      #   leggono punti diversi dello stesso buffer.
   max_shift: 24                   #   Assente = nessuna compensazione (vedi sotto).
@@ -494,6 +499,75 @@ axes:
 
 Design completo: `docs/plans/expr-env-arithmetic.md`.
 
+## Manopole: i blocchi `let:`
+
+Una **manopola** è un nome dichiarato una volta e letto da più espressioni per
+nome. Serve ad **accoppiare** parametri e gruppi: dici un valore (o una forma)
+una volta, e più formule lo riferiscono, ognuna con la propria aritmetica. È il
+`let` dei nodi-expr un livello sopra — nomi in scope, ma condivisi. Tre livelli,
+per i tre livelli del pattern compositivo:
+
+```yaml
+let:                                  # 1. documento: default comuni
+  g0: 4
+  d0: 25
+
+streams:
+  cugini:
+    let:                              # 2. gruppo: la forma DI QUESTO gruppo
+      respiro: {base: {expr: "d0"}, range: 1, n: 5, drift: {step: 0.2}}
+    spread:
+      n: 6
+      let:                            # 3. voce: cosa distingue le voci
+        livello: {expr: "i * 0.8"}
+      over:
+        base.pointer.start: {values: [0.12, 0.25, 0.4, 0.55, 0.93, 1.1]}
+    axes:
+      density:
+        base:  {expr: "respiro + livello"}   # forma comune + offset per voce
+        range: {expr: "d0 * 0.6"}
+```
+
+- **Iniezione per nome.** Al load (documento) e prima dell'espansione (gruppo,
+  voce), il valore risolto viene iniettato nel `let` di **ogni** nodo-expr che
+  ne nomina la chiave — la stessa meccanica di `versions`. Un `let` locale che
+  non nomina la manopola resta intatto.
+- **`let:` di documento** (top-level). Valori: scalare, envelope disegnato
+  (`[[t, v], ...]`), banda/`ramp`/`values` (pescati/generati in envelope **una
+  volta**, con seed `stable_seed("<study>:let:<nome>")`), o nodo-expr derivato
+  che referenzia altre manopole (risolto al load). Iniettato **prima** di ogni
+  processo: è il **riposo**, che `versions:`/`percorso:` poi **ombreggiano**
+  (iniettano dopo e vincono — stessa manopola, riposo e movimento). Attivo
+  anche in `make stack`.
+- **`let:` di gruppo** (dentro una entry di `streams:`). Nomi locali al gruppo,
+  risolti una volta per gruppo (seed `stable_seed("<entry>:let:<nome>")`) e
+  iniettati nelle espressioni dell'entry — axes e blocco `spread` — **prima**
+  dell'espansione, così tutte le voci del gruppo condividono il valore. È la
+  traiettoria comune (`respiro`), disegnata o pescata. Due gruppi diversi con
+  lo stesso nome sono indipendenti (come i loro `axes:`).
+- **`spread.let`** (dentro `spread:`, accanto a `n`/`over`). Manopole di
+  **voce**: un valore per stream generato, iniettato per nome. Due forme, come
+  le strategy: `expr` con `i`/`n` (deterministico per voce) o **banda** (un
+  pescaggio per voce). `values`/`ramp` sono rifiutati (possiederebbero un
+  conteggio ridondante con `over`: `n` resta di `over`/`spread.n`). Vedi «Il
+  blocco `spread:`».
+- **Aritmetica inviluppo⊕scalare.** Una manopola-envelope combinata con uno
+  scalare nell'espressione (`respiro + livello`, `respiro * k`) agisce sulle y,
+  i tempi restano — è l'aritmetica su Env del nodo-expr. Così la forma comune
+  vive in una manopola e l'offset/scala per voce in un'altra, e l'asse le
+  combina in una riga leggibile: **niente `base` annidato per avere uno slot
+  scrivibile**.
+- **Ombreggiare fra livelli è errore.** Un `let:` non può ridichiarare un nome
+  già in scope in un livello superiore della propria linea: documento è antenato
+  di ogni gruppo e di ogni `spread.let`; il gruppo è antenato del proprio
+  `spread.let`. Due gruppi (o due `spread.let` di gruppi diversi) sono fratelli:
+  lo stesso nome **non** collide. La regola cancella ogni domanda di precedenza —
+  un valore diverso vuole un **nome** diverso. La guardia gira al load.
+- **Non referenziata è errore.** Una manopola che nessuna espressione nomina è
+  un refuso (stessa regola di `versions:`).
+- **Additivo/opt-in.** Senza blocco `let:`, nessun cambiamento: i documenti
+  generati sono identici.
+
 ## Il blocco `gain_compensation:`
 
 ```yaml
@@ -638,14 +712,53 @@ versions:
   duration: {base: 15, range: 10}           # riservata: 6 durate in [15, 25]
 ```
 
-- Ogni chiave è un **nome di variabile** (identificatore libero; `i`, `n`,
-  `pi`, `e` sono riservati agli scope expr e vengono rifiutati). Il valore è
-  un generatore del vocabolario Y: `values`, `ramp`, o banda — qui la banda
-  richiede **`n`** (non c'è una camminata-X a possedere il conteggio); senza
-  `seed` deriva `stable_seed("<study>:versions:<nome>")`.
-- Più variabili → **prodotto cartesiano lessicografico** nell'ordine di
+- Ogni chiave è un **asse ortogonale** (identificatore libero; `i`, `n`,
+  `pi`, `e` sono riservati agli scope expr e vengono rifiutati). La forma più
+  semplice — valore un generatore Y (`values`/`ramp`/banda con **`n`**) — è un
+  asse a **una manopola omonima**: la forma piatta storica, retro-compatibile.
+  Un asse può però reggere più manopole (vedi Forma 1/2 sotto).
+- Più assi → **prodotto cartesiano lessicografico** nell'ordine di
   dichiarazione (come gli `orderings` dello sweep): con l'esempio sopra le
   versioni sono (50,1) (50,2) (50,3) (100,1) (100,2) (100,3).
+
+**Forma 1 — manopole parallele (co-varianti).** Un asse il cui valore è un dict
+di manopole, ognuna una **sequenza** (`values`/`ramp`/banda con `n`/lista): le
+manopole scorrono **insieme per indice**. La lunghezza dell'asse è la sequenza
+**più lunga**; le più corte **tengono l'ultimo valore**.
+
+```yaml
+versions:
+  grana:                      # un asse, due manopole che co-variano
+    g0:  {ramp: {start: 4, stop: 50, step: 6}}   # 8 valori
+    apr: [0, 2, 5]                                # 3 → tiene 5 dalla 4a all'8a
+```
+
+**Forma 2 — stati nominati.** Un asse il cui valore è un dict di **stati**,
+ognuno un **bundle** di manopole. I valori di un bundle possono essere
+**envelope** (prodotti da qualunque generatore: `ramp`, banda, breakpoint
+espliciti — come una manopola di gruppo). La lunghezza dell'asse è il numero di
+stati; un bundle **parziale** lascia le manopole non nominate al **riposo di
+`let:`**.
+
+```yaml
+versions:
+  densita:                    # un asse, due stati alternativi
+    estrema: {d0: 500, respiro: {ramp: {start: 20, stop: 60, step: 5}}}  # respiro = envelope
+    minima:  {d0: 2}                              # bundle parziale
+# grana × densita = 8 × 2 = 16 versioni
+```
+
+- **Lo stesso generatore ha due significati per posizione.** `{ramp: ...}` come
+  figlio diretto dell'asse (Forma 1) è una **sequenza di versioni**; dentro uno
+  stato (Forma 2) è un **envelope** (una forma nel tempo, in una versione sola).
+  Si distinguono dalla posizione, non dalla forma del valore.
+- **Discriminatore.** Un asse è Forma 1 se **tutte** le entry sono sequenze
+  (generatore/lista), Forma 2 se **tutte** sono bundle (dict non-generatore).
+  Mescolarle in un asse è errore; separale in due assi. Le etichette nello
+  `stream_id`: `grana=<indice>` (Forma 1), `densita=<stato>` (Forma 2),
+  `d=<valore>` (asse a manopola singola).
+- Le manopole mosse sono le stesse di `let:`: un asse le **ombreggia** (riposo →
+  movimento d'analisi). `versions:` resta solo analisi: `make stack` non lo vede.
 - Per ogni combinazione i valori vengono **iniettati negli scope `let`** dei
   nodi-expr che *nominano* la variabile, ombreggiando il default dichiarato
   (`let: {d: 0}`). Il default tiene lo studio valido anche senza il blocco;
@@ -948,6 +1061,37 @@ spread:
         env: [[0, 1], [0.1583, 1.5]]
         g: {base: 40, range: 20, seed: 42}   # stessa sagoma, livello random
 ```
+
+**`spread.let` — manopole di voce.** Accanto a `n`/`over`, la chiave `let`
+dichiara nomi il cui valore vale **per voce**, iniettati per nome negli scope
+`let` dei nodi-expr del generato — non scritti su un path, come fa `over`. Due
+forme, stesso vocabolario delle strategy: `expr` con `i`/`n` (deterministico
+per voce) e **banda** (un pescaggio per voce). `values`/`ramp` sono rifiutati:
+possiederebbero un conteggio ridondante con `over` (il conteggio resta di
+`over`/`spread.n`).
+
+```yaml
+spread:
+  n: 6
+  let:
+    livello: {expr: "i * 0.8"}                    # deterministico per voce
+    env:     {base: {expr: "d0"}, range: 1.5}     # un pescaggio per voce
+  over:
+    base.pointer.start: {values: [0.12, 0.25, 0.4, 0.55, 0.93, 1.1]}
+axes:
+  density:
+    base: {expr: "respiro + livello"}   # il gruppo LEGGE il nome della voce
+  grain.duration:
+    base: {expr: "env * 0.1"}           # stesso pescaggio, letto da un altro asse
+```
+
+`over` resta per le **destinazioni uniche** (un valore su un path) e i valori
+**non numerici** (`sample`, `envelope`); `spread.let` per quando il valore ha
+**più di un lettore** — un pescaggio condiviso da due parametri si scrive una
+volta in `spread.let` e si legge per nome da due assi (dove prima serviva la
+stessa banda-let copiata su due path con lo stesso `seed`). Il nome di una
+manopola di voce non può ombreggiare una manopola di gruppo o di documento
+(vedi «Manopole: i blocchi `let:`»).
 
 **Ordine del merge** (il più specifico vince): override comune dell'entry →
 valore della strategy → patch esplicita. Una entry esplicita omonima di un
