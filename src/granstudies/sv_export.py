@@ -136,6 +136,49 @@ def _stream_envelopes(stream: Any,
     return found
 
 
+def _merge_by_param(envelopes: List[Tuple[str, List, str, float, float]],
+                    group: str = "") -> List[Tuple[str, List, str, float, float]]:
+    """Un layer per parametro invece che per stream, dentro uno stesso pane.
+
+    Gli stream che finiscono nello stesso pane (le versioni di una voce, i
+    cugini accorpati) sono **consecutivi nel tempo**: i loro envelope dello
+    stesso parametro non si sovrappongono, quindi diventano un'unica polilinea
+    invece di N layer sovrapposti (uno per versione) tutti sullo stesso asse Y.
+
+    I punti tornano con tempi gia' assoluti in secondi, percio' onset/durata
+    dell'envelope risultante sono ``0.0``/``1.0``. Se le versioni hanno
+    interpolazioni diverse (o portano gia' un type per-punto), il type va nella
+    label di ogni punto e il layer passa a PlotPerBreakpoint.
+    """
+    groups: "dict[str, List[Tuple[List, str, float, float]]]" = {}
+    for path, points, env_type, onset, duration in envelopes:
+        param = path.rsplit("/", 1)[-1]
+        groups.setdefault(param, []).append((points, env_type, onset, duration))
+
+    out: List[Tuple[str, List, str, float, float]] = []
+    for param, items in groups.items():
+        types = {env_type for _pts, env_type, _o, _d in items}
+        # Type per-punto solo se serve: quando le versioni fuse hanno
+        # interpolazioni diverse, il type del layer non basta piu' e va scritto
+        # nella label di ogni punto. Le label gia' presenti restano intatte.
+        mixed = len(types) > 1
+        merged: List = []
+        for points, env_type, onset, duration in items:
+            for point in points:
+                t_norm, value, label = _split_point(point)
+                t_abs = onset + t_norm * duration
+                if mixed:
+                    merged.append([t_abs, value, label or env_type])
+                elif len(point) == 3:
+                    merged.append([t_abs, value, label])
+                else:
+                    merged.append([t_abs, value])
+        merged.sort(key=lambda p: p[0])
+        name = f"{group}/{param}" if group and group != param else param
+        out.append((name, merged, types.pop() if len(types) == 1 else "linear", 0.0, 1.0))
+    return out
+
+
 def _plateau_starts(envelopes: List[Tuple[str, List, str, float, float]]) -> List[float]:
     """Tempi normalizzati (ordinati, dedup) di inizio di ogni plateau.
 
@@ -207,35 +250,51 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
         "darkBackground": "true",
     })
 
-    # Modelli + dataset + layer per ogni envelope
+    # Raggruppamento per *voce* (vedi il commento al display piu' sotto): la
+    # parte del path prima di '/' tagliata al primo '__'. Dentro ogni gruppo gli
+    # envelope si fondono per parametro (un layer density, un layer
+    # grain.duration), invece di un layer per stream. Il raggruppamento e' qui e
+    # non piu' a valle perche' il merge deve avvenire prima di creare i modelli.
+    grouped: "dict[str, List[Tuple[str, List, str, float, float]]]" = {}
+    for env in envelopes:
+        key = env[0].split("/", 1)[0].split("__", 1)[0]
+        grouped.setdefault(key, []).append(env)
+    merged_groups = [_merge_by_param(envs, group=key) for key, envs in grouped.items()]
+
+    # Modelli + dataset + layer per ogni envelope (post-merge)
     layer_ids: List[Tuple[str, str, str]] = []  # (layer_id, model_id, path)
     next_id = 4
     param_colours: dict = {}
-    for i, (path, points, env_type, onset, own_duration) in enumerate(envelopes):
-        model_id = str(next_id);    next_id += 1
-        dataset_id = str(next_id);  next_id += 1
-        layer_id = str(next_id);    next_id += 1
+    layers_by_group: List[List[Tuple[str, str, str]]] = []
+    for group in merged_groups:
+        group_layers: List[Tuple[str, str, str]] = []
+        for path, points, env_type, onset, own_duration in group:
+            model_id = str(next_id);    next_id += 1
+            dataset_id = str(next_id);  next_id += 1
+            layer_id = str(next_id);    next_id += 1
 
-        ET.SubElement(data, "model", {
-            "id": model_id, "name": path,
-            "sampleRate": str(sample_rate), "type": "sparse",
-            "dimensions": "2", "resolution": "1",
-            "notifyOnAdd": "true", "dataset": dataset_id,
-        })
-        ds = ET.SubElement(data, "dataset", {"id": dataset_id, "dimensions": "2"})
-        for point in points:
-            t_norm, value, label = _split_point(point)
-            frame = str(round((onset + t_norm * own_duration) * sample_rate))
-            ET.SubElement(ds, "point", {"frame": frame, "value": str(value), "label": label})
+            ET.SubElement(data, "model", {
+                "id": model_id, "name": path,
+                "sampleRate": str(sample_rate), "type": "sparse",
+                "dimensions": "2", "resolution": "1",
+                "notifyOnAdd": "true", "dataset": dataset_id,
+            })
+            ds = ET.SubElement(data, "dataset", {"id": dataset_id, "dimensions": "2"})
+            for point in points:
+                t_norm, value, label = _split_point(point)
+                frame = str(round((onset + t_norm * own_duration) * sample_rate))
+                ET.SubElement(ds, "point", {"frame": frame, "value": str(value), "label": label})
 
-        colour, colour_name = _param_colour(path, param_colours)
-        plot_style = _layer_plot_style(points, env_type)
-        ET.SubElement(data, "layer", {
-            "id": layer_id, "type": "timevalues", "name": path, "model": model_id,
-            "plotStyle": plot_style, "verticalScale": "0",
-            "colourName": colour_name, "colour": colour, "darkBackground": "true",
-        })
-        layer_ids.append((layer_id, model_id, path))
+            colour, colour_name = _param_colour(path, param_colours)
+            plot_style = _layer_plot_style(points, env_type)
+            ET.SubElement(data, "layer", {
+                "id": layer_id, "type": "timevalues", "name": path, "model": model_id,
+                "plotStyle": plot_style, "verticalScale": "0",
+                "colourName": colour_name, "colour": colour, "darkBackground": "true",
+            })
+            group_layers.append((layer_id, model_id, path))
+            layer_ids.append((layer_id, model_id, path))
+        layers_by_group.append(group_layers)
 
     # Layer marker: un time instant all'inizio di ogni plateau (confini degli
     # stati). Modello 1D sparse; etichetta = indice plateau (1-based). Viene
@@ -276,28 +335,17 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
     display = ET.SubElement(root, "display")
     ET.SubElement(display, "window", {"width": "1728", "height": "1057"})
 
-    # multi: un pane per *gruppo* di envelope. Il gruppo e' la voce logica: la
-    # parte del path prima di '/' (lo stream_id, presente solo negli export
-    # stack) tagliata al primo '__'. Cosi' gli assi di uno stesso stream stanno
-    # in un pane unico e le versioni di una stessa voce (cugini_1__d=3__g=4,
-    # cugini_1__d=6__g=4, ...) ci finiscono insieme invece di aprire un pane per
-    # combinazione — lo stesso criterio per nome-base gia' usato dal ramo stems
-    # (``stack_stems_to_sv``) e dal post-merge del render (``merge_stems_by_base``).
-    # Per lo sweep i path non hanno ne' '/' ne' '__': ogni envelope resta un
-    # gruppo a se', un pane per envelope, identico a prima.
-    #
-    # Raggruppamento per dict, non con itertools.groupby: gli stream di
-    # ``versions`` sono ordinati per combinazione (cugini_1..7, poi di nuovo
-    # cugini_1..7 per la combo successiva), quindi le occorrenze di una voce non
-    # sono consecutive e groupby — che raggruppa solo elementi adiacenti — ne
-    # farebbe un gruppo per ognuna, tornando a un pane per combinazione.
-    def _group_key(item: Tuple[str, str, str]) -> str:
-        return item[2].split("/", 1)[0].split("__", 1)[0]
-
-    grouped: "dict[str, List[Tuple[str, str, str]]]" = {}
-    for item in layer_ids:
-        grouped.setdefault(_group_key(item), []).append(item)
-    multi_groups = list(grouped.values())
+    # multi: un pane per *gruppo* di envelope (v. il raggruppamento sopra). Il
+    # gruppo e' la voce logica: la parte del path prima di '/' (lo stream_id,
+    # presente solo negli export stack) tagliata al primo '__'. Cosi' gli assi
+    # di uno stesso stream stanno in un pane unico e le versioni di una stessa
+    # voce (cugini_1__d=3__g=4, cugini_1__d=6__g=4, ...) ci finiscono insieme
+    # invece di aprire un pane per combinazione — lo stesso criterio per
+    # nome-base gia' usato dal ramo stems (``stack_stems_to_sv``) e dal
+    # post-merge del render (``merge_stems_by_base``). Per lo sweep i path non
+    # hanno ne' '/' ne' '__': ogni envelope resta un gruppo a se', un pane per
+    # envelope, identico a prima.
+    multi_groups = layers_by_group
 
     n_panes = 1 + (1 if layout == "single" else len(multi_groups))
     pane_height = str(max(150, 912 // n_panes))
@@ -538,7 +586,10 @@ def _build_sv_xml_stems(stems: List[Tuple[str, str, int, float, float, List[Tupl
             "model": wave_model_id, "visible": "true",
         })
 
-        for i, (name, points, env_type, env_onset, env_duration) in enumerate(envelopes):
+        # Un layer per parametro, non per stream: le versioni impilate sulla
+        # stessa voce sono consecutive nel tempo, quindi i loro envelope di
+        # density (idem grain.duration) sono una polilinea sola.
+        for name, points, env_type, env_onset, env_duration in _merge_by_param(envelopes, group=stream_id):
             env_model_id = str(next_id); next_id += 1
             env_dataset_id = str(next_id); next_id += 1
             env_layer_id = str(next_id); next_id += 1
