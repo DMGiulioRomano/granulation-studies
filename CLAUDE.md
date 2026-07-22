@@ -89,6 +89,13 @@ study_yml_commit: {hash}
 3. Corpo vuoto — lo scrive l'utente in prosa, in sezioni `## Sessione N — <tema>
    (sample: ...)` se la giornata ha più sessioni.
 
+### Rispondere a "dove eravamo"
+
+Quando l'utente chiede "dove eravamo" o simile: leggi `promemoria.md`
+(sezione "Da fare"), gli ultimi 2-3 log in `studies/ascolto/` e l'ultimo
+commit. Riporta cosa è stato fatto di recente, cosa è rimasto aperto
+(sessioni di log vuote o a una riga) e le voci non fatte del promemoria.
+
 ### Aggiornare index e riepilogo
 
 Quando l'utente lo chiede, leggi tutti i log `YYYY-MM-DD.md` e rigenera:
