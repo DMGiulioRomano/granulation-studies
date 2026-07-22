@@ -15,6 +15,7 @@ function study {
   # sweep: nessun documento multi-stream, un .sv per variante envelope.
   # Con STREAM, limita l'apertura alla sola sottocartella di quello stream.
   local f
+  setopt localoptions extendedglob
   if [[ -n "$stream" ]]; then
     # $stream puo' essere un cugino pieno (zona_ombra_d05_3) o il nome dello
     # spread (zona_ombra_d05): il glob apre tutte le cartelle-cugino 1..N.
@@ -22,7 +23,7 @@ function study {
       sonic "$f"
     done
   else
-    for f in generated/"$s"/sv/{stack,versions,percorso}/"$s"_*_stems.sv(N) \
+    for f in generated/"$s"/sv/{stack,versions,percorso}/"$s"_*~*_stems.sv(N) \
              generated/"$s"/sv/sweep/**/*.sv(N); do
       sonic "$f"
     done
