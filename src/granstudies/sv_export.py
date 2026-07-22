@@ -50,6 +50,17 @@ _COLOURS = [
     ("#ffff00", "Yellow"),
 ]
 
+def _param_colour(path: str, seen: dict) -> Tuple[str, str]:
+    """Colore stabile per tipo di parametro (density, grain.duration, ...),
+    non per indice di enumerazione: cosi' tutte le istanze di density in un
+    pane condividono colore, invece di riceverne uno diverso a testa.
+    """
+    param = path.rsplit("/", 1)[-1]
+    if param not in seen:
+        seen[param] = _COLOURS[len(seen) % len(_COLOURS)]
+    return seen[param]
+
+
 Layout = Literal["multi", "single"]
 
 
@@ -199,6 +210,7 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
     # Modelli + dataset + layer per ogni envelope
     layer_ids: List[Tuple[str, str, str]] = []  # (layer_id, model_id, path)
     next_id = 4
+    param_colours: dict = {}
     for i, (path, points, env_type, onset, own_duration) in enumerate(envelopes):
         model_id = str(next_id);    next_id += 1
         dataset_id = str(next_id);  next_id += 1
@@ -216,7 +228,7 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
             frame = str(round((onset + t_norm * own_duration) * sample_rate))
             ET.SubElement(ds, "point", {"frame": frame, "value": str(value), "label": label})
 
-        colour, colour_name = _COLOURS[i % len(_COLOURS)]
+        colour, colour_name = _param_colour(path, param_colours)
         plot_style = _layer_plot_style(points, env_type)
         ET.SubElement(data, "layer", {
             "id": layer_id, "type": "timevalues", "name": path, "model": model_id,
@@ -469,6 +481,7 @@ def _build_sv_xml_stems(stems: List[Tuple[str, str, int, float, float, List[Tupl
         })
 
     next_id = 0
+    param_colours: dict = {}
     for stream_index, (stream_id, audio_path, sr, onset, duration, envelopes) in enumerate(stems):
         wave_model_id = str(next_id); next_id += 1
         spec_layer_id = str(next_id); next_id += 1
@@ -542,7 +555,7 @@ def _build_sv_xml_stems(stems: List[Tuple[str, str, int, float, float, List[Tupl
                 frame = str(round((env_onset + t_norm * env_duration) * sr))
                 ET.SubElement(ds, "point", {"frame": frame, "value": str(value), "label": label})
 
-            colour, colour_name = _COLOURS[i % len(_COLOURS)]
+            colour, colour_name = _param_colour(name, param_colours)
             plot_style = _layer_plot_style(points, env_type)
             ET.SubElement(data, "layer", {
                 "id": env_layer_id, "type": "timevalues", "name": name,
@@ -552,6 +565,42 @@ def _build_sv_xml_stems(stems: List[Tuple[str, str, int, float, float, List[Tupl
             ET.SubElement(pane, "layer", {
                 "id": env_layer_id, "type": "timevalues", "name": name,
                 "model": env_model_id, "visible": "true",
+            })
+
+        # Marker "Version starts": un instant a ogni onset distinto tra gli
+        # envelope del pane, cioe' all'inizio di ogni versione impilata sulla
+        # stessa voce (issue segnalata dall'utente: nelle versions serve un
+        # riferimento visivo dove cambia la variante, non solo il colore).
+        version_onsets = sorted({env_onset for _n, _p, _t, env_onset, _d in envelopes})
+        if len(version_onsets) > 1:
+            marker_model_id = str(next_id); next_id += 1
+            marker_dataset_id = str(next_id); next_id += 1
+            marker_layer_id = str(next_id); next_id += 1
+
+            ET.SubElement(data, "model", {
+                "id": marker_model_id, "name": f"{stream_id} :: Version starts",
+                "sampleRate": str(sr), "type": "sparse",
+                "dimensions": "1", "resolution": "1",
+                "notifyOnAdd": "true", "dataset": marker_dataset_id,
+            })
+            ET.SubElement(data, "playparameters", {
+                "mute": "true", "pan": "0", "gain": "1",
+                "clipId": "", "model": marker_model_id,
+            })
+            mds = ET.SubElement(data, "dataset", {"id": marker_dataset_id, "dimensions": "1"})
+            for idx, v_onset in enumerate(version_onsets, start=1):
+                frame = str(round(v_onset * sr))
+                ET.SubElement(mds, "point", {"frame": frame, "label": str(idx)})
+            ET.SubElement(data, "layer", {
+                "id": marker_layer_id, "type": "timeinstants",
+                "name": f"{stream_id} :: Version starts",
+                "model": marker_model_id, "plotStyle": "0",
+                "colourName": "White", "colour": "#ffffff", "darkBackground": "true",
+            })
+            ET.SubElement(pane, "layer", {
+                "id": marker_layer_id, "type": "timeinstants",
+                "name": f"{stream_id} :: Version starts",
+                "model": marker_model_id, "visible": "true",
             })
 
     ET.SubElement(root, "selections")
