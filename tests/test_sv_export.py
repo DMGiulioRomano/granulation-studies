@@ -256,6 +256,35 @@ def test_multi_groups_envelopes_by_stream_prefix():
     assert names == [["a/density", "a/grain.duration"], ["b/density"]]
 
 
+def test_one_layer_per_param_across_versions():
+    # Piu' stream della stessa voce nello stesso pane: un layer per parametro
+    # (density, grain.duration), non uno per stream. Interpolazioni diverse tra
+    # le versioni -> il type finisce nella label e il layer passa a PlotPerBreakpoint.
+    envs = [
+        ("v__d=1/density", [[0.0, 5], [1.0, 10]], "linear", 0.0, 10.0),
+        ("v__d=1/grain.duration", [[0.0, 0.001], [1.0, 0.002]], "linear", 0.0, 10.0),
+        ("v__d=2/density", [[0.0, 20], [1.0, 40]], "step", 10.0, 10.0),
+        ("v__d=2/grain.duration", [[0.0, 0.003], [1.0, 0.004]], "linear", 10.0, 10.0),
+    ]
+    xml = _parse(_build_sv_xml("/x.wav", 1000, 20.0, envs, "multi", markers=False))
+    tv = [l for l in xml.findall("./data/layer") if l.get("type") == "timevalues"]
+    assert [l.get("name") for l in tv] == ["v/density", "v/grain.duration"]
+    env_panes = xml.findall("./display/view")[1:]
+    assert len(env_panes) == 1
+
+    sparse = {m.get("dataset"): m.get("name") for m in xml.findall("./data/model")
+              if m.get("type") == "sparse"}
+    frames = {sparse[ds.get("id")]: [int(p.get("frame")) for p in ds.findall("point")]
+              for ds in xml.findall("./data/dataset")}
+    assert frames["v/density"] == [0, 10000, 10000, 20000]
+    # density: linear + step mescolati -> label per punto, plotStyle 9
+    density_layer = [l for l in tv if l.get("name") == "v/density"][0]
+    assert density_layer.get("plotStyle") == "9"
+    # grain.duration: type unico -> resta il plotStyle del layer, label vuote
+    grain_layer = [l for l in tv if l.get("name") == "v/grain.duration"][0]
+    assert grain_layer.get("plotStyle") == "3"
+
+
 def test_stack_envelopes_carry_stream_onset_and_duration():
     # study_versions_test: 3 versioni concatenate, ognuna con la propria
     # durata (20s) e onset (0/20/40) diversi dalla durata totale dello
@@ -277,11 +306,11 @@ def test_stack_envelopes_carry_stream_onset_and_duration():
 
     xml = _parse(_build_sv_xml("/x.wav", 1000, 60.0, envs, "multi", markers=False))
     datasets = xml.findall("./data/dataset")
-    frames_first = [p.get("frame") for p in datasets[0].findall("point")]
-    frames_second = [p.get("frame") for p in datasets[1].findall("point")]
+    # le due versioni della stessa voce si fondono in un layer density unico
+    assert len(datasets) == 1
+    frames = [p.get("frame") for p in datasets[0].findall("point")]
     # t_norm=1.0: primo stream -> (0 + 1*20)*1000 = 20000; secondo -> (20 + 1*20)*1000 = 40000
-    assert frames_first == ["0", "20000"]
-    assert frames_second == ["20000", "40000"]
+    assert frames == ["0", "20000", "20000", "40000"]
 
 
 def test_multi_without_prefix_is_one_pane_per_envelope():
@@ -456,10 +485,10 @@ def test_stack_stems_to_sv_merged_versions_one_pane_per_base(tmp_path):
     for ds in xml.findall("./data/dataset"):
         name = sparse.get(ds.get("id"), "")
         frames_by_name[name] = [int(p.get("frame")) for p in ds.findall("point")]
-    assert frames_by_name["fermo__d=1/density"] == [0, 2000]
-    assert frames_by_name["fermo__d=2/density"] == [2000, 4000]
-    assert frames_by_name["mobile__d=1/density"] == [0, 2000]
-    assert frames_by_name["mobile__d=2/density"] == [2000, 4000]
+    # un solo layer density per voce: le due versioni, consecutive nel tempo,
+    # sono una polilinea sola invece di due layer sovrapposti
+    assert frames_by_name["fermo/density"] == [0, 2000, 2000, 4000]
+    assert frames_by_name["mobile/density"] == [0, 2000, 2000, 4000]
 
 
 def test_stack_stems_to_sv_merged_group_missing_file_aborts(tmp_path):
