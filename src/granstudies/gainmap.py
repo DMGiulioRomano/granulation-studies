@@ -73,6 +73,16 @@ def parse_config(data: Mapping[str, Any]) -> Optional[Dict[str, float]]:
             f"gain_compensation: chiavi sconosciute {sorted(unknown)} "
             "(disponibili: alpha, max_shift)."
         )
+    # ``alpha``/``max_shift`` sono scalari strutturali: un nodo-expr (o
+    # qualunque non-numero) qui non e' valutabile e senza guardia esploderebbe
+    # con un ``TypeError`` grezzo su ``float(...)`` (issue #37).
+    for label, default in (("alpha", _DEFAULT_ALPHA), ("max_shift", _DEFAULT_MAX_SHIFT)):
+        val = raw.get(label, default)
+        if isinstance(val, bool) or not isinstance(val, (int, float)):
+            raise ValueError(
+                f"gain_compensation.{label} deve essere un numero (dato {val!r}); "
+                "un nodo-expr non e' ammesso qui."
+            )
     alpha = float(raw.get("alpha", _DEFAULT_ALPHA))
     if not 0.0 <= alpha <= 1.0:
         raise ValueError(
