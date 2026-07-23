@@ -583,9 +583,12 @@ prevedibile prima del render: l'RMS del buffer sulla finestra che il grano
 legge davvero, `[pointer.start, pointer.start + grain.duration)`. Il blocco
 attiva la stima e scrive un offset di `volume` per stream.
 
-Vale solo sui documenti **multi-stream** (`stack`, `versions`): la
+Vale solo sui documenti **multi-stream** (`stack`, `versions`, `percorso`): la
 compensazione è relativa, uno stream da solo non maschera nessuno. Blocco
-assente = nessuna compensazione, documenti identici a prima.
+assente = nessuna compensazione, documenti identici a prima. Su `percorso` il
+riferimento resta **locale** (la media si calcola per istanza, sugli stream che
+si sovrappongono in quel momento) e lo shift in sottrazione è **unico** per
+l'intero percorso.
 
 Tre regole, tutte osservabili nei documenti generati:
 

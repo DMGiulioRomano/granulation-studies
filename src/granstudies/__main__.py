@@ -280,7 +280,9 @@ def cmd_percorso(study: str) -> int:
     out = os.path.join(gen_dir(study), "yaml")
     target = os.path.join(out, "percorso", "percorso.yml")
     before = os.path.getmtime(target) if os.path.exists(target) else None
-    written = write_percorso(raw, sid, out, locs=locs)
+    written = write_percorso(
+        raw, sid, out, locs=locs, samples_dir=samples_dir(raw.get("samples_dir"))
+    )
     changed = before != os.path.getmtime(written[0])
     stato = "aggiornato" if changed else "invariato"
     print(f"[percorso] documento percorso ({stato}) -> {written[0]}")

@@ -178,17 +178,22 @@ def write_percorso(
     *,
     locs=None,
     output_sr: int = 48000,
+    samples_dir: str | None = None,
 ) -> List[str]:
     """Scrive il documento delle istanze del percorso (blocco ``percorso:``).
 
     File proprio del processo (``out_dir/percorso/percorso.yml``), quarto
     accanto a sweep/stack/versions. Riceve il documento *grezzo* come
     ``write_versions``: il parse per-istanza avviene dopo l'iniezione delle
-    traiettorie negli scope let.
+    traiettorie negli scope let. Con ``samples_dir`` risolto e il blocco
+    ``gain_compensation:`` presente, gli stream del percorso ricevono l'offset
+    di ``volume`` (v. ``gainmap``).
     """
     from .percorso import generate_percorso_document
 
-    doc = generate_percorso_document(data, study_id, locs, output_sr=output_sr)
+    doc = generate_percorso_document(
+        data, study_id, locs, output_sr=output_sr, samples_dir=samples_dir
+    )
     d = os.path.join(out_dir, "percorso")
     os.makedirs(d, exist_ok=True)
     path = os.path.join(d, "percorso.yml")

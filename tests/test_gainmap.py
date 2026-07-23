@@ -265,6 +265,38 @@ def test_cmd_stack_applica_la_compensazione(tmp_path, monkeypatch, buffer_dir):
     assert max(vols) - min(vols) == pytest.approx(20.0, abs=0.5)
 
 
+def test_cmd_percorso_applica_la_compensazione(tmp_path, monkeypatch, buffer_dir):
+    """Il percorso vero (`make percorso`): il cablaggio di issue #36 fa passare
+    `samples_dir` fino a `gainmap.compensate` anche sul quarto processo."""
+    from granstudies import __main__ as cli
+
+    doc = _stack_study({"alpha": 1.0})
+    doc["samples_dir"] = buffer_dir
+    doc["percorso"] = {
+        "onset": {"values": [0, 3, 6]},
+        "duration": {"base": 10, "unit": "s"},
+    }
+    sdir = tmp_path / "studies" / doc["study_id"]
+    sdir.mkdir(parents=True)
+    (sdir / "study.yml").write_text(yaml.safe_dump(doc, sort_keys=False))
+    monkeypatch.setattr(
+        cli, "study_dir", lambda s: os.path.join(str(tmp_path), "studies", s)
+    )
+    monkeypatch.setattr(
+        cli, "gen_dir", lambda s: os.path.join(str(tmp_path), "generated", s)
+    )
+
+    assert cli.cmd_percorso(doc["study_id"]) == 0
+    out = os.path.join(
+        str(tmp_path), "generated", doc["study_id"], "yaml", "percorso",
+        "percorso.yml",
+    )
+    with open(out, encoding="utf-8") as fh:
+        vols = _volumes(yaml.safe_load(fh))
+    assert max(vols) == 0.0
+    assert max(vols) - min(vols) == pytest.approx(20.0, abs=0.5)
+
+
 def test_senza_samples_dir_nessuna_compensazione_e_nessun_errore(tmp_path):
     """Il sample non e' raggiungibile: si scrive il documento com'era, in
     silenzio — un documento senza audio non e' un errore di sintassi."""
@@ -293,6 +325,10 @@ def test_parse_config_default():
     ({"alpha": -0.1}, "fra 0 e 1"),
     ({"max_shift": 0}, "> 0 dB"),
     ({"alfa": 0.7}, "chiavi sconosciute"),
+    # issue #37: un nodo-expr in alpha/max_shift esce come errore leggibile,
+    # non come TypeError grezzo da float(dict).
+    ({"alpha": {"expr": "0.7"}}, "deve essere un numero"),
+    ({"max_shift": {"expr": "12"}}, "deve essere un numero"),
 ])
 def test_parse_config_errori(raw, atteso):
     with pytest.raises(ValueError, match=atteso):
