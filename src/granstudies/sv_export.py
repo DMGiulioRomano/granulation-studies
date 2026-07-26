@@ -64,7 +64,11 @@ def _param_colour(path: str, seen: dict) -> Tuple[str, str]:
 Layout = Literal["multi", "single"]
 
 
-_ENVELOPE_TYPES = {"linear", "cubic", "step"}
+# Derivato dalla mappa dei plot style: e' la stessa cosa detta una volta sola —
+# un tipo esportabile e' un tipo che sa disegnarsi. Il vocabolario di parse vive
+# in ``study_spec.VALID_INTERPOLATION``; che i due coincidano lo tiene fermo un
+# test (``test_sv_export``), senza legare questo modulo al parser.
+_ENVELOPE_TYPES = frozenset(_PLOT_STYLE_BY_TYPE)
 
 
 def _split_point(point: List) -> Tuple[Any, Any, str]:
