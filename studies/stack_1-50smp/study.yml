@@ -6,25 +6,36 @@
 # punto in cui il puntatore legge il sample; density e grana partono uguali e
 # si separano solo per lo scarto che lo spread inietta a ogni cugino.
 #
-# Il blocco `versions:` muove poi i due parametri: ogni combinazione (g, d)
+# Il blocco `versions:` muove poi i due parametri: ogni combinazione (g0, d0)
 # replica i cugini piu' avanti nella timeline, cosi' si ascolta in sequenza
 # come cambia l'impasto verticale al variare di grana e density.
 #
 # Il documento e' scritto su TRE LIVELLI, cosi' da restare leggibile quando i
-# gruppi diventeranno piu' d'uno:
+# gruppi diventeranno piu' d'uno. Ogni livello ha la sua forma e le sue
+# manopole (il blocco `let:` di quel livello):
 #
-#   1. `axes:` top-level   — i default comuni a tutto il documento
-#   2. `axes:`/`stack:` dentro la entry `cugini` — la forma DI QUEL gruppo
-#   3. `spread.over`       — la differenziazione fra le voci del gruppo
+#   1. `let:` + `axes:` top-level     — i default comuni a tutto il documento
+#   2. `let:` + `axes:`/`stack:` dentro la entry `cugini` — la forma DI QUEL gruppo
+#   3. `spread.let` + `spread.over`   — la differenziazione fra le voci del gruppo
 #
 # Un secondo gruppo si aggiunge come entry sorella di `cugini`, con il proprio
-# `axes:`/`stack:`: non tocca ne' il padre ne' i cugini.
+# `let:`/`axes:`/`stack:`: non tocca ne' il padre ne' i cugini (due gruppi con
+# lo stesso nome di manopola sono due cose indipendenti).
 
 study_id: study01_stack_1-50smp
 title: "Studio 01 (stack) — grani 1-50 samples, 6 punti di lettura"
 seed: 1988
 duration: 50
 samples_dir: samples
+
+# --- Livello 1: le manopole di documento ------------------------------------
+# Lo stato di RIPOSO del materiale: i due numeri dello studio vivono qui, una
+# volta sola, e le formule li leggono per nome. `versions:` in fondo li
+# ombreggia (riposo -> movimento d'analisi): `make stack` suona il riposo,
+# `make versions` la griglia, e sono lo stesso materiale.
+let:
+  g0: 4      # grana a riposo, in campioni
+  d0: 25     # centro della banda density a riposo
 
 # I cugini leggono punti diversi del buffer, che ha punti forti e punti deboli,
 # e sotto una certa distanza quelli deboli spariscono.
@@ -47,7 +58,7 @@ base:
   onset: 0
   sample: silenzi.wav
   time_mode: normalized
-  volume: +10 #-12                 # 6 stream sommati: headroom
+  volume: 24 #-12                 # 6 stream sommati: headroom
   grain:
     envelope: hanning
     duration_unit: samples
@@ -55,7 +66,6 @@ base:
     loop_unit: absolute
     speed_ratio: 0
 
-# --- Livello 1: il padre ----------------------------------------------------
 # Solo i valori a riposo, comuni a ogni gruppo. La forma vive nei gruppi, non
 # qui: un `n` dichiarato a questo livello collide con la camminata-X di un
 # gruppo (il conteggio ha un solo proprietario), quindi il padre resta magro.
@@ -90,39 +100,56 @@ streams:
   cugini:
 
     # --- Livello 2: la forma di QUESTO gruppo -------------------------------
-    # Density e grana non sono costanti dentro la versione: le variabili `d`/`g`
-    # iniettate da `versions:` sono il *centro* di una banda che il valore
-    # percorre a passo d'ubriaco (`drift`). I default nei `let` tengono lo
-    # studio valido anche senza il blocco `versions:` (make stack).
+    # `respiro` e' la traiettoria comune della density: 5 quote pescate in una
+    # banda larga 1 attorno a `d0`, che cammina a passo d'ubriaco. Sta in una
+    # manopola di gruppo perche' va pescata UNA volta e condivisa: dichiarata
+    # dentro `axes:` verrebbe clonata in ogni cugino e — col seed-Y che si
+    # auto-deriva dallo stream_id — ogni voce ripescherebbe la propria
+    # camminata. Sei camminate scorrelate, non una forma comune traslata.
     #
     # `drift` = passo d'ubriaco: senza, ogni breakpoint e' un pescaggio
     # indipendente nella banda (salti, rumore bianco); con drift il primo
     # valore si pesca, poi ogni successivo e' `precedente +- passo`, dove il
-    # passo vale `step` * la larghezza della banda corrente. Quindi
-    # step: 0.12 = ogni breakpoint si sposta al massimo del 12% della banda
-    # rispetto al precedente: il valore *cammina* invece di saltare. Sul bordo
-    # banda riflette (non si incolla).
+    # passo vale `step` * la larghezza della banda corrente. Sul bordo banda
+    # riflette (non si incolla).
+    let:
+      respiro: {base: {expr: "d0"}, range: 1, n: 5, drift: {step: 0.2}}
+
+    # --- Livello 3: la differenziazione fra i cugini ------------------------
+    # `i` e' l'indice 0-based del cugino.
     #
-    # Niente `n` negli assi: qui il conteggio lo possiede la camminata-X
-    # (blocco `stack:` sotto), e i valori Y si pescano ai tempi reali che la X
-    # genera.
+    # `spread.let` dichiara i valori PER VOCE che le formule leggono per nome;
+    # `spread.over` li SCRIVE su un path (destinazione unica o valore non
+    # numerico). `livello` e' l'offset ordinato della density: un gradino netto
+    # per voce, non piu' un pescaggio casuale sommato a uno scarto d'indice
+    # (dove la parte casuale era dello stesso ordine dell'intenzione).
+    spread:
+      let:
+        livello: {expr: "i * 0.8"}
+      over:
+        # La grana di partenza del cugino, quantizzata al campione.
+        axes.grain.duration.base:
+          expr: "floor(g0 + i/(10-i))"
+        # Ogni cugino ha un respiro-X della grana leggermente piu' largo del
+        # precedente: le voci non cambiano grana tutte insieme.
+        stack.grain.duration.range:
+          expr: "i * .1"
+
+    # Density e grana non sono costanti dentro la versione: si muovono dentro
+    # una banda, a passo d'ubriaco. Niente `n` negli assi: qui il conteggio lo
+    # possiede la camminata-X (blocco `stack:` sotto), e i valori Y si pescano
+    # ai tempi reali che la X genera.
     axes:
       density:
-        # Il pavimento della banda e' a sua volta generato: 5 quote pescate in
-        # una banda larga 1, che cammina. Il suo `base` — cioe' il livello
-        # attorno a cui quelle 5 quote stanno — lo inietta lo spread, un valore
-        # per cugino (livello 3).
-        base:
-          range: 1
-          n: 5
-          drift: {step: 0.2}
-        range: {expr: "d * 0.6", let: {d: 25}}
+        # Forma comune del gruppo + offset della voce: stessa melodia, sei
+        # altezze. (Era il "pavimento del pavimento" `axes.density.base.base`:
+        # serviva solo per avere uno slot scalare dentro la forma dell'asse.)
+        base: {expr: "respiro + livello"}
+        range: {expr: "d0 * 0.6"}
         drift: {step: 0.12}
       grain.duration:
-        # `base` qui e' solo il fallback per uno stream non generato dallo
-        # spread: i cugini lo sovrascrivono tutti (livello 3).
-        base: {expr: "g", let: {g: 25}}
-        range: {n: 6, base: {expr: ".3 * g", let: {g: 3}}, range: [0, 5]}
+        # `base` lo scrive lo spread, un valore per cugino (livello 3).
+        range: {n: 6, base: {expr: ".3 * g0"}, range: [0, 5]}
         interpolation: step
         drift: {step: 0.32}
       distribution:
@@ -153,38 +180,10 @@ streams:
         range: .1
         drift: {step: .1}
 
-    # --- Livello 3: la differenziazione fra i cugini ------------------------
-    # Lo spread scrive un valore per cugino sui path qui sotto; `i` e' l'indice
-    # 0-based del cugino. `i/(10-i)` apre progressivamente lo scarto fra le
-    # voci: quasi nullo sui primi, marcato sugli ultimi.
-    spread:
-      over:
-        # Livello attorno a cui pesca il pavimento della banda density: un
-        # pescaggio random per cugino (banda-let `env`) piu' lo scarto d'indice.
-        # NB: `env` e' uno SCALARE per stream, non un envelope — la banda-let
-        # dello spread pesca un valore per voce, non una forma nel tempo.
-        axes.density.base.base:
-          expr: "env + i/(10-i)"
-          let:
-            env:
-              base:
-                expr: "d"
-                let: {d: 25}
-              range: 1.5
-              drift: {step: .15}
-        # La grana di partenza del cugino, quantizzata al campione.
-        axes.grain.duration.base:
-          expr: "floor(g + i/(10-i))"
-          let:
-            g: 4
-        # Ogni cugino ha un respiro-X della grana leggermente piu' largo del
-        # precedente: le voci non cambiano grana tutte insieme.
-        stack.grain.duration.range:
-          expr: "i * .1"
-
+# Muove per nome le manopole del riposo dichiarate in `let:` (le ombreggia).
 # Prima variabile = esterna/lenta (grana), seconda = interna/veloce (density).
 # 8 x 7 = 56 versioni concatenate, 50 s ciascuna, distribuite su 8 documenti
-# (uno per valore di `g`, 7 versioni ciascuno).
+# (uno per valore di `g0`, 7 versioni ciascuno).
 versions:
-  g: {ramp: {start: 4, stop: 50, step: 6}}
-  d: {ramp: {start: 0, stop: 20, step: 3}}
+  g0: {ramp: {start: 4, stop: 50, step: 6}}
+  d0: {ramp: {start: 0, stop: 20, step: 3}}
