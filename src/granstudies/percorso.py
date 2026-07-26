@@ -643,6 +643,7 @@ def generate_percorso_document(
     locs: Locations | None = None,
     *,
     output_sr: Optional[int] = 48000,
+    samples_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Il documento engine multi-stream con le istanze del percorso.
 
@@ -657,6 +658,18 @@ def generate_percorso_document(
     toccato: la stessa camminata/pescaggio ritorna, trasformata dalle
     variabili (il gesto che ritorna); il reseed e' un override come un altro.
 
+    Col blocco ``gain_compensation:`` e un ``samples_dir`` risolto, gli stream
+    ricevono qui l'offset di ``volume`` che pareggia il mascheramento fra punti
+    di lettura diversi dello stesso buffer (v. ``gainmap``), come stack e
+    versions. La regola resta quella condivisa: riferimento **locale** (la media
+    degli stream contemporanei, calcolata per istanza sulla sovrapposizione
+    ``[onset, onset+duration)``), traslazione in sottrazione **unica** per
+    documento, ``max_shift`` di default a 24 dB. Le tre estensioni specifiche
+    del percorso che la issue #36 solleva — riferimento globale opzionale, peso
+    per frazione di sovrapposizione sugli stack sfalsati a catena, default di
+    ``max_shift`` piu' stretto sugli archi lunghi — sono scelte musicali
+    lasciate all'utente e non sono implementate qui.
+
     La ``duration`` d'istanza entra come ``duration:`` del documento della
     singola istanza prima del parse: fa da default, una duration per-stream
     vince. Lo ``stream_id`` e' suffissato ``__k=NN`` (1-based, zero-padded
@@ -668,6 +681,7 @@ def generate_percorso_document(
     lo stesso nome ovunque esista, e il post-merge per nome-base la cuce nel
     tempo. Durata documento = ``max(onset + duration)``.
     """
+    from . import gainmap
     from .stack import build_stack_stream
     from .spread import spread_counts
     from .study_spec import resolve_streams
@@ -712,6 +726,18 @@ def generate_percorso_document(
             s["stream_id"] = f"{s['stream_id']}__{label}"
             s["onset"] = (s.get("onset") or 0) + timeline.onsets[k]
             built.append(s)
+    # Compensazione prima di collassare in documento: il riferimento e' locale
+    # (per istanza, sulla sovrapposizione temporale) e la traslazione in
+    # sottrazione e' unica per l'intero percorso, cosi' i rapporti di livello
+    # fra istanze restano confrontabili all'ascolto (v. issue #36).
+    gain = gainmap.parse_config(data)
+    if gain and samples_dir:
+        gainmap.compensate(
+            built,
+            samples_dir=samples_dir,
+            output_sr=output_sr or 48000,
+            **gain,
+        )
     return build_multi_document(
         built,
         title=f"{sid} :: stack :: percorso",

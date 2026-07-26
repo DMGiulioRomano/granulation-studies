@@ -142,3 +142,97 @@ def test_ramp_incomplete_is_spec_error_not_typeerror():
     assert e.hint               # rimedio presente
     assert "ramp" in e.msg
     assert "start" in e.msg and "stop" in e.msg
+
+
+# --- issue #37: nodo-expr fuori sede / interpolation non validata ----------------
+# Slot strutturali (baseline, values, gain_compensation.alpha) e un valore
+# inventato di interpolation devono uscire come SpecError col path, non come
+# TypeError grezzo o (per interpolation) senza alcun errore.
+
+def _base_axis(**over):
+    ax = {"path": "density", "baseline": 10, "values": [1, 2, 3]}
+    ax.update(over)
+    return {
+        "study_id": "s",
+        "base": {"sample": "x.wav"},
+        "axes": {"density": ax},
+        "sweep": {"orders": [1]},
+    }
+
+
+def test_baseline_expr_node_is_spec_error_not_typeerror():
+    data = _base_axis(baseline={"expr": "10"}, values=None)
+    del data["axes"]["density"]["values"]
+    data["axes"]["density"].update({"base": 5, "range": 1, "n": 3})
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(data, "s")
+    e = exc.value
+    assert e.axis == "density"
+    assert e.key == ("axes", "density", "baseline")
+    assert "nodo-expr" in e.msg
+    assert e.hint
+
+
+def test_values_element_expr_node_is_spec_error_not_typeerror():
+    data = _base_axis(values=[1, {"expr": "2"}, 3])
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(data, "s")
+    e = exc.value
+    assert e.axis == "density"
+    assert e.key == ("axes", "density", "values")
+    assert "nodo-expr" in e.msg
+
+
+@pytest.mark.parametrize("bad", ["dieci", [1], None, True])
+def test_baseline_non_numero_is_spec_error_not_typeerror(bad):
+    # Il nodo-expr non e' l'unico non-numero che finiva nel confronto bounds:
+    # stringa, lista, null e bool esplodevano allo stesso modo, senza path.
+    data = _base_axis(baseline=bad)
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(data, "s")
+    assert exc.value.key == ("axes", "density", "baseline")
+
+
+@pytest.mark.parametrize("bad", ["due", [2], None, True])
+def test_values_element_non_numero_is_spec_error_not_typeerror(bad):
+    data = _base_axis(values=[1, bad, 3])
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(data, "s")
+    assert exc.value.key == ("axes", "density", "values")
+
+
+def test_gain_compensation_alpha_expr_node_is_spec_error_not_typeerror():
+    data = _base_axis()
+    data["gain_compensation"] = {"alpha": {"expr": "0.7"}, "max_shift": 12}
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(data, "s")
+    e = exc.value
+    assert e.key == ("gain_compensation",)
+    assert "alpha" in e.msg
+
+
+def test_interpolation_unknown_value_rejected_on_axis():
+    data = _base_axis(interpolation="banana")
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(data, "s")
+    e = exc.value
+    assert e.axis == "density"
+    assert e.key == ("axes", "density", "interpolation")
+    assert "banana" in e.msg
+    assert "linear" in e.hint and "step" in e.hint
+
+
+def test_interpolation_unknown_value_rejected_at_study_level():
+    data = _base_axis()
+    data["axes"]["interpolation"] = "banana"
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(data, "s")
+    e = exc.value
+    assert e.key == ("axes", "interpolation")
+    assert "banana" in e.msg
+
+
+def test_interpolation_step_is_accepted():
+    # 'step' e' nel vocabolario unico (linear | cubic | step): non deve fallire.
+    spec = parse_study_spec(_base_axis(interpolation="step"), "s")
+    assert spec.axis("density").interpolation == "step"

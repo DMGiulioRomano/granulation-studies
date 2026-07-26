@@ -620,3 +620,87 @@ def test_document_title_and_seed():
     doc = _pdoc({"onset": {"values": [0, 10]}, "w": 1})
     assert doc["title"] == "ptest :: stack :: percorso"
     assert doc["seed"] == 7
+
+
+# --- gain_compensation sul percorso (issue #36) ----------------------------------
+# Come stack e versions: col blocco e un samples_dir risolto, ogni istanza del
+# percorso riceve l'offset di volume che pareggia il mascheramento fra punti di
+# lettura diversi dello stesso buffer. Senza samples_dir non tocca niente.
+
+SR = 48000
+
+
+def _gain_study(gain=None):
+    """Percorso a due stream (forte/debole) che leggono punti diversi del buffer,
+    tre istanze enumerate che si sovrappongono nel tempo."""
+    data = {
+        "study_id": "ptest",
+        "duration": 10,
+        "base": {
+            "sample": "t.wav",
+            "volume": 0.0,
+            "time_mode": "normalized",
+            "grain": {"envelope": "hanning", "duration_unit": "samples"},
+            "pointer": {"loop_unit": "absolute", "speed_ratio": 0},
+        },
+        "axes": {
+            "density": {"baseline": 10, "base": 10},
+            "grain.duration": {"baseline": 50, "base": 50},
+        },
+        "stack": {"density": {"base": 1}, "grain.duration": {"base": 1}},
+        "streams": {
+            "forte": {"base": {"pointer": {"start": 0.1}}},
+            "debole": {"base": {"pointer": {"start": 0.6}}},
+        },
+        "percorso": {
+            "onset": {"values": [0, 3, 6]},
+            "duration": {"base": 10, "unit": "s"},
+        },
+    }
+    if gain is not None:
+        data["gain_compensation"] = gain
+    return data
+
+
+@pytest.fixture
+def buffer_dir(tmp_path):
+    import numpy as np
+    import soundfile as sf
+
+    x = np.concatenate([np.full(SR // 2, 0.8), np.full(SR // 2, 0.08)])
+    sf.write(str(tmp_path / "t.wav"), x, SR)
+    return str(tmp_path)
+
+
+def test_document_gain_compensation_pairs_each_instance(buffer_dir):
+    doc = generate_percorso_document(
+        _gain_study({"alpha": 1.0}), "ptest", output_sr=SR, samples_dir=buffer_dir
+    )
+    vols = [s["volume"] for s in doc["streams"]]
+    # forte/debole di ogni istanza si pareggiano (20 dB), un solo massimo a 0
+    # su tutto il percorso (traslazione in sottrazione unica).
+    assert max(vols) == 0.0
+    assert max(vols) - min(vols) == pytest.approx(20.0, abs=0.5)
+    by_id = _by_id(doc)
+    for k in (1, 2, 3):
+        forte = by_id[f"forte__k={k}"]["volume"]
+        debole = by_id[f"debole__k={k}"]["volume"]
+        assert debole - forte == pytest.approx(20.0, abs=0.5)
+
+
+def test_document_gain_compensation_noop_without_samples_dir(buffer_dir):
+    # Senza samples_dir il sample non e' raggiungibile: documento com'era, in
+    # silenzio (non e' un errore), i volumi restano tutti alla base.
+    doc = generate_percorso_document(
+        _gain_study({"alpha": 1.0}), "ptest", output_sr=SR, samples_dir=None
+    )
+    assert {s["volume"] for s in doc["streams"]} == {0.0}
+
+
+def test_document_without_gain_block_untouched(buffer_dir):
+    # Non-regressione: senza blocco gain_compensation i volumi non cambiano
+    # anche se il samples_dir e' risolto.
+    doc = generate_percorso_document(
+        _gain_study(), "ptest", output_sr=SR, samples_dir=buffer_dir
+    )
+    assert {s["volume"] for s in doc["streams"]} == {0.0}

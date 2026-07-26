@@ -73,6 +73,12 @@ class Axis:
 # (plateau/transition) e' proprieta' del processo sweep e vive sotto ``sweep:``.
 _AXES_RESERVED_KEYS = ("interpolation", "seed")
 
+# Vocabolario di ``interpolation`` (curva di Y fra i valori di test). Unico per
+# tutto il repo: ``step`` (tenuta), ``linear`` (rampa), ``cubic`` (curva) — gli
+# stessi che ``sv_export`` mappa sui tipi engine. Un valore fuori da qui e' un
+# refuso: va fermato al parse, non passato muto a valle (issue #37).
+_VALID_INTERPOLATION = ("linear", "cubic", "step")
+
 
 @dataclass(frozen=True)
 class StudySpec:
@@ -93,7 +99,7 @@ class StudySpec:
     mode: str = "discrete"          # discrete | envelope | both
     plateau: float = 5.0            # secondi per plateau (ascolto stabile)
     transition: float = 5.0         # secondi per transizione tra plateau
-    interpolation: str = "linear"   # linear | cubic
+    interpolation: str = "linear"   # linear | cubic | step
     stream_id: str | None = None    # sotto-cartella per versionare gli output
     # Processo stack: config X per-asse (None = blocco ``stack:`` assente), i
     # due seed globali (seed-Y in axes, seed-X in stack) e l'unita' globale
@@ -214,6 +220,24 @@ def _validate(spec: StudySpec, ctx: ErrCtx, *, orders_explicit: bool = False) ->
                 axis=ax.name,
                 hint="dichiara 'values', 'ramp' o una banda ('base'/'range'/'n').",
             )
+        # Non-numero fuori sede: ``baseline`` e gli elementi di ``values`` sono
+        # slot *strutturali* (il baseline di riposo, i valori che si enumerano),
+        # non ambienti Env dove un ``expr:`` avrebbe senso. Qualunque non-numero
+        # qui — nodo-expr, stringa, lista — esploderebbe poco sotto nel confronto
+        # bounds con un ``TypeError`` grezzo, senza path (issue #37).
+        for slot, v in (
+            [("baseline", ax.baseline)] + [("values", x) for x in ax.values]
+        ):
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                cosa = "un nodo-expr" if isinstance(v, dict) else "un non-numero"
+                raise ctx.err(
+                    f"Asse '{ax.name}': '{slot}' contiene {cosa} ({v!r}), "
+                    "non ammesso qui.",
+                    key=("axes", ax.name, slot),
+                    axis=ax.name,
+                    hint=f"'{slot}' vuole un numero: e' uno slot strutturale "
+                    "(conta/enumera i valori), non un ambiente 'expr:'/'let:'.",
+                )
         # Sforo bloccante: i bounds engine sono un safety clamp, un valore
         # fuori range va fermato al parse invece di essere silenziosamente
         # clampato in render.
@@ -560,6 +584,19 @@ def _stack_config(
     return raw, seed, unit
 
 
+def _check_interpolation(
+    value: Any, ctx: ErrCtx, key: Tuple[Any, ...], axis: str | None = None
+) -> None:
+    """Ferma al parse un ``interpolation`` fuori vocabolario (issue #37)."""
+    if value not in _VALID_INTERPOLATION:
+        raise ctx.err(
+            f"interpolation '{value}' sconosciuta.",
+            key=key,
+            axis=axis,
+            hint=f"i valori validi sono {list(_VALID_INTERPOLATION)}.",
+        )
+
+
 def parse_study_spec(
     data: Dict[str, Any],
     study_id: str | None = None,
@@ -621,6 +658,10 @@ def parse_study_spec(
     default_y_seed = axes_seed if axes_seed is not None else stable_seed(f"{seed_key}:y")
 
     study_interpolation = axes_raw.get("interpolation", "linear")
+    if "interpolation" in axes_raw:
+        _check_interpolation(
+            study_interpolation, ctx, key=("axes", "interpolation")
+        )
     axes: List[Axis] = []
     for name, cfg in axes_raw.items():
         if name in _AXES_RESERVED_KEYS:
@@ -640,6 +681,11 @@ def parse_study_spec(
         # 'path' esplicito resta un alias; se omesso, la chiave dell'asse
         # (anche in dot-notation, es. 'grain.duration') e' il path engine.
         path = cfg.get("path", name)
+        if "interpolation" in cfg:
+            _check_interpolation(
+                cfg["interpolation"], ctx,
+                key=("axes", name, "interpolation"), axis=name,
+            )
         # Generatore Y riconosciuto dalla forma (values | ramp | base): chiave
         # canonica values|ramp|band, con i parametri della banda raccolti piatti.
         with ctx.wrapping(key=("axes", name), axis=name):
@@ -726,6 +772,11 @@ def parse_study_spec(
     else:
         orders = list(range(1, len(axes) + 1))
     orders_explicit = "orders" in sweep_cfg
+    # Riavvolge i ValueError nudi di ``parse_config`` in SpecError col path del
+    # blocco, cosi' un ``alpha`` fuori sede o una chiave sconosciuta portano la
+    # posizione come ogni altro errore di parse (issue #37).
+    with ctx.wrapping(key=("gain_compensation",)):
+        gain_compensation = gainmap.parse_config(data)
     spec = StudySpec(
         study_id=sid,
         title=data.get("title"),
@@ -746,7 +797,7 @@ def parse_study_spec(
         stack_seed=stack_seed,
         stack_unit=stack_unit,
         axes_seed=axes_seed,
-        gain_compensation=gainmap.parse_config(data),
+        gain_compensation=gain_compensation,
     )
     _validate(spec, ctx, orders_explicit=orders_explicit)
     return spec
