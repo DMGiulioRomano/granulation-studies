@@ -183,6 +183,24 @@ def test_values_element_expr_node_is_spec_error_not_typeerror():
     assert "nodo-expr" in e.msg
 
 
+@pytest.mark.parametrize("bad", ["dieci", [1], None, True])
+def test_baseline_non_numero_is_spec_error_not_typeerror(bad):
+    # Il nodo-expr non e' l'unico non-numero che finiva nel confronto bounds:
+    # stringa, lista, null e bool esplodevano allo stesso modo, senza path.
+    data = _base_axis(baseline=bad)
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(data, "s")
+    assert exc.value.key == ("axes", "density", "baseline")
+
+
+@pytest.mark.parametrize("bad", ["due", [2], None, True])
+def test_values_element_non_numero_is_spec_error_not_typeerror(bad):
+    data = _base_axis(values=[1, bad, 3])
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(data, "s")
+    assert exc.value.key == ("axes", "density", "values")
+
+
 def test_gain_compensation_alpha_expr_node_is_spec_error_not_typeerror():
     data = _base_axis()
     data["gain_compensation"] = {"alpha": {"expr": "0.7"}, "max_shift": 12}

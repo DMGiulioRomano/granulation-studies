@@ -220,17 +220,18 @@ def _validate(spec: StudySpec, ctx: ErrCtx, *, orders_explicit: bool = False) ->
                 axis=ax.name,
                 hint="dichiara 'values', 'ramp' o una banda ('base'/'range'/'n').",
             )
-        # Nodo-expr fuori sede: ``baseline`` e gli elementi di ``values`` sono
+        # Non-numero fuori sede: ``baseline`` e gli elementi di ``values`` sono
         # slot *strutturali* (il baseline di riposo, i valori che si enumerano),
-        # non ambienti Env dove un ``expr:`` avrebbe senso. Un dict qui non e'
-        # valutabile e, senza guardia, esploderebbe poco sotto nel confronto
+        # non ambienti Env dove un ``expr:`` avrebbe senso. Qualunque non-numero
+        # qui — nodo-expr, stringa, lista — esploderebbe poco sotto nel confronto
         # bounds con un ``TypeError`` grezzo, senza path (issue #37).
         for slot, v in (
             [("baseline", ax.baseline)] + [("values", x) for x in ax.values]
         ):
-            if isinstance(v, dict):
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                cosa = "un nodo-expr" if isinstance(v, dict) else "un non-numero"
                 raise ctx.err(
-                    f"Asse '{ax.name}': '{slot}' contiene un nodo-expr ({v!r}), "
+                    f"Asse '{ax.name}': '{slot}' contiene {cosa} ({v!r}), "
                     "non ammesso qui.",
                     key=("axes", ax.name, slot),
                     axis=ax.name,
