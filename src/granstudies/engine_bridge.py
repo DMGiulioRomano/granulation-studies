@@ -29,6 +29,32 @@ def _ensure_engine_on_path() -> None:
         )
     if ENGINE_SRC not in sys.path:
         sys.path.insert(0, ENGINE_SRC)
+    _patch_volume_ceiling()
+
+
+# Tetto di volume (dB) voluto dallo studio, piu' alto del +12 dB dell'engine.
+# Sopra 0 dBFS il renderer non normalizza: e' clipping vero, non headroom.
+VOLUME_MAX_DB = 24.0
+
+
+def _patch_volume_ceiling() -> None:
+    """Alza ``max_val`` di ``volume`` nel registry dell'engine.
+
+    ponytail: patch a runtime perche' l'engine e' un submodule e non espone
+    un override dei bounds (``get_parameter_definition`` parametrizza solo
+    ``sample_dur_sec`` e ``output_sr``). Il registry viene letto a ogni
+    chiamata, quindi la mutazione vale per parser, api e ``bounds.py``.
+    Da rimuovere se l'engine rendera' configurabili i bounds.
+    """
+    from dataclasses import replace
+
+    from pge.parameters import parameter_definitions as pd
+
+    current = pd.GRANULAR_PARAMETERS["volume"]
+    if current.max_val != VOLUME_MAX_DB:
+        pd.GRANULAR_PARAMETERS["volume"] = replace(
+            current, max_val=VOLUME_MAX_DB
+        )
 
 
 def _silence_loggers(log_dir: str) -> None:
