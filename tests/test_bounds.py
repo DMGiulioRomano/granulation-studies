@@ -45,3 +45,14 @@ def test_span():
     assert bounds.span("distribution") == 1.0
     assert bounds.span("pitch.semitones") == 72.0
     assert bounds.span("non.esiste") is None
+
+
+def test_volume_ceiling_patched():
+    # il tetto engine (+12 dB) e' alzato a runtime da engine_bridge
+    from granstudies.engine_bridge import VOLUME_MAX_DB
+    from pge.parameters.parameter_definitions import get_parameter_definition
+
+    assert bounds.bounds_for("volume") == (-120.0, VOLUME_MAX_DB)
+    # il patch vale anche per il parser dell'engine, non solo per bounds.py
+    assert get_parameter_definition("volume").max_val == VOLUME_MAX_DB
+    assert bounds.clamp("volume", 999) == VOLUME_MAX_DB
