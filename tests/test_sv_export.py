@@ -531,3 +531,15 @@ def test_stack_stems_to_sv_singleton_suffixed_stream_keeps_raw_stem(tmp_path):
              if m.get("type") == "wavefile"]
     assert len(files) == 1
     assert "padded" in files[0] and files[0].endswith("stack__fermo__d=1.aif")
+
+
+def test_vocabolario_interpolation_allineato_col_parser():
+    """Il vocabolario che il parse accetta e i tipi che il .sv sa disegnare sono
+    lo stesso insieme. Erano due liste letterali scritte a mano in due moduli:
+    questo test e' cio' che tiene ferma la coincidenza, senza far dipendere
+    l'export dal parser."""
+    from granstudies.study_spec import VALID_INTERPOLATION
+    from granstudies.sv_export import _ENVELOPE_TYPES, _PLOT_STYLE_BY_TYPE
+
+    assert set(VALID_INTERPOLATION) == _ENVELOPE_TYPES
+    assert set(VALID_INTERPOLATION) == set(_PLOT_STYLE_BY_TYPE)

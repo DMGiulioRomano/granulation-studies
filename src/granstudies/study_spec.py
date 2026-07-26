@@ -73,11 +73,13 @@ class Axis:
 # (plateau/transition) e' proprieta' del processo sweep e vive sotto ``sweep:``.
 _AXES_RESERVED_KEYS = ("interpolation", "seed")
 
-# Vocabolario di ``interpolation`` (curva di Y fra i valori di test). Unico per
-# tutto il repo: ``step`` (tenuta), ``linear`` (rampa), ``cubic`` (curva) — gli
-# stessi che ``sv_export`` mappa sui tipi engine. Un valore fuori da qui e' un
-# refuso: va fermato al parse, non passato muto a valle (issue #37).
-_VALID_INTERPOLATION = ("linear", "cubic", "step")
+# Vocabolario di ``interpolation`` (curva di Y fra i valori di test): ``step``
+# (tenuta), ``linear`` (rampa), ``cubic`` (curva). Un valore fuori da qui e' un
+# refuso: va fermato al parse, non passato muto a valle (issue #37). Pubblico
+# perche' e' la definizione del vocabolario per tutto il repo: ``sv_export``
+# ricava i suoi tipi disegnabili da ``_PLOT_STYLE_BY_TYPE`` e un test verifica
+# che i due insiemi coincidano.
+VALID_INTERPOLATION = ("linear", "cubic", "step")
 
 
 @dataclass(frozen=True)
@@ -588,12 +590,12 @@ def _check_interpolation(
     value: Any, ctx: ErrCtx, key: Tuple[Any, ...], axis: str | None = None
 ) -> None:
     """Ferma al parse un ``interpolation`` fuori vocabolario (issue #37)."""
-    if value not in _VALID_INTERPOLATION:
+    if value not in VALID_INTERPOLATION:
         raise ctx.err(
             f"interpolation '{value}' sconosciuta.",
             key=key,
             axis=axis,
-            hint=f"i valori validi sono {list(_VALID_INTERPOLATION)}.",
+            hint=f"i valori validi sono {list(VALID_INTERPOLATION)}.",
         )
 
 
