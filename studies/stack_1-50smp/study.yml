@@ -39,7 +39,6 @@ let:
   # Il ventaglio fra le voci, come frazione: 0 = unisono, 1 = scarti pieni.
   # E' un envelope, quindi il ventaglio si apre NEL TEMPO. Tempo normalizzato
   # sullo stream: con `versions:` ogni versione riapre il ventaglio da capo.
-  s: [[0, 0], [1, 1]]
 
 # I cugini leggono punti diversi del buffer, che ha punti forti e punti deboli,
 # e sotto una certa distanza quelli deboli spariscono.
@@ -92,6 +91,7 @@ streams:
     spread:
       let:
         livello: {expr: "i * 0.8"}
+        s: [[0, 0], [1, 1]]
       over:
         # La grana di partenza del cugino, quantizzata al campione.
         axes.grain.duration.base:
@@ -118,14 +118,14 @@ streams:
         range: {n: 6, base: {expr: ".3 * g0"}, range: [0, 5]}
         interpolation: step
         drift: {step: 0.32}
-      distribution:
-        base: 0
-        range: .5
-        drift:
-          step:
-            base: 0
-            n: 8
-            range: .2
+      #distribution:
+      #  base: 0
+      #  range: .5
+      #  drift:
+      #    step:
+      #      base: 0
+      #      n: 8
+      #      range: .2
     stack:
       density:
         base: 0.5
