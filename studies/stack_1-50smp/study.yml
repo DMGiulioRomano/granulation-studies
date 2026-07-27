@@ -79,19 +79,17 @@ stack: {}
 
 spread:
   over:
-    base.pointer.start:
-      values: [0.12, 0.25, 0.4, 0.55, 0.93, 1.1]
-    base.pan:
-      expr: "(1 - 2 * (i % 2))* (i*27)"
+    base.pointer.start: {values: [0.12, 0.25, 0.4, 0.55, 0.93, 1.1]}
+    base.pan: {expr: "(1 - 2 * (i % 2))* (i*27)"}
 
 streams:
   cugini:
     let:
       respiro: {base: {expr: "d0"}, range: 1, n: 5, drift: {step: 0.2}}
+      s: [[0, 0], [1, 1]]
     spread:
       let:
         livello: {expr: "i * 0.8"}
-        s: [[0, 0], [1, 1]]
       over:
         # La grana di partenza del cugino, quantizzata al campione.
         axes.grain.duration.base:
@@ -135,10 +133,10 @@ streams:
         base: .1
         range: .1
         drift: {step: 0.15}
-      distribution:
-        base: .3
-        range: .1
-        drift: {step: .1}
+      #distribution:
+      #  base: .3
+      #  range: .1
+      #  drift: {step: .1}
 
 # Muove per nome le manopole del riposo dichiarate in `let:` (le ombreggia).
 # Prima variabile = esterna/lenta (grana), seconda = interna/veloce (density).
