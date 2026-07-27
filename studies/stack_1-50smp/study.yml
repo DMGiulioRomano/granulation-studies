@@ -36,6 +36,10 @@ samples_dir: samples
 let:
   g0: 4      # grana a riposo, in campioni
   d0: 25     # centro della banda density a riposo
+  # Il ventaglio fra le voci, come frazione: 0 = unisono, 1 = scarti pieni.
+  # E' un envelope, quindi il ventaglio si apre NEL TEMPO. Tempo normalizzato
+  # sullo stream: con `versions:` ogni versione riapre il ventaglio da capo.
+  s: [[0, 0], [1, 1]]
 
 # I cugini leggono punti diversi del buffer, che ha punti forti e punti deboli,
 # e sotto una certa distanza quelli deboli spariscono.
@@ -66,27 +70,14 @@ base:
     loop_unit: absolute
     speed_ratio: 0
 
-# Solo i valori a riposo, comuni a ogni gruppo. La forma vive nei gruppi, non
-# qui: un `n` dichiarato a questo livello collide con la camminata-X di un
-# gruppo (il conteggio ha un solo proprietario), quindi il padre resta magro.
 axes:
   density:
     baseline: 10
   grain.duration:
     baseline: 25
 
-# Il processo stack si attiva per PRESENZA di questo blocco al top-level, anche
-# vuoto: e' il marcatore che dice "questo documento e' un ascolto verticale"
-# (e che `versions:` richiede). La camminata-X vera vive nel `stack:` di ogni
-# gruppo; qui non va nulla, cosi' nessun gruppo eredita un respiro non suo.
 stack: {}
 
-# I punti di lettura del sample (secondi assoluti). Sono 6: il punto a 0.8 s,
-# quasi silenzio, e' stato tolto perche' dettava legge alla compensazione di
-# guadagno. `n` dello spread viene da qui (lunghezza di `values`).
-# Il blocco e' top-level: e' il default che ogni entry con la chiave `spread`
-# eredita, cosi' un secondo gruppo ottiene gli stessi punti di lettura senza
-# riscriverli.
 spread:
   over:
     base.pointer.start:
@@ -95,34 +86,9 @@ spread:
       expr: "(1 - 2 * (i % 2))* (i*27)"
 
 streams:
-  # Unico gruppo del documento. Nessun sweep: questo studio vive solo nello
-  # stack (ascolto verticale).
   cugini:
-
-    # --- Livello 2: la forma di QUESTO gruppo -------------------------------
-    # `respiro` e' la traiettoria comune della density: 5 quote pescate in una
-    # banda larga 1 attorno a `d0`, che cammina a passo d'ubriaco. Sta in una
-    # manopola di gruppo perche' va pescata UNA volta e condivisa: dichiarata
-    # dentro `axes:` verrebbe clonata in ogni cugino e — col seed-Y che si
-    # auto-deriva dallo stream_id — ogni voce ripescherebbe la propria
-    # camminata. Sei camminate scorrelate, non una forma comune traslata.
-    #
-    # `drift` = passo d'ubriaco: senza, ogni breakpoint e' un pescaggio
-    # indipendente nella banda (salti, rumore bianco); con drift il primo
-    # valore si pesca, poi ogni successivo e' `precedente +- passo`, dove il
-    # passo vale `step` * la larghezza della banda corrente. Sul bordo banda
-    # riflette (non si incolla).
     let:
       respiro: {base: {expr: "d0"}, range: 1, n: 5, drift: {step: 0.2}}
-
-    # --- Livello 3: la differenziazione fra i cugini ------------------------
-    # `i` e' l'indice 0-based del cugino.
-    #
-    # `spread.let` dichiara i valori PER VOCE che le formule leggono per nome;
-    # `spread.over` li SCRIVE su un path (destinazione unica o valore non
-    # numerico). `livello` e' l'offset ordinato della density: un gradino netto
-    # per voce, non piu' un pescaggio casuale sommato a uno scarto d'indice
-    # (dove la parte casuale era dello stesso ordine dell'intenzione).
     spread:
       let:
         livello: {expr: "i * 0.8"}
@@ -141,14 +107,14 @@ streams:
     # ai tempi reali che la X genera.
     axes:
       density:
-        # Forma comune del gruppo + offset della voce: stessa melodia, sei
-        # altezze. (Era il "pavimento del pavimento" `axes.density.base.base`:
-        # serviva solo per avere uno slot scalare dentro la forma dell'asse.)
-        base: {expr: "respiro + livello"}
-        range: {expr: "d0 * 0.6"}
-        drift: {step: 0.12}
+        # Forma comune del gruppo + offset della voce, scalato da `s`:
+        # `mix(A, B, w)` = A*(1-w) + B*w, cioe' `respiro + s * livello` scritto
+        # in modo lecito (`respiro` e' un Env e `s * livello` pure: Env + Env e'
+        # vietato, `mix` e' l'unica porta fra due Env).
+        base: {expr: "mix(respiro, respiro + livello, s)"}
+        #range: {expr: "d0 * 0.6"}
+        #drift: {step: 0.12}
       grain.duration:
-        # `base` lo scrive lo spread, un valore per cugino (livello 3).
         range: {n: 6, base: {expr: ".3 * g0"}, range: [0, 5]}
         interpolation: step
         drift: {step: 0.32}
@@ -160,12 +126,6 @@ streams:
             base: 0
             n: 8
             range: .2
-
-    # La camminata-X del gruppo: quanti breakpoint al secondo genera ogni asse
-    # (banda in Hz, anch'essa a passo d'ubriaco, cosi' nemmeno il ritmo dei
-    # cambi e' periodico). Density lenta (strutturale, ~1 valore ogni 0.5-2 s),
-    # grana veloce: i due assi si muovono su scale temporali diverse invece di
-    # pulsare insieme.
     stack:
       density:
         base: 0.5
