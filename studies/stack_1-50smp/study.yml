@@ -28,35 +28,13 @@ seed: 1988
 duration: 50
 samples_dir: samples
 
-# --- Livello 1: le manopole di documento ------------------------------------
-# Lo stato di RIPOSO del materiale: i due numeri dello studio vivono qui, una
-# volta sola, e le formule li leggono per nome. `versions:` in fondo li
-# ombreggia (riposo -> movimento d'analisi): `make stack` suona il riposo,
-# `make versions` la griglia, e sono lo stesso materiale.
 let:
   g0: 40      # grana a riposo, in campioni
   d0: 0     # centro della banda density a riposo
-  # Il ventaglio fra le voci, come frazione: 0 = unisono, 1 = scarti pieni.
-  # E' un envelope, quindi il ventaglio si apre NEL TEMPO. Tempo normalizzato
-  # sullo stream: con `versions:` ogni versione riapre il ventaglio da capo.
-
-# I cugini leggono punti diversi del buffer, che ha punti forti e punti deboli,
-# e sotto una certa distanza quelli deboli spariscono.
-#
-# `alpha` = quanta parte della distanza si chiude. A 1 il sample perde la sua
-# topografia: ogni punto di lettura suona uguale. A 0.7 resta udibile che un
-# punto e' piu' forte dell'altro senza che uno mascheri l'altro.
-#
-# `max_shift` = tetto in dB alla correzione del singolo cugino. Conta perche'
-# la compensazione porta tutti verso il piu' DEBOLE (si attenua, non si alza):
-# un punto quasi muto trascinerebbe giu' tutto il materiale forte. Il punto a
-# 0.8 s — il piu' debole, ~33 dB sotto il piu' forte — e' stato tolto dallo
-# spread; il tetto a 12 dB tiene comunque il calo entro un valore udibile.
 gain_compensation:
   alpha: 0.7
   max_shift: 12
 
-# Parametri fissi: tutto cio' che non e' un asse.
 base:
   onset: 0
   sample: silenzi.wav
@@ -66,21 +44,20 @@ base:
     envelope: hanning
     duration_unit: samples
     duration_range: [[0,0],[1,100]] 
+    #duration_range: [[[0, 0], [75, 100]], 1, 4, 'cubic', null, true]
   pointer:
     loop_unit: absolute
     speed_ratio: 0
     start: .12
 
 axes:
-  density:
-    baseline: 10
-  grain.duration:
-    baseline: 25
+  density: {baseline: 10}
+  grain.duration: {baseline: 25}
 
 stack: {}
 
-spread:
-  n: 4
+spread: 
+  n: 6 
   over:
     #base.pointer.start: {values: [0.12, 0.25, 0.4, 0.55, 0.93, 1.1]}
     base.pan: {expr: "(1 - 2 * (i % 2))* (i*27)"}
@@ -90,33 +67,24 @@ streams:
     let:
       comune: {base: {expr: "d0"}, range: 1, n: 5, drift: {step: 0.2}}
       s: [[0, 0], [1, 1]]
+      #s: [[[0, 0], [25, 1], [75, .5]], 1, 2, 'step', null, true]
       #s: [[[0, 0], [75, 1]], 1, 4, 'cubic', null, true]
     spread:
-      let:
-        divarico: {expr: "i * 0.2"}
+      let: {divarico: {expr: "i * 0.2"}}
       over:
-        axes.grain.duration.base:
-          expr: "floor(g0 + i/(10-i))"
-        stack.grain.duration.range:
-          expr: "i * .1"
-
+        axes.grain.duration.base: {expr: "floor(g0 + i/(10-i))"}
+        stack.grain.duration.range: {expr: "i * .1"}
     axes:
       density:
         base: {expr: "mix(comune, comune + divarico, s)"}
-        #range: {expr: "d0 * 0.6"}
-        #drift: {step: 0.12}
-      grain.duration: {expr: "g0"} #{range: {n: 6, base: {expr: ".6 * g0"}, range: [0, 5]}, interpolation: step, drift: {step: 0.32}}
+        #range: {expr: "s * d0 * 0.1"}
+        drift: {step: 0.12}
+      grain.duration: {base: {expr: "g0"}} #, range: {expr: "g0 *.5"}, interpolation: step} #{range: {n: 6, base: {expr: ".6 * g0"}, range: [0, 5]}, interpolation: step, drift: {step: 0.32}}
       #distribution: { base: 0, range: .15, drift: { step: { base: 0, n: 8, range: .2}}}
 
     stack:
-      density:
-        base: 0.5
-        range: 1.5
-        drift: {step: 0.15}
-      grain.duration:
-        base: .1
-        range: .1
-        drift: {step: 0.15}
+      density: {base: 0.5, range: 1.5, drift: {step: 0.15}}
+      grain.duration: {base: .1} #, range: .1, drift: {step: 0.15}}
       #distribution: { base: .1, range: .1, drift: {step: .1}}
 
 # Muove per nome le manopole del riposo dichiarate in `let:` (le ombreggia).
@@ -124,5 +92,6 @@ streams:
 # 8 x 7 = 56 versioni concatenate, 50 s ciascuna, distribuite su 8 documenti
 # (uno per valore di `g0`, 7 versioni ciascuno).
 versions:
-  g0: {ramp: {start: 10, stop: 50, step: 10}}
+  #g0: {ramp: {start: 10, stop: 50, step: 10}}
+  g0: {ramp: {start: 5, stop: 200, step: 50}}
   d0: {ramp: {start: 0, stop: 70, step: 3}}
