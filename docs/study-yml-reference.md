@@ -777,6 +777,44 @@ versions:
   solo il valore delle variabili — è il confronto pulito del metodo. La durata
   documento è `max(onset + duration)` su tutti gli stream (nel caso classico
   concatenato coincide con `N * duration`).
+- **`spread.n` mosso da una variabile** (issue #39). L'iniezione arriva anche
+  dentro `spread.n`, quindi una variabile del blocco può cambiare il **numero
+  di voci** di una entry-spread da una versione all'altra — basta nominarla
+  lì, la guardia anti-refuso conta anche quel nodo-expr:
+
+  ```yaml
+  streams:
+    cugini:
+      spread:
+        n: {expr: "k", let: {k: 3}}     # k: 3 voci a riposo (make stack)
+        over: {base.pointer.start: {ramp: {start: 0.1, step: 0.1}}}
+  versions:
+    k: {values: [2, 4]}                 # 2 voci nella prima versione, 4 nella seconda
+  ```
+
+  È lo stesso meccanismo del percorso (`spread.n` come nodo-expr), ma **a
+  gradini di versione** invece che per istanza sulla timeline reale: versions
+  confronta popolazioni diverse affiancate, il percorso le fa evolvere. Come
+  nel percorso la scelta ridistribuzione/accodamento emerge dalla forma del
+  ramp in `over`: `ramp {start, stop}` suddivide su `n`, `ramp {start, step}`
+  lascia ferme le voci esistenti e accoda le nuove.
+- **Padding stabile dei nomi generati.** Con `n` variabile lo zero-padding è
+  fissato sulla larghezza del **massimo `n` dell'intero prodotto cartesiano**:
+  con `k: {values: [9, 11]}` le voci si chiamano `cugini_01 … cugini_09` nella
+  prima versione e `cugini_01 … cugini_11` nella seconda — mai `cugini_1` di
+  qua e `cugini_01` di là. Così una **patch** per nome (`cugini_03:`) si
+  applica in ogni versione in cui la voce esiste, e dove non esiste viene
+  consumata in silenzio (voce-fantasma) invece di restare uno stream spurio in
+  più. Il massimo è sul prodotto intero e non per gruppo: i file separati di
+  `versions.chunk` / della variabile esterna restano confrontabili fra loro.
+  Con `n` costante il pad non allarga nulla (retrocompatibile).
+  - Attenzione: il pad è **per processo**. `make stack` è l'istanza di
+    partenza e ignora `versions:` (v. sopra), quindi lì `n` vale il default
+    del `let` e i nomi sono stretti: una patch scritta per le versioni
+    (`cugini_03:`) non corrisponde a nessun generato dello stack e vi resta
+    uno stream ordinario. Vale identico per il percorso; se dà fastidio,
+    scrivi la patch col nome stretto oppure ascolta quel materiale via
+    `make versions`.
 - **`onset` e `duration` come chiavi riservate** (issue #26): non sono
   variabili — non entrano nel prodotto cartesiano né negli scope `let` — ma
   generatori della **timeline**: producono una sequenza lunga N (numero di
@@ -938,7 +976,9 @@ percorso:
   **patch di spread** (`coro_05:`) si applica in ogni istanza in cui la voce
   esiste — e può contenere nodi-expr che nominano variabili del percorso:
   l'eccezione evolve. Nelle istanze in cui la voce non esiste la patch viene
-  consumata in silenzio. La patch di *istanza* ("il quinto passaggio fa
+  consumata in silenzio. Il pad è per processo: sotto `make stack` i nomi
+  restano stretti (vedi la nota nel blocco `versions:`). La patch di
+  *istanza* ("il quinto passaggio fa
   eccezione") non esiste (parcheggiata): la scappatoia è la strategy
   enumerata con una traiettoria `{type: step}` su una finestra che contiene
   solo l'istanza da trattare.
@@ -992,7 +1032,9 @@ streams:
 
 L'espansione avviene **prima** del merge delle stream: `ventaglio` sparisce e
 al suo posto compaiono `ventaglio_1` … `ventaglio_8` (indice 1-based,
-zero-padded alla larghezza di `n`: con `n: 12` si ha `ventaglio_01`), entry
+zero-padded alla larghezza di `n`: con `n: 12` si ha `ventaglio_01`; quando
+`n` è mosso da `versions:`/`percorso:` la larghezza si fissa sul massimo —
+vedi «Padding stabile» nelle rispettive sezioni), entry
 ordinarie a tutti gli effetti (sotto-cartelle, seed per-stream, override). Lo
 `study.yml` sorgente non viene riscritto: il dict espanso si può ispezionare
 in `generated/<study>/yaml/streams_expanded.yml`, rigenerato da `sweep`/`stack`.
