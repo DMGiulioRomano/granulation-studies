@@ -1009,8 +1009,9 @@ per gli assi:
 | banda | `base`/`range`/`seed`/`distribution`/`drift` (+`n` opz.) | solo con `n` proprio | `n` estrazioni nella banda |
 | `expr` | `{expr, let}` | no | un eval per stream: `i` (0-based), `n` e le bande-let in scope |
 
-`spread.n` esplicito e conteggi posseduti devono **coincidere**; se `n` è
-omesso lo definisce l'unico conteggio posseduto; nessuna fonte → errore. Con
+`spread.n` esplicito e conteggi posseduti devono **coincidere** (con `n` come
+Env conta il suo picco, vedi sotto); se `n` è omesso lo definisce l'unico
+conteggio posseduto; nessuna fonte → errore. Con
 più path in `over` i valori si appaiano **per indice** (niente prodotto
 cartesiano, come in stack): lo stream i-esimo prende il valore i-esimo di ogni
 strategy. Le forme-Env dentro le strategy (banda che scorre, nodi-generatore
@@ -1036,6 +1037,41 @@ spread:
         env: [[0, 1], [0.1583, 1.5]]
         a: 50
 ```
+
+**`n` come Env — il coro cresce e cala nel tempo.** Oltre a scalare e nodo-expr,
+`spread.n` accetta un **envelope** nelle forme di sempre (`[[t, n], ...]`,
+`[a, b]`, `{type, points, curve}`): il numero di voci *udibili* varia dentro la
+singola versione, sul tempo normalizzato dello stream.
+
+Uno stream nel documento engine è statico — il loro numero non può cambiare in
+corsa. Quindi le voci si generano **tutte fino al picco** di `n(t)` (arrotondato
+in su) e un gate su `base.volume` le accende e spegne:
+
+```
+gain(voce i) = clamp(n(t) - i, 0, 1)
+```
+
+la stessa regola che `num_voices` applica già dentro un singolo stream. **La
+curva la decide l'interpolazione dell'Env di `n`**: con `type: step` la voce si
+accende di scatto, con la rampa (`linear`, eventualmente piegata da `curve`)
+entra sfumando.
+
+```yaml
+spread:
+  n: [[0, 1], [1, 4]]                                  # 1 → 4 voci, entrano sfumando
+  # n: {type: step, points: [[0,1],[0.5,2],[0.75,4]]}  # entrano di scatto
+  over:
+    base.pointer.start: {values: [0.12, 0.25, 0.4, 0.55]}
+```
+
+Il livello «voce accesa» è il `volume` scalare della entry, o in mancanza quello
+di `base:` del documento. Un `volume` già **envelope**, o un `over.base.volume`
+dichiarato insieme al gate, sono **errore esplicito**: si sovrascriverebbero.
+Per un profilo di volume proprio, usa `n` scalare e scrivi gli envelope a mano
+in `over.base.volume`.
+
+Il gate esce come envelope `step` campionato su griglia uniforme: l'istante di
+commutazione ha risoluzione 1/256 della durata dello stream.
 
 **La banda-let (random per stream).** Solo nella strategy `expr` dello
 spread, una variabile di `let` può essere una **banda**

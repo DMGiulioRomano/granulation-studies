@@ -494,6 +494,7 @@ def resolve_streams(
         pad_n=spread_pad,
         axis_names=axis_names,
         global_spread=data.get("spread"),
+        base_volume=(data.get("base") or {}).get("volume"),
     )
     result = []
     for stream_id, override in streams.items():

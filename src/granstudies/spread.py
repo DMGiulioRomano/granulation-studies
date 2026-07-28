@@ -22,6 +22,7 @@ nulla, anche col blocco globale presente.
 from __future__ import annotations
 
 import copy
+from math import ceil, log10
 from typing import Any, Dict, List, Tuple
 
 from . import bounds as bounds_mod
@@ -30,6 +31,7 @@ from .expr import eval_expr, is_expr_node, parse_expr_node
 from .inject import inject
 from .value_generators import (
     Y_GENERATOR_KEYS,
+    _threshold_at,
     band,
     expand_params,
     is_generator_node,
@@ -315,13 +317,110 @@ def _spread_n(raw: Any, ctx: ErrCtx) -> Any:
     return out
 
 
+# Gate di voce (``n`` come Env): campioni sul tempo normalizzato dello stream e
+# floor in dB della voce spenta.
+# ponytail: griglia uniforme invece delle intersezioni analitiche — con `curve`
+# le intersezioni non sono in forma chiusa. 256 campioni = risoluzione 1/256
+# della durata sull'istante di commutazione; se servisse esatta, si risolvono
+# analiticamente i casi step/linear e si campiona solo `curve`.
+_GATE_SAMPLES = 256
+_GATE_FLOOR_DB = -120.0
+
+
+def _is_n_env(raw: Any) -> bool:
+    """``spread.n`` scritto come Env (il coro cresce/decresce NEL tempo).
+
+    Le forme di sempre di un Env disegnato: ``[[t, n], ...]``, lo shorthand
+    ``[a, b]``, o ``{type, points, curve}`` con l'interpolazione esplicita.
+    Il nodo-expr (dict con ``expr``) resta il caso scalare per-istanza.
+    """
+    if isinstance(raw, dict):
+        return "points" in raw
+    return isinstance(raw, (list, tuple)) and bool(raw)
+
+
+def _n_env_peak(raw: Any, ctx: ErrCtx) -> int:
+    """Numero di voci da generare: il massimo di ``n(t)``, arrotondato in su.
+
+    Le voci esistono tutte nel documento (uno stream e' statico), il gate le
+    accende e spegne: il picco e' quante ne servono.
+    """
+    points = raw["points"] if isinstance(raw, dict) else raw
+    values = [
+        p[1] if isinstance(p, (list, tuple)) else p
+        for p in points
+    ]
+    if not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in values):
+        raise ctx.err(
+            f"spread: 'n' come envelope vuole valori numerici, trovato {points!r}.",
+            key=("spread", "n"),
+            hint="es. \"n: [[0, 1], [1, 4]]\" (da 1 a 4 voci nel tempo).",
+        )
+    peak = ceil(max(values))
+    if peak < 1:
+        raise ctx.err(
+            f"spread: 'n' come envelope deve arrivare almeno a 1 voce "
+            f"(picco {max(values)}).",
+            key=("spread", "n"),
+        )
+    return peak
+
+
+def _gate_envelopes(raw: Any, n: int, volume: Any, ctx: ErrCtx) -> List[Any]:
+    """Envelope di ``volume`` per voce, derivato da ``n(t)``.
+
+    ``gain(voce i) = clamp(n(t) - i, 0, 1)``: la voce e' piena quando ``n(t)``
+    l'ha superata, spenta prima, e nel mezzo vale la frazione. E' la stessa
+    regola che ``num_voices`` applica gia' dentro un singolo stream (fade sulla
+    voce di confine), qui a livello di spread.
+
+    La curva la decide l'interpolazione dell'Env di ``n``, come chiesto: con
+    ``type: step`` la voce si accende di scatto, con la rampa (``linear``,
+    eventualmente piegata da ``curve``) entra sfumando. Il gate esce sempre
+    come envelope ``step``: e' la scaletta campionata di ``gain``, e cosi' il
+    gradino resta netto invece di diventare una rampa tra due campioni.
+    """
+    if not isinstance(volume, (int, float)) or isinstance(volume, bool):
+        raise ctx.err(
+            f"spread: 'n' come envelope genera il gate su 'volume', ma il "
+            f"volume dichiarato e' {volume!r} — le due cose si "
+            "sovrascriverebbero.",
+            key=("spread", "n"),
+            hint="con 'n' variabile nel tempo il volume dev'essere uno scalare "
+            "(il livello a voce accesa); per un profilo di volume proprio, usa "
+            "'n' scalare e scrivi gli envelope in 'over.base.volume'.",
+        )
+    grid = [k / (_GATE_SAMPLES - 1) for k in range(_GATE_SAMPLES)]
+    curve = [_threshold_at(raw, t) for t in grid]
+    gates: List[Any] = []
+    for i in range(n):
+        points: List[List[float]] = []
+        for t, value in zip(grid, curve):
+            gain = min(1.0, max(0.0, value - i))
+            db = (
+                _GATE_FLOOR_DB
+                if gain <= 0.0
+                else round(volume + 20.0 * log10(gain), 6)
+            )
+            # Un envelope step tiene il valore fino al punto successivo: i
+            # campioni che non cambiano nulla non servono.
+            if points and points[-1][1] == db:
+                continue
+            points.append([round(t, 9), db])
+        gates.append({"type": "step", "points": points})
+    return gates
+
+
 def _resolve_n(
     name: str, spread: Dict[str, Any], strategies: Dict[str, tuple], ctx: ErrCtx
 ) -> int:
     """``n`` effettivo dello spread: esplicito e conteggi posseduti coincidono."""
     counts: Dict[str, int] = {}
     if "n" in spread:
-        counts["spread.n"] = _spread_n(spread["n"], ctx)
+        raw = spread["n"]
+        counts["spread.n"] = (
+            _n_env_peak(raw, ctx) if _is_n_env(raw) else _spread_n(raw, ctx)
+        )
     for path, (marker, params) in strategies.items():
         owned = _owned_count(name, path, marker, params, ctx)
         if owned is not None:
@@ -546,7 +645,11 @@ def _let_values(
 
 
 def _plan_entry(
-    name: str, entry: Dict[str, Any], locs: Locations | None, pad: int | None = None
+    name: str,
+    entry: Dict[str, Any],
+    locs: Locations | None,
+    pad: int | None = None,
+    base_volume: Any = None,
 ) -> tuple[List[str], Dict[str, List[Any]], Dict[str, List[Any]], List[str]]:
     """(nomi generati, valori per path, nomi-fantasma) di una entry-spread.
 
@@ -568,6 +671,21 @@ def _plan_entry(
         path: _strategy_values(name, path, marker, params, n, ctx)
         for path, (marker, params) in strategies.items()
     }
+    # ``n`` come Env: le voci ci sono tutte, il gate le accende nel tempo.
+    raw_n = entry["spread"].get("n")
+    if _is_n_env(raw_n):
+        if "base.volume" in per_path:
+            raise ctx.err(
+                "spread: 'n' come envelope e 'over.base.volume' scrivono "
+                "entrambi il volume delle voci.",
+                key=("spread", "n"),
+                hint="tieni uno dei due: il gate di 'n' o gli envelope scritti "
+                "a mano in 'over'.",
+            )
+        volume = (entry.get("base") or {}).get("volume", base_volume)
+        per_path["base.volume"] = _gate_envelopes(
+            raw_n, n, 0.0 if volume is None else volume, ctx
+        )
     # Manopole di voce: valori per voce iniettati per nome (non su un path).
     per_let = _let_values(name, entry["spread"], n, ctx)
     top = max(n, pad or 0)
@@ -626,6 +744,7 @@ def expand_spreads(
     pad_n: Dict[str, int] | None = None,
     axis_names: frozenset = frozenset(),
     global_spread: Dict[str, Any] | None = None,
+    base_volume: Any = None,
 ) -> Dict[str, Any]:
     """Espande le entry-spread di ``streams:`` in entry ordinarie.
 
@@ -651,10 +770,16 @@ def expand_spreads(
     deep-merge prima dell'espansione: ``spread: {}`` lo riattiva intero, un
     blocco parziale lo ritocca, una entry senza chiave non espande nulla.
     Senza blocco globale il comportamento storico e' invariato.
+
+    ``base_volume`` e' il ``base.volume`` del documento: serve come livello
+    "voce accesa" quando ``n`` e' un Env e il gate viene generato (la entry
+    puo' comunque dichiarare il proprio).
     """
     streams = _with_global_spread(streams, global_spread, locs)
     plans = {
-        name: _plan_entry(name, entry, locs, (pad_n or {}).get(name))
+        name: _plan_entry(
+            name, entry, locs, (pad_n or {}).get(name), base_volume
+        )
         for name, entry in streams.items()
         if _is_spread(entry)
     }
