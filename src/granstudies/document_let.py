@@ -25,7 +25,12 @@ from .expr import eval_expr, is_expr_node
 from .inject import expr_names as _expr_names
 from .inject import inject as _inject
 from .inject import referenced_names as _referenced_names
-from .value_generators import expand_env, is_generator_node, stable_seed
+from .value_generators import (
+    expand_env,
+    is_compact_env,
+    is_generator_node,
+    stable_seed,
+)
 from .yaml_loc import Locations
 
 
@@ -74,7 +79,8 @@ def resolve_knobs(
     """Risolve i valori di un blocco di manopole (documento o gruppo).
 
     Scalari ed envelope statici (liste) sono gia' valori di scope; una banda
-    (o ``ramp``/``values``) si compila in envelope una volta, con seed
+    (o ``ramp``/``values``) e la forma compatta a cicli (``[pattern, 1, n_reps,
+    ...]``) si compilano in envelope una volta, con seed
     ``stable_seed(f"{seed_prefix}:{nome}")`` — un pescaggio condiviso; i nodi-
     expr derivati si valutano contro le manopole gia' risolte, a fixpoint
     (l'ordine di dichiarazione non conta). ``key_prefix`` etichetta gli errori
@@ -85,7 +91,7 @@ def resolve_knobs(
     for name, val in block.items():
         if is_expr_node(val):
             pending[name] = val
-        elif is_generator_node(val):
+        elif is_generator_node(val) or is_compact_env(val):
             with ctx.wrapping(key=key_prefix + (name,)):
                 resolved[name] = expand_env(
                     val, seed=stable_seed(f"{seed_prefix}:{name}"), path=name
