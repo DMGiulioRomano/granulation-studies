@@ -43,8 +43,8 @@ axes:
     ramp: {start: 1, stop: 10, step: 5}
     baseline: 20
   grain.duration:
-    baseline: 1
-    ramp: {start: 1, stop: 50, step: 1}
+    baseline: 4
+    ramp: {start: 4, stop: 50, step: 1}
   distribution:
     #interpolation: cubic
     values: [0,.25,0,1,0,.75]

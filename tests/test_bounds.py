@@ -29,9 +29,9 @@ def test_clamp_within_and_outside():
 
 
 def test_bounds_grain_duration_dynamic_output_sr():
-    # con output_sr il minimo e' 1 campione (1/output_sr), non 1ms (issue #17)
+    # con output_sr il minimo e' il floor dello studio: 4 campioni (bounds.py)
     lo, hi = bounds.bounds_for("grain.duration", output_sr=48000)
-    assert lo == 1.0 / 48000
+    assert lo == bounds.MIN_GRAIN_SAMPLES / 48000
     assert hi == 10.0
 
 

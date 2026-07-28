@@ -33,6 +33,10 @@ _MANUAL_BOUNDS: Dict[str, Tuple[float, float]] = {
     "pitch.cents": (-3600.0, 3600.0),
 }
 
+# Minimo di grain.duration in campioni imposto da questo studio (l'engine
+# scende a 1 campione). Vedi ``bounds_for``.
+MIN_GRAIN_SAMPLES = 4
+
 
 def known_paths() -> frozenset:
     """Tutti i path dotted noti (registry engine + manuali), senza import engine."""
@@ -58,7 +62,12 @@ def bounds_for(
     from .engine_bridge import parameter_bounds
 
     pb = parameter_bounds(output_sr=output_sr)[key]
-    return (pb.min_val, pb.max_val)
+    lo = pb.min_val
+    if path == "grain.duration" and output_sr:
+        # Floor dello studio: l'engine ammette 1 campione, ma sotto i 4 campioni
+        # il grano non ha inviluppo udibile. Vincolo di questo repo, non engine.
+        lo = max(lo, MIN_GRAIN_SAMPLES / output_sr)
+    return (lo, pb.max_val)
 
 
 def default_output_sr() -> int:

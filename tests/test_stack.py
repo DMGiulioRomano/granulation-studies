@@ -195,14 +195,14 @@ def test_document_emerging_values_clamped_to_engine_bounds():
     data["axes"]["grain_duration"] = {
         "path": "grain.duration",
         "base": 0.00001,
-        "range": 0.00001,  # sotto sia il floor statico (1ms) sia 1 campione @48k
+        "range": 0.00001,  # sotto sia il floor statico (1ms) sia 4 campioni @48k
     }
     data["stack"]["grain_duration"] = {"base": 2, "range": 0}
 
-    # Senza output_sr esplicito: default 48000, floor dinamico a 1 campione.
+    # Senza output_sr esplicito: default 48000, floor dinamico a 4 campioni.
     doc = generate_stack_document(_specs(data))
     pts = doc["streams"][0]["grain"]["duration"]["points"]
-    assert all(v == 1 / 48000 for _, v in pts)
+    assert all(v == 4 / 48000 for _, v in pts)
 
     # output_sr=None ripristina il fallback statico di 1ms (issue #17).
     doc_static = generate_stack_document(_specs(data), output_sr=None)
