@@ -683,7 +683,7 @@ def generate_percorso_document(
     """
     from . import gainmap
     from .stack import build_stack_stream
-    from .spread import spread_counts
+    from .spread import spread_pad
     from .study_spec import resolve_streams
     from .versions import inject_combo
     from .yaml_builder import build_multi_document
@@ -707,15 +707,11 @@ def generate_percorso_document(
     # padding stabile richiede il conteggio di TUTTE le istanze prima di
     # nominare la prima voce).
     docs: List[Dict[str, Any]] = []
-    pad_n: Dict[str, int] = {}
     for k, combo in enumerate(combos):
         data_k = inject_combo(base_data, combo)
         data_k["duration"] = durations[k]
         docs.append(data_k)
-        for entry, n in spread_counts(
-            data_k.get("streams") or {}, locs, global_spread=data_k.get("spread")
-        ).items():
-            pad_n[entry] = max(pad_n.get(entry, 0), n)
+    pad_n = spread_pad(docs, locs)
 
     width = len(str(len(docs)))
     built: List[Dict[str, Any]] = []

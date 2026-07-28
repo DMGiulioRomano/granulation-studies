@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Tuple
 from . import bounds as bounds_mod
 from .errors import ErrCtx, SpecError
 from .expr import eval_expr, is_expr_node, parse_expr_node
+from .group_let import apply_group_let
 from .inject import inject
 from .value_generators import (
     Y_GENERATOR_KEYS,
@@ -858,4 +859,32 @@ def spread_counts(
             path: _strategy(name, path, cfg, ctx) for path, cfg in over.items()
         }
         out[name] = _resolve_n(name, entry["spread"], strategies, ctx)
+    return out
+
+
+def spread_pad(
+    docs: List[Dict[str, Any]], locs: Locations | None = None
+) -> Dict[str, int]:
+    """``{entry: massimo n}`` per il padding stabile dei nomi generati.
+
+    Con ``n`` dinamico il conteggio di una entry-spread cambia da un documento
+    all'altro — di istanza in istanza lungo il percorso, a gradini di versione
+    sotto ``versions:`` — e la larghezza dello zero-padding va fissata sul
+    massimo PRIMA di nominare la prima voce: altrimenti la stessa voce logica
+    cambia nome (``coro_9`` / ``coro_09``) e una patch per nome si applica solo
+    dove le cifre coincidono, restando altrove una entry ordinaria non
+    consumata — in silenzio.
+
+    Riceve i documenti gia' iniettati (uno per istanza/versione) e applica a
+    ognuno la stessa pre-pass di ``resolve_streams``: le manopole di gruppo
+    (``let:`` per entry, che possono alimentare ``spread.n``) e il blocco
+    ``spread:`` top-level come default per-entry. Il risultato e' il ``pad_n``
+    di ``expand_spreads``, passato come ``spread_pad=`` a ``resolve_streams``.
+    """
+    out: Dict[str, int] = {}
+    for data in docs:
+        streams = apply_group_let(data.get("streams") or {}, locs)
+        counts = spread_counts(streams, locs, global_spread=data.get("spread"))
+        for entry, n in counts.items():
+            out[entry] = max(out.get(entry, 0), n)
     return out

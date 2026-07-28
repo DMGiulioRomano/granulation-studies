@@ -2,6 +2,7 @@ import pytest
 
 from granstudies import yaml_loc
 from granstudies.errors import SpecError
+from granstudies.group_let import apply_group_let
 from granstudies.spread import expand_spreads, spread_counts
 from granstudies.study_spec import resolve_streams
 
@@ -1410,3 +1411,49 @@ def test_n_envelope_confligge_con_over_base_volume():
     doc["streams"]["cugini"]["spread"]["over"]["base.volume"] = {"values": [0, 24]}
     with pytest.raises(SpecError, match="entrambi il volume"):
         expand_spreads(doc["streams"], base_volume=24)
+
+
+# --- spread_pad: il massimo n per entry su piu' documenti (issue #39) --------------
+# Il padding stabile serve a ogni processo che ripete lo stesso documento con
+# ``spread.n`` mosso da una variabile: il percorso sulle istanze, versions sulle
+# versioni. ``spread_pad`` e' il gemello di ``spread_counts`` sul *documento*:
+# applica la stessa pre-pass di ``resolve_streams`` prima di contare.
+
+def _pad_doc(n, **extra):
+    entry = {"spread": {"n": n, "over": {"base.volume": {"expr": "0 - i"}}}}
+    entry.update(extra)
+    return {"streams": {"coro": entry}}
+
+
+def test_spread_pad_takes_max_across_documents():
+    from granstudies.spread import spread_pad
+
+    docs = [_pad_doc(2), _pad_doc(11), _pad_doc(7)]
+    assert spread_pad(docs) == {"coro": 11}
+
+
+def test_spread_pad_ignores_non_spread_entries():
+    from granstudies.spread import spread_pad
+
+    docs = [{"streams": {"solo": {"base": {"volume": -6}}}}]
+    assert spread_pad(docs) == {}
+
+
+def test_spread_pad_reads_global_spread_block():
+    from granstudies.spread import spread_pad
+
+    # il conteggio va risolto sul blocco gia' ereditato dal globale
+    docs = [{"spread": _GLOBAL, "streams": {"z": {"spread": {}}}}]
+    assert spread_pad(docs) == {"z": 3}
+
+
+def test_spread_pad_applies_group_let_before_counting():
+    from granstudies.spread import spread_pad
+
+    # ``spread.n`` alimentato da una manopola di gruppo: senza la pre-pass di
+    # ``apply_group_let`` il conteggio leggerebbe il default del let locale
+    # (1) invece del valore di gruppo (5), e il pad uscirebbe troppo stretto.
+    doc = _pad_doc({"expr": "q", "let": {"q": 1}}, let={"q": 5})
+    assert spread_pad([doc]) == {"coro": 5}
+    # ed e' davvero il conteggio che expand_spreads produce
+    assert len(expand_spreads(apply_group_let(doc["streams"]))) == 5
