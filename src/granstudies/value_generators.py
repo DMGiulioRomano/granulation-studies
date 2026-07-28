@@ -408,6 +408,59 @@ def is_generator_node(spec: Any) -> bool:
     return isinstance(spec, dict) and any(k in Y_GENERATOR_KEYS for k in spec)
 
 
+def is_compact_env(spec: Any) -> bool:
+    """True se ``spec`` e' la forma compatta a cicli dell'engine.
+
+    ``[pattern, end_time, n_reps, interp?, time_dist?, wrap?]``: si riconosce
+    dai primi tre elementi (lista di coppie, numero, intero). Non collide con
+    le forme statiche di Env: ``[[t, y], ...]`` ha coppie a ogni posizione,
+    ``[a, b]`` ha due soli scalari.
+    """
+    return (
+        isinstance(spec, (list, tuple))
+        and 3 <= len(spec) <= 6
+        and isinstance(spec[0], (list, tuple))
+        and len(spec[0]) > 0
+        and all(isinstance(p, (list, tuple)) for p in spec[0])
+        and isinstance(spec[1], (int, float))
+        and not isinstance(spec[1], bool)
+        and isinstance(spec[2], int)
+        and not isinstance(spec[2], bool)
+    )
+
+
+def expand_compact(spec: Sequence[Any], path: str) -> List[List[float]]:
+    """Compila la forma compatta a cicli in breakpoint, validata per granstudies.
+
+    Due vincoli che l'engine non ha e qui servono. ``end_time`` dev'essere 1:
+    in un ``let:`` l'Env vive sull'asse *normalizzato* dello stream (``frac`` in
+    ``[0, 1]``), non sui secondi — un ``end_time`` in secondi produrrebbe
+    breakpoint tutti oltre il bordo, che ``_threshold_at`` appiattisce in hold
+    senza dire niente. I punti del pattern devono essere coppie: il tipo
+    d'interpolazione per-punto (3-tuple) non ha rappresentazione nelle forme
+    statiche di Env, dove ``type`` e' globale.
+    """
+    from .engine_bridge import expand_compact_env
+
+    if spec[1] != 1:
+        raise ValueError(
+            f"{path}: forma compatta, end_time deve essere 1 (ricevuto "
+            f"{spec[1]}) — dentro un let l'Env vive sul tempo normalizzato "
+            "dello stream, non in secondi."
+        )
+    for p in spec[0]:
+        if len(p) != 2:
+            raise ValueError(
+                f"{path}: forma compatta, i punti del pattern devono essere "
+                f"coppie [x%, y] (ricevuto {list(p)!r}) — il tipo per-punto "
+                "non esiste in un Env di studio, usa 'type' globale."
+            )
+    try:
+        return expand_compact_env(list(spec))
+    except ValueError as exc:
+        raise ValueError(f"{path}: forma compatta, {exc}") from exc
+
+
 def expand_env(spec: Threshold, *, seed: int, path: str, depth: int = 0) -> Threshold:
     """Compila un nodo-generatore in una forma statica di ``Env`` (breakpoint).
 
@@ -435,6 +488,8 @@ def expand_env(spec: Threshold, *, seed: int, path: str, depth: int = 0) -> Thre
         except ValueError as exc:
             raise ValueError(f"{path}: {exc}") from exc
         return out
+    if is_compact_env(spec):
+        return expand_compact(spec, path)
     if not is_generator_node(spec):
         return spec
     if depth >= MAX_ENV_DEPTH:

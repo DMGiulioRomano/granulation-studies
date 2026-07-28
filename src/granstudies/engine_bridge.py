@@ -71,6 +71,22 @@ def _silence_loggers(log_dir: str) -> None:
     configure_engine_logger(yaml_name="granstudies", log_dir=log_dir)
 
 
+def expand_compact_env(compact: list) -> List[List[float]]:
+    """Espande la forma compatta a cicli dell'engine in breakpoint ``[[t, y], ...]``.
+
+    ``[pattern, end_time, n_reps, interp?, time_dist?, wrap?]`` (vedi
+    ``engine/docs/reference/yaml.md`` §5). L'espansione e' quella dell'engine,
+    non una riscritta: la stessa forma scritta in ``base:`` (che passa verbatim
+    al parser dell'engine) e in un ``let:`` deve produrre gli stessi tempi, e
+    ``time_dist``/``wrap`` vivono la'.
+    """
+    _ensure_engine_on_path()
+    _silence_loggers(os.path.join(REPO_ROOT, "generated", ".logs"))
+    from pge.envelopes.envelope_builder import EnvelopeBuilder
+
+    return [[float(t), y] for t, y in EnvelopeBuilder.parse(list(compact))]
+
+
 def load_generator(
     yaml_path: str,
     samples_dir: Optional[str] = None,
