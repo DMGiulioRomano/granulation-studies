@@ -38,6 +38,7 @@ della cartella-scala.
 | `300-1000ms` | grani lunghi, grain.duration 300-1000 ms (step 25 ms) | `300-1000ms` |
 | `stack` | stream non-cartesiani (ascolto verticale) | `stack` |
 | `stack_1-50smp` | stack: 7 punti di lettura insieme, grain.duration 1-50 campioni; `versions` su density e grana | `stack_1-50smp` |
+| `stack_100-300ms` | come `stack_1-50smp` ma grana lunga: grain.duration 100-300 ms (secondi, niente `duration_unit`) | `stack_100-300ms` |
 | `brano01` | brano musicale (ex `study_stack_test_5`) | `brano01` |
 | `brano01_v2` | versione a 10 min di brano01 (ex `study_stack_test_5_10min`) | `brano01_v2` |
 | `ascolto` | diario di ascolto dello studio — non è uno `STUDY` | — |
