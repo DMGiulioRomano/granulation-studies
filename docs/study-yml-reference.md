@@ -515,16 +515,16 @@ let:                                  # 1. documento: default comuni
 streams:
   cugini:
     let:                              # 2. gruppo: la forma DI QUESTO gruppo
-      respiro: {base: {expr: "d0"}, range: 1, n: 5, drift: {step: 0.2}}
+      comune: {base: {expr: "d0"}, range: 1, n: 5, drift: {step: 0.2}}
     spread:
       n: 6
       let:                            # 3. voce: cosa distingue le voci
-        livello: {expr: "i * 0.8"}
+        divarico: {expr: "i * 0.8"}
       over:
         base.pointer.start: {values: [0.12, 0.25, 0.4, 0.55, 0.93, 1.1]}
     axes:
       density:
-        base:  {expr: "respiro + livello"}   # forma comune + offset per voce
+        base:  {expr: "comune + divarico"}   # forma comune + offset per voce
         range: {expr: "d0 * 0.6"}
 ```
 
@@ -543,7 +543,7 @@ streams:
   risolti una volta per gruppo (seed `stable_seed("<entry>:let:<nome>")`) e
   iniettati nelle espressioni dell'entry — axes e blocco `spread` — **prima**
   dell'espansione, così tutte le voci del gruppo condividono il valore. È la
-  traiettoria comune (`respiro`), disegnata o pescata. Due gruppi diversi con
+  traiettoria condivisa dalle voci (`comune`), disegnata o pescata. Due gruppi diversi con
   lo stesso nome sono indipendenti (come i loro `axes:`).
 - **`spread.let`** (dentro `spread:`, accanto a `n`/`over`). Manopole di
   **voce**: un valore per stream generato, iniettato per nome. Due forme, come
@@ -552,7 +552,7 @@ streams:
   conteggio ridondante con `over`: `n` resta di `over`/`spread.n`). Vedi «Il
   blocco `spread:`».
 - **Aritmetica inviluppo⊕scalare.** Una manopola-envelope combinata con uno
-  scalare nell'espressione (`respiro + livello`, `respiro * k`) agisce sulle y,
+  scalare nell'espressione (`comune + divarico`, `comune * k`) agisce sulle y,
   i tempi restano — è l'aritmetica su Env del nodo-expr. Così la forma comune
   vive in una manopola e l'offset/scala per voce in un'altra, e l'asse le
   combina in una riga leggibile: **niente `base` annidato per avere uno slot
@@ -746,7 +746,7 @@ stati; un bundle **parziale** lascia le manopole non nominate al **riposo di
 ```yaml
 versions:
   densita:                    # un asse, due stati alternativi
-    estrema: {d0: 500, respiro: {ramp: {start: 20, stop: 60, step: 5}}}  # respiro = envelope
+    estrema: {d0: 500, comune: {ramp: {start: 20, stop: 60, step: 5}}}  # comune = envelope
     minima:  {d0: 2}                              # bundle parziale
 # grana × densita = 8 × 2 = 16 versioni
 ```
@@ -917,7 +917,7 @@ percorso:
   che evolve. Il default nel `let` (`w: 0`) tiene lo studio valido senza il
   blocco: `axes:`/`stack:` come sono scritti *sono* l'istanza di partenza
   (`make stack` la suona), il percorso aggiunge solo il "verso dove".
-  Nominare la stessa variabile in più registri (forma Y, respiro X,
+  Nominare la stessa variabile in più registri (forma Y, banda X,
   `spread.n`) **accoppia** le evoluzioni; nominare diverso le decorrelava —
   nessuna sintassi dedicata, emerge dall'iniezione.
 - **Seed invariato se non toccato**: ogni istanza eredita tutto via
@@ -1113,13 +1113,13 @@ possiederebbero un conteggio ridondante con `over` (il conteggio resta di
 spread:
   n: 6
   let:
-    livello: {expr: "i * 0.8"}                    # deterministico per voce
+    divarico: {expr: "i * 0.8"}                    # deterministico per voce
     env:     {base: {expr: "d0"}, range: 1.5}     # un pescaggio per voce
   over:
     base.pointer.start: {values: [0.12, 0.25, 0.4, 0.55, 0.93, 1.1]}
 axes:
   density:
-    base: {expr: "respiro + livello"}   # il gruppo LEGGE il nome della voce
+    base: {expr: "comune + divarico"}   # il gruppo LEGGE il nome della voce
   grain.duration:
     base: {expr: "env * 0.1"}           # stesso pescaggio, letto da un altro asse
 ```
