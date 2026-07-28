@@ -66,7 +66,7 @@ base:
   onset: 0
   sample: silenzi.wav
   time_mode: normalized
-  volume: 24 #-12                 # 6 stream sommati: headroom
+  #volume: 24 #-12                 # 6 stream sommati: headroom
   grain:
     envelope: hanning
     #duration_range: [[0,0],[.5,.05],[1,0]]
