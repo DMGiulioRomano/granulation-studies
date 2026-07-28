@@ -1344,3 +1344,69 @@ def test_cmd_stack_expanded_artifact_with_global_spread(tmp_path, monkeypatch):
     assert list(expanded) == ["base", "v_1", "v_2", "v_3"]
     assert expanded["v_2"]["base"]["onset"] == 2
     assert all("spread" not in (e or {}) for e in expanded.values())
+
+
+# --- n come envelope: il coro cresce/decresce nel tempo ---------------------
+
+
+def _n_env_doc(n_spec):
+    return {
+        "base": {"sample": "s.wav", "time_mode": "normalized", "volume": 24},
+        "axes": {"density": {"baseline": 10}},
+        "streams": {
+            "cugini": {
+                "spread": {
+                    "n": n_spec,
+                    "over": {"base.pointer.start": {"ramp": {"start": 0.1, "step": 0.1}}},
+                }
+            }
+        },
+    }
+
+
+def _gates(n_spec):
+    from granstudies.spread import expand_spreads
+
+    doc = _n_env_doc(n_spec)
+    out = expand_spreads(doc["streams"], base_volume=doc["base"]["volume"])
+    return {name: e["base"]["volume"] for name, e in out.items()}
+
+
+def test_n_envelope_genera_il_picco_di_voci():
+    gates = _gates([[0, 1], [1, 4]])
+    assert list(gates) == ["cugini_1", "cugini_2", "cugini_3", "cugini_4"]
+
+
+def test_n_envelope_step_accende_di_scatto():
+    # La voce 2 e' spenta finche' n(t) non la supera, poi va piena: due soli
+    # livelli, nessuna rampa.
+    gate = _gates({"type": "step", "points": [[0, 1], [0.5, 2]]})["cugini_2"]
+    assert gate["type"] == "step"
+    assert [v for _, v in gate["points"]] == [-120.0, 24.0]
+    assert gate["points"][1][0] == pytest.approx(0.5, abs=0.01)
+
+
+def test_n_envelope_rampa_fa_entrare_sfumando():
+    gate = _gates([[0, 1], [1, 2]])["cugini_2"]
+    livelli = [v for _, v in gate["points"]]
+    assert livelli[0] == -120.0 and livelli[-1] == 24.0
+    # sfumatura, non gradino: molti livelli intermedi, monotoni crescenti
+    assert len(livelli) > 10
+    assert livelli[1:] == sorted(livelli[1:])
+
+
+def test_n_envelope_con_volume_envelope_e_errore():
+    from granstudies.spread import expand_spreads
+
+    doc = _n_env_doc([[0, 1], [1, 2]])
+    with pytest.raises(SpecError, match="sovrascriverebbero"):
+        expand_spreads(doc["streams"], base_volume=[[0, 0], [1, 24]])
+
+
+def test_n_envelope_confligge_con_over_base_volume():
+    from granstudies.spread import expand_spreads
+
+    doc = _n_env_doc([[0, 1], [1, 2]])
+    doc["streams"]["cugini"]["spread"]["over"]["base.volume"] = {"values": [0, 24]}
+    with pytest.raises(SpecError, match="entrambi il volume"):
+        expand_spreads(doc["streams"], base_volume=24)
