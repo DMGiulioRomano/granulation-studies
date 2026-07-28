@@ -38,6 +38,7 @@ from typing import Any, Dict, List, Optional
 from .errors import ErrCtx
 from .expr import is_expr_node
 from . import gainmap
+from .spread import spread_pad
 from .stack import build_stack_stream
 from .study_spec import resolve_streams
 from .document_let import resolve_knobs
@@ -527,6 +528,13 @@ def _build_versions(
     versioni precedenti (col solo ``duration:`` top-level, il classico
     ``k * duration``). La durata documento e' ``max(onset + duration)`` sugli
     stream costruiti: versioni sovrapposte o bucate sono legittime.
+
+    Una variabile del blocco puo' muovere ``spread.n`` (nodo-expr), e allora
+    il numero di voci di una entry-spread cambia da una versione all'altra: il
+    padding dei nomi generati e' stabilizzato sulla larghezza del massimo
+    ``n`` di TUTTO il prodotto cartesiano (``spread_pad``, issue #39), come il
+    percorso fa lungo le istanze. E' la stessa evoluzione-di-spread, a gradini
+    di versione invece che sul tempo reale.
     """
     sid = study_id or data.get("study_id") or "study"
     ctx = ErrCtx(locs=locs)
@@ -571,11 +579,28 @@ def _build_versions(
             acc += d
     base_data = {k: v for k, v in data.items() if k != "versions"}
 
+    # Prima passata: i documenti iniettati, e il massimo ``n`` per entry-spread
+    # sull'intero prodotto cartesiano. Il padding stabile dei nomi generati
+    # richiede il conteggio di TUTTE le versioni prima di nominare la prima
+    # voce (issue #39): con ``spread.n`` mosso da una variabile del blocco il
+    # numero di voci cambia a gradini di versione, e senza pad condiviso la
+    # stessa voce logica cambierebbe nome a cavallo di una decade. Il massimo
+    # e' sul prodotto intero, non per gruppo: i documenti di
+    # ``generate_versions_documents`` restano confrontabili fra loro, e una
+    # patch per nome vale in ogni file.
+    docs: List[Dict[str, Any]] = []
+    for k, (_label, combo) in enumerate(combos):
+        data_k = inject_combo(base_data, combo)
+        if durations is not None:
+            data_k["duration"] = durations[k]
+        docs.append(data_k)
+    pad_n = spread_pad(docs, locs)
+
     if chunk is not None:
         n_groups = -(-len(combos) // chunk)  # ceil
         pad = len(str(n_groups - 1))
     built: List[tuple[str, Dict[str, Any]]] = []
-    for k, (label, combo) in enumerate(combos):
+    for k, (label, _combo) in enumerate(combos):
         # Gruppo di default: il primo asse (esterno/lento) — la prima parte
         # dell'etichetta (``grana=1__densita=rada`` -> ``grana=1``).
         group = (
@@ -583,10 +608,7 @@ def _build_versions(
             if chunk is not None
             else label.split("__", 1)[0]
         )
-        data_k = inject_combo(base_data, combo)
-        if durations is not None:
-            data_k["duration"] = durations[k]
-        for spec in resolve_streams(data_k, sid, locs=locs):
+        for spec in resolve_streams(docs[k], sid, locs=locs, spread_pad=pad_n):
             s = build_stack_stream(spec, output_sr=output_sr)
             s["stream_id"] = f"{s['stream_id']}__{label}"
             s["onset"] = (s.get("onset") or 0) + onsets[k]

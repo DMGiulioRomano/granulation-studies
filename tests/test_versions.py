@@ -14,6 +14,7 @@ from granstudies.versions import (
     generate_versions_document,
     generate_versions_documents,
     inject_combo,
+    parse_version_axes,
     parse_versions,
     version_combos,
 )
@@ -392,3 +393,103 @@ def test_split_preserves_relative_layout_with_explicit_onset():
     assert [sorted({s["onset"] for s in doc["streams"]}) for _, doc in docs] == [
         [0, 25], [0, 40],
     ]
+
+
+# --- spread.n mosso da una variabile di versions (issue #39) ----------------------
+# Le due cose si incontravano gia' da sole (``spread.n`` accetta un nodo-expr,
+# ``versions`` inietta nell'intero documento prima di ``resolve_streams``), ma
+# il padding dei nomi era calcolato per versione: a cavallo di una decade la
+# stessa voce logica cambiava nome, e una patch per nome si applicava solo dove
+# le cifre coincidevano.
+
+def _coro_study(versions, patches=None, n=None):
+    """Studio con una entry-spread il cui ``n`` e' guidato da ``k``.
+
+    ``k`` e' nominata solo dentro ``spread.n``: la guardia anti-refuso di
+    ``parse_version_axes`` conta anche quel nodo-expr.
+    """
+    data = _study(versions)
+    data["streams"] = {
+        "cugini": {
+            "spread": {
+                "n": n if n is not None else {"expr": "k", "let": {"k": 3}},
+                "over": {"base.volume": {"expr": "0 - i"}},
+            },
+        },
+    }
+    data["streams"].update(patches or {})
+    return data
+
+
+def _coro_ids(data):
+    doc = generate_versions_document(data, "vtest", output_sr=None)
+    return [s["stream_id"] for s in doc["streams"]]
+
+
+def test_spread_n_varies_per_version():
+    ids = _coro_ids(_coro_study({"k": {"values": [2, 4]}}))
+    assert ids == [
+        "cugini_1__k=2", "cugini_2__k=2",
+        "cugini_1__k=4", "cugini_2__k=4", "cugini_3__k=4", "cugini_4__k=4",
+    ]
+
+
+def test_variable_referenced_only_in_spread_n_passes_guard():
+    # nessun'altra espressione nomina k: la guardia deve comunque vederla
+    assert parse_version_axes(_coro_study({"k": {"values": [2, 4]}}))["k"]
+
+
+def test_name_width_stable_across_a_decade():
+    # k=9 -> 9 voci, k=11 -> 11: senza pad condiviso sarebbero cugini_1 e
+    # cugini_01, cioe' due nomi per la stessa voce logica
+    ids = _coro_ids(_coro_study({"k": {"values": [9, 11]}}))
+    assert ids[:2] == ["cugini_01__k=9", "cugini_02__k=9"]
+    assert len([i for i in ids if i.endswith("__k=9")]) == 9
+    assert ids[-1] == "cugini_11__k=11"
+    assert {len(i.split("__")[0]) for i in ids} == {len("cugini_01")}
+
+
+def test_patch_applies_in_every_version_where_the_voice_exists():
+    data = _coro_study(
+        {"k": {"values": [9, 11]}},
+        patches={"cugini_03": {"base": {"volume": -90}}},
+    )
+    doc = generate_versions_document(data, "vtest", output_sr=None)
+    by_id = {s["stream_id"]: s for s in doc["streams"]}
+    assert by_id["cugini_03__k=9"]["volume"] == -90
+    assert by_id["cugini_03__k=11"]["volume"] == -90
+    # e resta una patch, non uno stream in piu': 9 + 11 voci in tutto
+    assert len(doc["streams"]) == 20
+
+
+def test_patch_of_a_voice_absent_from_a_version_is_consumed_silently():
+    # cugini_11 esiste solo nella versione k=11: nella k=2 e' una voce-fantasma
+    data = _coro_study(
+        {"k": {"values": [2, 11]}},
+        patches={"cugini_11": {"base": {"volume": -90}}},
+    )
+    doc = generate_versions_document(data, "vtest", output_sr=None)
+    by_id = {s["stream_id"]: s for s in doc["streams"]}
+    assert "cugini_11__k=2" not in by_id
+    assert by_id["cugini_11__k=11"]["volume"] == -90
+    assert len([i for i in by_id if i.endswith("__k=2")]) == 2
+
+
+def test_constant_n_keeps_historic_narrow_names():
+    # senza variabilita' il pad non allarga niente: retro-compatibile
+    data = _coro_study({"k": {"values": [1, 2]}}, n=3)
+    # con n costante k non e' piu' nominata dallo spread: le serve un altro
+    # riferimento, o scatta la guardia anti-refuso
+    data["axes"]["density"]["range"] = {"expr": "k", "let": {"k": 0}}
+    ids = _coro_ids(data)
+    assert ids[:3] == ["cugini_1__k=1", "cugini_2__k=1", "cugini_3__k=1"]
+
+
+def test_pad_is_shared_across_split_documents():
+    # il massimo e' sul prodotto intero, non per gruppo: i file di
+    # generate_versions_documents restano confrontabili fra loro
+    data = _coro_study({"k": {"values": [2, 11]}})
+    docs = generate_versions_documents(data, "vtest", output_sr=None)
+    assert [label for label, _ in docs] == ["k=2", "k=11"]
+    first = [s["stream_id"] for s in docs[0][1]["streams"]]
+    assert first == ["cugini_01__k=2", "cugini_02__k=2"]
