@@ -65,7 +65,7 @@ base:
   grain:
     envelope: hanning
     duration_unit: samples
-    duration_range: [[0,0],[.5,10],[1,0]] 
+    duration_range: [[0,0],[1,100]] 
   pointer:
     loop_unit: absolute
     speed_ratio: 0
@@ -88,12 +88,12 @@ spread:
 streams:
   cugini:
     let:
-      respiro: {base: {expr: "d0"}, range: 1, n: 5, drift: {step: 0.2}}
+      comune: {base: {expr: "d0"}, range: 1, n: 5, drift: {step: 0.2}}
       s: [[0, 0], [1, 1]]
       #s: [[[0, 0], [75, 1]], 1, 4, 'cubic', null, true]
     spread:
       let:
-        livello: {expr: "i * 0.8"}
+        divarico: {expr: "i * 0.2"}
       over:
         axes.grain.duration.base:
           expr: "floor(g0 + i/(10-i))"
@@ -102,7 +102,7 @@ streams:
 
     axes:
       density:
-        base: {expr: "mix(respiro, respiro + livello, s)"}
+        base: {expr: "mix(comune, comune + divarico, s)"}
         #range: {expr: "d0 * 0.6"}
         #drift: {step: 0.12}
       grain.duration: {expr: "g0"} #{range: {n: 6, base: {expr: ".6 * g0"}, range: [0, 5]}, interpolation: step, drift: {step: 0.32}}

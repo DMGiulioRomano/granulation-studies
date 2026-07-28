@@ -90,17 +90,17 @@ spread:
 streams:
   cugini:
     let:
-      respiro: {base: {expr: "d0"}, range: 1, n: 5, drift: {step: 0.2}}
+      comune: {base: {expr: "d0"}, range: 1, n: 5, drift: {step: 0.2}}
       s: [[0, 0], [1, 1]]
     spread:
       let:
-        livello: {expr: "i * 0.8"}
+        divarico: {expr: "i * 0.8"}
       over:
         # La grana di partenza del cugino: scarto proporzionale alla grana di
         # riposo, cosi' resta relativo quando `versions:` muove g0.
         axes.grain.duration.base:
           expr: "g0 * (1 + i/(10-i) * 0.1)"
-        # Ogni cugino ha un respiro-X della grana leggermente piu' largo del
+        # Ogni cugino ha una banda-X della grana leggermente piu' larga del
         # precedente: le voci non cambiano grana tutte insieme.
         stack.grain.duration.range:
           expr: "i * .1"
@@ -112,10 +112,10 @@ streams:
     axes:
       density:
         # Forma comune del gruppo + offset della voce, scalato da `s`:
-        # `mix(A, B, w)` = A*(1-w) + B*w, cioe' `respiro + s * livello` scritto
-        # in modo lecito (`respiro` e' un Env e `s * livello` pure: Env + Env e'
+        # `mix(A, B, w)` = A*(1-w) + B*w, cioe' `comune + s * divarico` scritto
+        # in modo lecito (`comune` e' un Env e `s * divarico` pure: Env + Env e'
         # vietato, `mix` e' l'unica porta fra due Env).
-        base: {expr: "mix(respiro, respiro + livello, s)"}
+        base: {expr: "mix(comune, comune + divarico, s)"}
         #range: {expr: "d0 * 0.6"}
         #drift: {step: 0.12}
       grain.duration:
