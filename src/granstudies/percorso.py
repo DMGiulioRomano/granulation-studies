@@ -670,9 +670,9 @@ def generate_percorso_document(
     ``max_shift`` piu' stretto sugli archi lunghi — sono scelte musicali
     lasciate all'utente e non sono implementate qui.
 
-    La ``duration`` d'istanza entra come ``duration:`` del documento della
-    singola istanza prima del parse: fa da default, una duration per-stream
-    vince. Lo ``stream_id`` e' suffissato ``__k=NN`` (1-based, zero-padded
+    La ``duration`` d'istanza entra come ``base.duration`` del documento della
+    singola istanza prima del parse (issue #42): fa da default, una duration
+    per-stream vince. Lo ``stream_id`` e' suffissato ``__k=NN`` (1-based, zero-padded
     sulla larghezza del K finale: l'ordine alfabetico in SV e' quello
     cronologico); l'onset per-stream resta relativo alla propria istanza
     (``onset_finale = onset_istanza + onset_stream``). Il padding dei nomi di
@@ -709,7 +709,14 @@ def generate_percorso_document(
     docs: List[Dict[str, Any]] = []
     for k, combo in enumerate(combos):
         data_k = inject_combo(base_data, combo)
-        data_k["duration"] = durations[k]
+        # La duration d'istanza entra come ``base.duration`` del documento
+        # dell'istanza (issue #42), gemella dell'iniezione di ``versions``:
+        # e' il default degli stream dell'istanza, e li' vivono i default.
+        # Un ``duration:`` top-level residuo di uno studio non ancora migrato
+        # vincerebbe (nel merged e' indistinguibile da una duration di entry)
+        # e schiaccerebbe tutte le istanze sulla stessa durata: va scartato.
+        data_k.setdefault("base", {})["duration"] = durations[k]
+        data_k.pop("duration", None)
         docs.append(data_k)
     pad_n = spread_pad(docs, locs)
 
