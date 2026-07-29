@@ -30,7 +30,6 @@
 study_id: study01_stack_100-300ms
 title: "Studio 01 (stack) — grani 100-300 ms, 6 punti di lettura"
 seed: 1988
-duration: 50
 samples_dir: samples
 
 # --- Livello 1: le manopole di documento ------------------------------------
@@ -64,6 +63,7 @@ gain_compensation:
 # Parametri fissi: tutto cio' che non e' un asse.
 base:
   onset: 0
+  duration: 50   # durata di uno stream (default per chi non ne dichiara una)
   sample: silenzi.wav
   time_mode: normalized
   #volume: 24 #-12                 # 6 stream sommati: headroom
@@ -149,5 +149,6 @@ streams:
 # veloce (density). 9 x 7 = 63 versioni concatenate, 50 s ciascuna, distribuite
 # su 9 documenti (uno per valore di `g0`, 7 versioni ciascuno).
 versions:
+  duration: 50   # passo della concatenazione: una versione ogni 50 s
   g0: {ramp: {start: 0.1, stop: 0.3, step: 0.025}}
   d0: {ramp: {start: 0, stop: 20, step: 3}}
