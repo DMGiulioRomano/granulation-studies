@@ -93,6 +93,7 @@ def _write_expanded_streams(study: str, data: Dict[str, Any]) -> None:
     a validazione gia' avvenuta. Scrittura incrementale come ogni YAML
     generato (mtime fermo a contenuto identico).
     """
+    from .group_let import apply_group_let
     from .render import _dump
     from .spread import expand_spreads
 
@@ -103,6 +104,11 @@ def _write_expanded_streams(study: str, data: Dict[str, Any]) -> None:
     streams = data.get("streams") or {}
     if not any(isinstance(e, dict) and "spread" in e for e in streams.values()):
         return
+    # Stessa pre-pass di ``resolve_streams``: le manopole di gruppo alimentano
+    # anche ``spread.let``/``spread.over``, quindi vanno iniettate PRIMA di
+    # espandere — senza, una expr di voce che nomina una manopola di gruppo
+    # esplode qui, nello yaml di sola ispezione.
+    streams = apply_group_let(streams)
     out = os.path.join(gen_dir(study), "yaml")
     os.makedirs(out, exist_ok=True)
     path = os.path.join(out, "streams_expanded.yml")
