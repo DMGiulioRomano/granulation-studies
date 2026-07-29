@@ -5,9 +5,11 @@ Il gemello verticale dello sweep. Dove sweep *esplode* gli stream in N file
 multi-stream. L'invariante: ``axes`` conosce solo Y (valori + interpolation);
 il processo possiede X — sweep via plateau/transition (durata derivata), stack
 via le strategy-X (``x_strategies``) normalizzate sulla durata dello stream.
-``duration:`` top-level e' il default che ogni stream puo' sovrascrivere
-(issue #26): camminate-X ed envelope ``time_mode: normalized`` si normalizzano
-sulla duration *propria* dello stream, non su quella del documento.
+``base.duration`` e' il default che ogni stream puo' sovrascrivere con la
+propria ``duration:`` di entry (issue #26, #42): camminate-X ed envelope
+``time_mode: normalized`` si normalizzano sulla duration *propria* dello
+stream, non su quella del documento — che nessuno dichiara, perche' e'
+dedotta qui come ``max(onset + duration)``.
 
 In stack gli assi NON si combinano: niente prodotto cartesiano, niente zip.
 Ogni asse di uno stream diventa un envelope indipendente sulla stessa durata,
@@ -126,11 +128,17 @@ def build_stack_stream(
     if spec.duration is None:
         raise ValueError(
             f"stack [{spec.stream_id or spec.study_id}]: nessuna 'duration' "
-            "risolta (ne' propria dello stream ne' ereditata dal top-level)."
+            "risolta (ne' propria dello stream ne' ereditata da 'base.duration')."
         )
     base = dict(spec.base)
     base["stream_id"] = spec.stream_id or "stream"
     base["time_mode"] = "normalized"
+    # Scrittura *incondizionata*, al contrario della riga gemella per l'onset
+    # qui sotto: ``spec.duration`` e' gia' la catena ``duration:`` di entry >
+    # ``base.duration`` risolta al parse (#42), quindi una eventuale
+    # ``base.duration`` presente in ``spec.base`` e' o lo stesso valore o
+    # quello che l'override di entry ha appena scavalcato. Renderla
+    # condizionale perderebbe l'override.
     base["duration"] = spec.duration
     # L'onset per-stream (issue #26) vince su un eventuale ``base.onset``
     # ereditato; non dichiarato (None) lo lascia intatto.

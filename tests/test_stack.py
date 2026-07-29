@@ -465,3 +465,55 @@ def test_document_without_top_level_duration():
     by_id = {s["stream_id"]: s for s in doc["streams"]}
     assert by_id["voce_a"]["duration"] == 10
     assert doc["duration"] == 35              # max(onset + duration)
+
+
+# --- base.duration nel ramo streams (issue #42) -----------------------------------
+
+def _base_duration_data():
+    data = _study_data()
+    del data["duration"]
+    data["base"]["duration"] = 30
+    return data
+
+
+def test_base_duration_survives_stream_construction():
+    # Il sintomo 2 di #42: prima la base.duration era sovrascritta senza
+    # guardare, quindi una 'base: {duration: N}' non faceva nulla e non
+    # avvisava. Ora e' la fonte, e arriva nello stream engine.
+    from granstudies.stack import generate_stack_document
+
+    doc = generate_stack_document(_specs(_base_duration_data()))
+    assert [s["duration"] for s in doc["streams"]] == [30, 30]
+
+
+def test_entry_base_duration_is_read_per_stream():
+    from granstudies.stack import generate_stack_document
+
+    data = _base_duration_data()
+    data["streams"]["voce_b"]["base"] = {"duration": 12}
+    doc = generate_stack_document(_specs(data))
+    by_id = {s["stream_id"]: s for s in doc["streams"]}
+    assert by_id["voce_a"]["duration"] == 30
+    assert by_id["voce_b"]["duration"] == 12
+
+
+def test_entry_duration_wins_over_entry_base_duration():
+    # La catena entry > base va risolta PRIMA di scrivere lo stream: rendere
+    # condizionale la scrittura di stack.py (non riscrivere se base ne ha
+    # gia' una) perderebbe proprio questo override.
+    from granstudies.stack import generate_stack_document
+
+    data = _base_duration_data()
+    data["streams"]["voce_b"] = {"duration": 12, "base": {"duration": 99}}
+    doc = generate_stack_document(_specs(data))
+    by_id = {s["stream_id"]: s for s in doc["streams"]}
+    assert by_id["voce_b"]["duration"] == 12
+
+
+def test_document_duration_unchanged_with_base_duration():
+    from granstudies.stack import generate_stack_document
+
+    data = _base_duration_data()
+    data["streams"]["voce_b"]["onset"] = 10
+    doc = generate_stack_document(_specs(data))
+    assert doc["duration"] == 40              # max(onset + duration), invariato
