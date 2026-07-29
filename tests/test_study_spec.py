@@ -887,3 +887,73 @@ def test_stack_stream_without_any_duration_raises():
     d["streams"] = {"a": {"duration": 10}, "b": {}}
     with pytest.raises(ValueError, match="duration"):
         resolve_streams(d)
+
+
+# --- base.duration come fonte di spec.duration (issue #42) -----------------------
+
+def _base_duration_dict():
+    """Uno stack che dichiara la durata dello stream dove va: dentro ``base:``."""
+    d = _stack_dict()
+    del d["duration"]
+    d["base"]["duration"] = 30
+    return d
+
+
+def test_base_duration_is_the_stream_default():
+    # La durata di stream si scrive accanto allo stream, non al top del documento.
+    spec = parse_study_spec(_base_duration_dict())
+    assert spec.duration == 30
+
+
+def test_base_duration_inherited_by_streams_without_their_own():
+    d = _base_duration_dict()
+    d["streams"] = {"lunga": {"duration": 60}, "eredita": {}}
+    specs = {s.stream_id: s for s in resolve_streams(d)}
+    assert specs["lunga"].duration == 60      # override di entry
+    assert specs["eredita"].duration == 30    # eredita base.duration
+
+
+def test_stream_duration_overrides_base_duration_in_entry():
+    # Il sintomo 2: una base.duration di entry non e' piu' inerte, e la
+    # duration di entry le vince sopra (catena entry > base sul merged).
+    d = _base_duration_dict()
+    d["streams"] = {
+        "propria": {"duration": 60, "base": {"duration": 12}},
+        "solo_base": {"base": {"duration": 12}},
+    }
+    specs = {s.stream_id: s for s in resolve_streams(d)}
+    assert specs["propria"].duration == 60
+    assert specs["solo_base"].duration == 12
+
+
+def test_base_duration_non_positive_raises():
+    d = _base_duration_dict()
+    d["base"]["duration"] = 0
+    with pytest.raises(ValueError, match=r"base\.duration"):
+        parse_study_spec(d)
+
+
+def test_base_duration_non_numeric_raises():
+    d = _base_duration_dict()
+    d["base"]["duration"] = "trenta"
+    with pytest.raises(ValueError, match=r"base\.duration"):
+        parse_study_spec(d)
+
+
+def test_stack_without_any_duration_message_points_to_base():
+    d = _stack_dict()
+    del d["duration"]
+    with pytest.raises(ValueError, match=r"base\.duration"):
+        parse_study_spec(d)
+
+
+def test_top_level_duration_still_wins_over_base_as_entry_override():
+    # Nel documento *merged* la 'duration:' top-level non e' una chiave di
+    # studio: e' la duration di entry appena promossa dal merge, e come tale
+    # deve vincere su base.duration. Dentro parse_study_spec i due casi sono
+    # indistinguibili (come per 'onset'), e va bene cosi': uno studio non
+    # ancora migrato si comporta esattamente come prima, cosi' la fase 4 puo'
+    # aggiungere base.duration e togliere il top-level in due passi separati.
+    d = _base_duration_dict()
+    d["duration"] = 999
+    assert parse_study_spec(d).duration == 999

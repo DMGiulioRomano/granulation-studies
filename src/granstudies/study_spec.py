@@ -91,6 +91,9 @@ class StudySpec:
     study_id: str
     title: str | None
     seed: int | None
+    # Durata dello stream (s), risolta per catena ``duration:`` di entry >
+    # ``base.duration`` (issue #42). Non e' la durata del documento: quella e'
+    # sempre dedotta, ``max(onset + duration)`` sugli stream costruiti.
     duration: float | None
     # Onset dello stream sulla timeline (s). ``None`` = non dichiarato: lo
     # distingue da un esplicito ``onset: 0`` cosi' il processo stack non
@@ -666,15 +669,27 @@ def parse_study_spec(
             hint="l'accoppiamento degli assi (ex parallel) vive nel processo "
             "stack — stessa strategy-X e stesso n.",
         )
-    duration = data.get("duration")
-    if duration is not None and (
-        not isinstance(duration, (int, float)) or isinstance(duration, bool)
-        or duration <= 0
+    # Durata dello stream: si dichiara accanto allo stream (issue #42). La
+    # catena e' ``duration:`` di entry > ``base.duration``, risolta qui sul
+    # documento *merged* — dopo il merge la ``duration:`` di una entry e'
+    # diventata chiave top-level, esattamente come succede a ``onset``. Il
+    # ``duration:`` scritto a mano al top di uno studio e' l'ultima rete, in
+    # via di rimozione: la durata del documento non si dichiara, si deduce.
+    base_duration = (data.get("base") or {}).get("duration")
+    for value, label, key in (
+        (base_duration, "'base.duration'", ("base", "duration")),
+        (data.get("duration"), "'duration'", ("duration",)),
     ):
-        raise ctx.err(
-            f"'duration' deve essere un numero > 0 (ricevuto {duration!r}).",
-            key=("duration",),
-        )
+        if value is not None and (
+            not isinstance(value, (int, float)) or isinstance(value, bool)
+            or value <= 0
+        ):
+            raise ctx.err(
+                f"{label} deve essere un numero > 0 (ricevuto {value!r}).",
+                key=key,
+            )
+    top_duration = data.get("duration")
+    duration = top_duration if top_duration is not None else base_duration
     onset = data.get("onset")
     if onset is not None and (
         not isinstance(onset, (int, float)) or isinstance(onset, bool)
@@ -786,15 +801,15 @@ def parse_study_spec(
                 hint=f"gli assi dichiarati in 'axes:' sono {sorted(axis_names)}.",
             )
     # Il documento qui puo' essere il merge di uno stream: ``duration`` e'
-    # assente solo se lo stream non ne risolve nessuna (ne' propria ne'
-    # ereditata dal top-level, che e' un default, non un vincolo).
+    # assente solo se lo stream non ne risolve nessuna, ne' propria ne'
+    # ereditata da ``base.duration`` (che e' un default, non un vincolo).
     if stack_axes is not None and duration is None:
         raise ctx.err(
             "stack: lo stream non risolve nessuna 'duration' (ne' propria "
-            "ne' ereditata dal top-level).",
+            "ne' ereditata da 'base.duration').",
             key=("stack",),
-            hint="dichiara 'duration: <secondi>' al top del documento "
-            "(default per tutti gli stream) oppure nello stream.",
+            hint="dichiara 'base: {duration: <secondi>}' (default per tutti "
+            "gli stream) oppure 'duration:' nella entry dello stream.",
         )
     orderings = [list(o) for o in sweep_cfg.get("orderings", [])]
     # Default di ``orders`` condizionato dalla presenza di ``orderings``: se
