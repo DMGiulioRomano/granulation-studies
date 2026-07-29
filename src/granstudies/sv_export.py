@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import bz2
 import os
+import re
 import xml.etree.ElementTree as ET
 from typing import Any, List, Literal, Optional, Tuple
 
@@ -214,7 +215,8 @@ def _sample_rate(audio_path: str) -> int:
 def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
                   envelopes: List[Tuple[str, List, str, float, float]], layout: Layout,
                   markers: bool = True,
-                  markers_scope: Literal["all", "waveform"] = "waveform") -> bytes:
+                  markers_scope: Literal["all", "waveform"] = "waveform",
+                  group_marks: Optional[List[Tuple[float, str]]] = None) -> bytes:
     root = ET.Element("sv")
     data = ET.SubElement(root, "data")
 
@@ -304,9 +306,37 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
     # stati). Modello 1D sparse; etichetta = indice plateau (1-based). Viene
     # poi referenziato in ogni pane, cosi' le linee verticali sono allineate su
     # waveform ed envelope e la navigazione PgUp/PgDown ci salta sopra.
+    # ``group_marks``: (tempo assoluto in secondi, etichetta) — inizio di ogni
+    # gruppo di stream sulla timeline. Rossi, per orientarsi fra i gruppi in
+    # fila; sostituiscono i marker di plateau quando presenti.
     marker_ref: Tuple[str, str] | None = None
     plateau_starts = _plateau_starts(envelopes) if markers else []
-    if plateau_starts:
+    if group_marks:
+        marker_model_id = str(next_id);    next_id += 1
+        marker_dataset_id = str(next_id);  next_id += 1
+        marker_layer_id = str(next_id);    next_id += 1
+        ET.SubElement(data, "model", {
+            "id": marker_model_id, "name": "Group starts",
+            "sampleRate": str(sample_rate), "type": "sparse",
+            "dimensions": "1", "resolution": "1",
+            "notifyOnAdd": "true", "dataset": marker_dataset_id,
+        })
+        ET.SubElement(data, "playparameters", {
+            "mute": "true", "pan": "0", "gain": "1",
+            "clipId": "", "model": marker_model_id,
+        })
+        mds = ET.SubElement(data, "dataset", {"id": marker_dataset_id, "dimensions": "1"})
+        for t_sec, label in group_marks:
+            ET.SubElement(mds, "point", {
+                "frame": str(round(t_sec * sample_rate)), "label": label,
+            })
+        ET.SubElement(data, "layer", {
+            "id": marker_layer_id, "type": "timeinstants", "name": "Group starts",
+            "model": marker_model_id, "plotStyle": "0",
+            "colourName": "Red", "colour": "#ff0000", "darkBackground": "true",
+        })
+        marker_ref = (marker_layer_id, marker_model_id)
+    elif plateau_starts:
         marker_model_id = str(next_id);    next_id += 1
         marker_dataset_id = str(next_id);  next_id += 1
         marker_layer_id = str(next_id);    next_id += 1
@@ -367,14 +397,18 @@ def _build_sv_xml(audio_path: str, sample_rate: int, duration_sec: float,
             "model": "0", "visible": "true",
         })
 
+    marker_name = "Group starts" if group_marks else "Plateau markers"
+
     def _marker_layer(pane, *, waveform_pane: bool = False):
         if marker_ref is None:
             return
-        if markers_scope == "waveform" and not waveform_pane:
+        # I marker di gruppo servono a orientarsi in ogni pane, non solo sulla
+        # waveform: lo scope ristretto vale solo per i plateau.
+        if markers_scope == "waveform" and not waveform_pane and not group_marks:
             return
         layer_id, model_id = marker_ref
         ET.SubElement(pane, "layer", {
-            "id": layer_id, "type": "timeinstants", "name": "Plateau markers",
+            "id": layer_id, "type": "timeinstants", "name": marker_name,
             "model": model_id, "visible": "true",
         })
 
@@ -650,7 +684,7 @@ def _build_sv_xml_stems(stems: List[Tuple[str, str, int, float, float, List[Tupl
                 "id": marker_layer_id, "type": "timeinstants",
                 "name": f"{stream_id} :: Version starts",
                 "model": marker_model_id, "plotStyle": "0",
-                "colourName": "White", "colour": "#ffffff", "darkBackground": "true",
+                "colourName": "Red", "colour": "#ff0000", "darkBackground": "true",
             })
             ET.SubElement(pane, "layer", {
                 "id": marker_layer_id, "type": "timeinstants",
@@ -762,9 +796,20 @@ def stack_to_sv(stack_yaml_path: str, audio_path: str, out_path: str,
     duration = float(doc.get("duration", 1.0))
     envelopes = _stack_envelopes(doc, axis_paths)
 
+    # Confini dei gruppi: l'onset di ogni stream, dedup, etichettato col
+    # nome-base della voce (``cugini_3__g0=5__d0=3`` -> ``cugini``). Con
+    # `versions` piu' voci condividono lo stesso onset: la prima vince.
+    marks: dict = {}
+    for stream in doc.get("streams", []):
+        t = round(float(stream.get("onset", 0) or 0), 6)
+        base = stream.get("stream_id", "").split("__", 1)[0]
+        marks.setdefault(t, re.sub(r"_\d+$", "", base))  # toglie l'indice di voce
+    group_marks = sorted(marks.items())
+
     sr = _sample_rate(audio_path)
     compressed = _build_sv_xml(os.path.abspath(audio_path), sr, duration,
-                               envelopes, layout, markers=False)
+                               envelopes, layout, markers=False,
+                               group_marks=group_marks)
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     with open(out_path, "wb") as fh:
