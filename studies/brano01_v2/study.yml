@@ -22,11 +22,11 @@
 study_id: brano01_v2
 title: "Brano 01 — versione due (10 min)"
 seed: 5
-duration: 600
 samples_dir: samples
 
 base:
   onset: 0
+  duration: 600   # durata dello stream, ereditata da chi non ne dichiara una
   sample: silenzi.wav
   time_mode: normalized
   grain:
