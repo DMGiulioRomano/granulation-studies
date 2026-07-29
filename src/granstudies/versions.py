@@ -12,18 +12,21 @@ envelope: ogni stream conserva il proprio ``time_mode: normalized`` sulla
 propria durata, e l'engine dimensiona il buffer su ``max(onset + duration)``.
 
 Sulla timeline le versioni si posizionano con le chiavi riservate ``onset``/
-``duration`` del blocco (issue #26): sequenze lunghe N (numero di combo),
-fuori dal prodotto cartesiano, mappate 1:1 sulle versioni — ``onset[k]``
-assoluto, ``duration[k]`` default di versione (una duration per-stream vince).
-Chiavi assenti -> le versioni si concatenano sulle durate di versione (col
-solo ``duration:`` top-level e' il classico ``onset = k * duration``).
+``duration`` del blocco (issue #26): uno **scalare** (vale per tutte le
+versioni, la forma comune) oppure una sequenza lunga N (numero di combo),
+fuori dal prodotto cartesiano, mappata 1:1 sulle versioni — ``onset[k]``
+assoluto, ``duration[k]`` default di versione, iniettato come
+``base.duration`` del documento della combo (una duration per-stream vince).
+Senza ``onset`` le versioni si concatenano sulle durate di versione: col
+``duration`` scalare e' il classico ``onset = k * duration``.
 Sovrapposizioni e buchi sono legittimi: il merge degli stem fa overlay-add.
 
 Il blocco richiede ``stack:`` (le versioni sono repliche dello stack), ma e'
 un processo indipendente con output proprio (``yaml/versions/versions.yml``:
 ``yaml/stack/stack.yml`` resta il materiale com'e' scritto, senza repliche —
-e' l'istanza di partenza del percorso); ``duration:`` top-level e' un
-default, serve solo quando nessun'altra fonte risolve durate e posizioni.
+e' l'istanza di partenza del percorso). ``versions.duration`` e' il passo
+della concatenazione, ``base.duration`` la durata di uno stream: due cose
+diverse che prima erano lo stesso numero al top del documento (issue #42).
 Una variabile deve essere referenziata da almeno un'espressione del documento
 (guardia anti-refuso); il default dichiarato nel ``let`` (es. ``d: 0``) tiene
 lo studio valido anche senza il blocco, e viene ombreggiato dall'iniezione.
@@ -196,21 +199,30 @@ def _timeline_sequence(
 ) -> List[float]:
     """Risolve una chiave riservata (``onset``/``duration``) in N valori.
 
-    Stesso vocabolario delle variabili (``values``/``ramp``/banda), ma il
-    conteggio lo possiede il prodotto cartesiano: ``values`` deve avere
-    esattamente N elementi; la banda deduce ``n = N`` (unico punto del
-    progetto dove n e' deducibile) e un ``n`` esplicito diverso e' errore;
-    ``ramp`` senza ``step`` distribuisce N valori equispaziati start -> stop,
-    con ``step`` la griglia generata deve contare esattamente N. Una banda
-    senza ``seed`` deriva ``stable_seed("<study>:versions:<nome>")``.
+    Uno **scalare** e' la forma corta e vale per tutte le versioni: e' il caso
+    piu' comune (versioni tutte lunghe uguale, passo costante) e va scritto
+    come si legge, ``versions: {duration: 50}`` (issue #42).
+
+    Altrimenti il vocabolario e' quello delle variabili
+    (``values``/``ramp``/banda), ma il conteggio lo possiede il prodotto
+    cartesiano: ``values`` deve avere esattamente N elementi; la banda deduce
+    ``n = N`` (unico punto del progetto dove n e' deducibile) e un ``n``
+    esplicito diverso e' errore; ``ramp`` senza ``step`` distribuisce N valori
+    equispaziati start -> stop, con ``step`` la griglia generata deve contare
+    esattamente N. Una banda senza ``seed`` deriva
+    ``stable_seed("<study>:versions:<nome>")``.
     """
     key = ("versions", name)
+    if isinstance(cfg, (int, float)) and not isinstance(cfg, bool):
+        values: List[Any] = [cfg] * n
+        return _check_timeline_values(name, values, n, ctx, key)
     if not isinstance(cfg, dict):
         raise ctx.err(
-            f"versions: '{name}' deve avere un generatore (dict), "
-            f"trovato {cfg!r}.",
+            f"versions: '{name}' deve avere un generatore (dict) o uno "
+            f"scalare, trovato {cfg!r}.",
             key=key,
-            hint="dichiara 'values', 'ramp' o una banda ('base'/'range').",
+            hint="uno scalare vale per tutte le versioni (es. 'duration: 50'); "
+            "altrimenti dichiara 'values', 'ramp' o una banda ('base'/'range').",
         )
     with ctx.wrapping(key=key):
         gen_key, params = y_generator(cfg)
@@ -246,6 +258,17 @@ def _timeline_sequence(
             values = band(
                 **expand_params(band_params, seed=band_params["seed"])
             )
+    return _check_timeline_values(name, values, n, ctx, key)
+
+
+def _check_timeline_values(
+    name: str, values: List[Any], n: int, ctx: ErrCtx, key: tuple
+) -> List[float]:
+    """Valida la sequenza di una chiave riservata: lunghezza, tipo, segno.
+
+    Condivisa dalle due forme (scalare broadcastato e generatore): quello che
+    la timeline accetta non dipende da come e' stata scritta.
+    """
     if len(values) != n:
         raise ctx.err(
             f"versions: '{name}' genera {len(values)} valori ma le versioni "
@@ -521,11 +544,11 @@ def _build_versions(
     Le chiavi riservate ``onset``/``duration`` del blocco (issue #26)
     posizionano le versioni: ``onset[k]`` e' assoluto (l'onset per-stream
     resta relativo alla propria versione: ``onset_finale = onset_versione +
-    onset_stream``); ``duration[k]`` viene iniettata come ``duration:`` del
-    documento della combo k *prima* di ``resolve_streams``, quindi fa da
-    default e una duration per-stream vince comunque. Chiavi assenti ->
-    concatenazione: ``onset_versione[k]`` e' la somma delle durate delle
-    versioni precedenti (col solo ``duration:`` top-level, il classico
+    onset_stream``); ``duration[k]`` viene iniettata come ``base.duration``
+    del documento della combo k *prima* di ``resolve_streams`` (issue #42),
+    quindi fa da default e una duration per-stream vince comunque. Chiavi
+    assenti -> concatenazione: ``onset_versione[k]`` e' la somma delle durate
+    delle versioni precedenti (con ``versions.duration`` scalare, il classico
     ``k * duration``). La durata documento e' ``max(onset + duration)`` sugli
     stream costruiti: versioni sovrapposte o bucate sono legittime.
 
@@ -566,11 +589,14 @@ def _build_versions(
         if per_version is None:
             raise ctx.err(
                 "versions: senza 'versions.onset' serve una durata di "
-                "versione per concatenare — 'versions.duration' oppure "
-                "'duration:' top-level.",
+                "versione per concatenare, e non c'e' nessuna "
+                "'versions.duration'.",
                 key=("versions",),
-                hint="aggiungi 'duration: <secondi>' al top del documento, "
-                "o le chiavi riservate 'duration'/'onset' nel blocco.",
+                hint="aggiungi 'duration: <secondi>' dentro il blocco "
+                "'versions:' (il passo della concatenazione) oppure "
+                "'versions.onset' per posizionare le versioni a mano. La "
+                "'base.duration' non vale: e' la durata di uno stream, non "
+                "il passo delle versioni.",
             )
         onsets = []
         acc = 0.0
@@ -592,7 +618,17 @@ def _build_versions(
     for k, (_label, combo) in enumerate(combos):
         data_k = inject_combo(base_data, combo)
         if durations is not None:
-            data_k["duration"] = durations[k]
+            # La duration di versione entra come ``base.duration`` del
+            # documento della combo (issue #42): e' il default degli stream
+            # della versione, quindi va scritta dove i default degli stream
+            # vivono. Una ``duration:`` di entry la scavalca come sempre.
+            data_k.setdefault("base", {})["duration"] = durations[k]
+            # Rete della transizione: uno studio non ancora migrato porta
+            # ancora un ``duration:`` top-level, che nel documento merged e'
+            # indistinguibile da una duration di entry e vincerebbe su quella
+            # di versione. Non deve: la versione e' piu' specifica del default
+            # di documento. Sparira' da se' quando il top-level sara' vietato.
+            data_k.pop("duration", None)
         docs.append(data_k)
     pad_n = spread_pad(docs, locs)
 

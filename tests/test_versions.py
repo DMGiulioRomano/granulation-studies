@@ -493,3 +493,67 @@ def test_pad_is_shared_across_split_documents():
     assert [label for label, _ in docs] == ["k=2", "k=11"]
     first = [s["stream_id"] for s in docs[0][1]["streams"]]
     assert first == ["cugini_01__k=2", "cugini_02__k=2"]
+
+
+# --- versions.duration: scalare e default di versione (issue #42) ---------------
+
+def test_reserved_duration_accepts_scalar_broadcast_on_n():
+    # Il caso di gran lunga piu' comune — tutte le versioni lunghe uguale —
+    # era l'unico che non si poteva scrivere: pretendeva un generatore.
+    data = _study({"d": {"values": [1, 2, 3]}, "duration": 5})
+    del data["duration"]
+    doc = generate_versions_document(data, "vtest", output_sr=None)
+    onsets = sorted({s["onset"] for s in doc["streams"]})
+    assert onsets == [0, 5, 10]               # passo 5, broadcastato su N
+    assert {s["duration"] for s in doc["streams"]} == {5}
+    assert doc["duration"] == 15
+
+
+def test_reserved_duration_scalar_non_positive_errors():
+    data = _study({"d": {"values": [1, 2]}, "duration": 0})
+    del data["duration"]
+    with pytest.raises(SpecError, match="deve essere > 0"):
+        generate_versions_document(data, "vtest", output_sr=None)
+
+
+def test_reserved_duration_scalar_non_numeric_errors():
+    data = _study({"d": {"values": [1, 2]}, "duration": "cinque"})
+    del data["duration"]
+    with pytest.raises(SpecError, match="scalare"):
+        generate_versions_document(data, "vtest", output_sr=None)
+
+
+def test_reserved_onset_accepts_scalar_broadcast_on_n():
+    # Simmetria: onset e duration sono la stessa chiave riservata, con la
+    # stessa forma. Uno scalare su onset e' un valore assoluto ripetuto —
+    # tutte le versioni sovrapposte, legittimo (il merge fa overlay-add).
+    data = _study({"d": {"values": [1, 2]}, "onset": 3})
+    doc = generate_versions_document(data, "vtest", output_sr=None)
+    assert {s["onset"] for s in doc["streams"]} == {3}
+
+
+def test_scalar_duration_is_version_default_and_stream_wins():
+    # D2: versions.duration resta doppia — passo E default degli stream della
+    # versione. Il default passa ora per base.duration, quindi una duration
+    # di entry lo scavalca come qualsiasi altro default di documento.
+    data = _study({"d": {"values": [1, 2]}, "duration": 5})
+    del data["duration"]
+    data["streams"]["fermo"] = {
+        "duration": 4,
+        "axes": {"density": {"base": {"expr": "env"}}},
+    }
+    doc = generate_versions_document(data, "vtest", output_sr=None)
+    by_id = {s["stream_id"]: s for s in doc["streams"]}
+    assert by_id["fermo__d=1"]["duration"] == 4    # la propria vince
+    assert by_id["mobile__d=1"]["duration"] == 5   # eredita la versione
+    assert by_id["mobile__d=2"]["onset"] == 5      # il passo resta il suo
+
+
+def test_version_duration_survives_a_document_with_base_duration():
+    # base.duration del documento e' il default degli stream; la duration di
+    # versione e' piu' specifica e la ombreggia (stesso posto, valore nuovo).
+    data = _study({"d": {"values": [1, 2]}, "duration": 5})
+    del data["duration"]
+    data["base"]["duration"] = 30
+    doc = generate_versions_document(data, "vtest", output_sr=None)
+    assert {s["duration"] for s in doc["streams"]} == {5}
