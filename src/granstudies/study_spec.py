@@ -73,6 +73,10 @@ class Axis:
 # (plateau/transition) e' proprieta' del processo sweep e vive sotto ``sweep:``.
 _AXES_RESERVED_KEYS = ("interpolation", "seed")
 
+# Nome dei valori attesi per ogni ``grain.duration_unit``, per i messaggi
+# d'errore sui bounds. Unita' assente o ``seconds`` -> secondi.
+_UNIT_LABELS = {"samples": "campioni", "milliseconds": "ms"}
+
 # Vocabolario di ``interpolation`` (curva di Y fra i valori di test): ``step``
 # (tenuta), ``linear`` (rampa), ``cubic`` (curva). Un valore fuori da qui e' un
 # refuso: va fermato al parse, non passato muto a valle (issue #37). Pubblico
@@ -244,23 +248,29 @@ def _validate(spec: StudySpec, ctx: ErrCtx, *, orders_explicit: bool = False) ->
         # fuori range va fermato al parse invece di essere silenziosamente
         # clampato in render.
         #
-        # I bounds del registry sono in *secondi*. Se lo stream dichiara
-        # ``grain.duration_unit: samples`` (stream.py:415), i valori dell'asse
-        # ``grain.duration`` sono in campioni: vanno convertiti in secondi
-        # (fattore 1/output_sr) prima del confronto, e ``output_sr`` porta il
-        # minimo a 1 campione come fa l'engine.
-        samples_unit = (
-            ax.path == "grain.duration"
-            and spec.base.get("grain", {}).get("duration_unit") == "samples"
+        # I bounds del registry sono in *secondi*. Se lo stream dichiara una
+        # ``grain.duration_unit`` diversa da ``seconds`` (stream.py:415), i
+        # valori dell'asse ``grain.duration`` sono in quell'unita' e vanno
+        # convertiti prima del confronto. Dichiarare un'unita' fine (campioni,
+        # millisecondi) e' anche il segnale che si lavora sotto il
+        # millisecondo, quindi ``output_sr`` porta il minimo al floor dinamico
+        # invece del fallback statico di 1 ms.
+        grain_unit = (
+            spec.base.get("grain", {}).get("duration_unit")
+            if ax.path == "grain.duration"
+            else None
         )
+        if grain_unit == "seconds":
+            grain_unit = None
         sr = bounds_mod.default_output_sr()
-        b = bounds_mod.bounds_for(ax.path, output_sr=sr if samples_unit else None)
+        b = bounds_mod.bounds_for(ax.path, output_sr=sr if grain_unit else None)
         if b is not None:
             lo, hi = b
+            factor = bounds_mod.grain_duration_factor(grain_unit, sr)
             for v in list(ax.values) + [ax.baseline]:
-                v_sec = v / sr if samples_unit else v
+                v_sec = v * factor
                 if (lo is not None and v_sec < lo) or (hi is not None and v_sec > hi):
-                    unit = "campioni" if samples_unit else "s"
+                    unit = _UNIT_LABELS.get(grain_unit, "s")
                     raise ctx.err(
                         f"Asse '{ax.name}' valore {v} {unit} fuori bounds {b} "
                         f"(s) per il path '{ax.path}'.",
@@ -272,7 +282,11 @@ def _validate(spec: StudySpec, ctx: ErrCtx, *, orders_explicit: bool = False) ->
 
 
 def _resolve_baseline(
-    name: str, cfg: Dict[str, Any], defaults: Dict[str, Any] | None, ctx: ErrCtx
+    name: str,
+    cfg: Dict[str, Any],
+    defaults: Dict[str, Any] | None,
+    ctx: ErrCtx,
+    grain_unit: str | None = None,
 ):
     """Risolve il ``baseline`` di un asse: esplicito o dal default engine.
 
@@ -280,10 +294,24 @@ def _resolve_baseline(
     dello schema engine via ``path``. I path ``pitch.*`` (unit-driven, nessun
     default) e i parametri con ``default=None`` (es. ``density``) richiedono un
     baseline esplicito.
+
+    ``grain_unit`` e' la ``grain.duration_unit`` dichiarata in ``base``: come
+    nell'engine (stream.py, dove la ``grain.duration`` diventa obbligatoria con
+    un'unita' non-secondi), un default in secondi non e' un valore in campioni
+    ne' in millisecondi, quindi il baseline va scritto a mano.
     """
     if "baseline" in cfg:
         return cfg["baseline"]
     path = cfg.get("path", name)
+    if path == "grain.duration" and grain_unit not in (None, "seconds"):
+        raise ctx.err(
+            f"Asse '{name}': con 'grain.duration_unit: {grain_unit}' il "
+            f"'baseline' e' obbligatorio.",
+            key=("axes", name),
+            axis=name,
+            hint=f"il default engine ({path}) e' in secondi e non verrebbe "
+            f"convertito: scrivi 'baseline:' in {_UNIT_LABELS[grain_unit]}.",
+        )
     if path == "pitch" or path.startswith("pitch."):
         raise ctx.err(
             f"Asse '{name}': path '{path}' e' unit-driven (pitch), "
@@ -623,6 +651,10 @@ def parse_study_spec(
         from .engine_bridge import parameter_defaults
 
         _defaults_cache = parameter_defaults()
+    # Unita' di ``grain.duration`` dichiarata in ``base``: governa sia il
+    # baseline (che non puo' venire dal default engine, in secondi) sia il
+    # confronto coi bounds in ``_validate``.
+    _grain_unit = ((data.get("base") or {}).get("grain") or {}).get("duration_unit")
 
     sweep_cfg = data.get("sweep") or {}
     ctx = ErrCtx(locs=locs, stream=sweep_cfg.get("stream_id") or None)
@@ -736,7 +768,9 @@ def parse_study_spec(
             Axis(
                 name=name,
                 path=path,
-                baseline=_resolve_baseline(name, cfg, _defaults_cache, ctx),
+                baseline=_resolve_baseline(
+                    name, cfg, _defaults_cache, ctx, _grain_unit
+                ),
                 values=values,
                 interpolation=cfg.get("interpolation", study_interpolation),
                 generator={gen_key: gen_params},

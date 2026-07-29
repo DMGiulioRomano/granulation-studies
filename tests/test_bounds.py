@@ -1,3 +1,5 @@
+import pytest
+
 from granstudies import bounds
 
 
@@ -39,6 +41,48 @@ def test_bounds_output_sr_ignored_for_other_paths():
     # output_sr non tocca i parametri senza bound dinamico
     assert bounds.bounds_for("density", output_sr=48000) == (0.01, 4000.0)
     assert bounds.bounds_for("pitch.semitones", output_sr=48000) == (-36.0, 36.0)
+
+
+def test_grain_duration_factor_per_unita():
+    assert bounds.grain_duration_factor(None) == 1.0
+    assert bounds.grain_duration_factor("seconds") == 1.0
+    assert bounds.grain_duration_factor("milliseconds") == 0.001
+    assert bounds.grain_duration_factor("samples", 48000) == 1 / 48000
+
+
+def test_grain_duration_factor_samples_pretende_output_sr():
+    # 'samples' e' l'unica unita' che dipende dal sample rate
+    with pytest.raises(ValueError, match="output_sr"):
+        bounds.grain_duration_factor("samples")
+    assert bounds.grain_duration_factor("milliseconds") == 0.001
+
+
+def test_grain_duration_factor_unita_sconosciuta():
+    with pytest.raises(ValueError, match="sconosciuta"):
+        bounds.grain_duration_factor("frames")
+
+
+def test_clamp_grain_duration_in_millisecondi():
+    # bounds in secondi [4/48000, 10] -> in ms [1/12, 10000]
+    lo_ms = bounds.MIN_GRAIN_SAMPLES / 48000 * 1000
+    assert bounds.clamp(
+        "grain.duration", 50, output_sr=48000, unit="milliseconds"
+    ) == 50
+    assert bounds.clamp(
+        "grain.duration", 0.0001, output_sr=48000, unit="milliseconds"
+    ) == pytest.approx(lo_ms)
+    assert bounds.clamp(
+        "grain.duration", 99999, output_sr=48000, unit="milliseconds"
+    ) == pytest.approx(10_000.0)
+
+
+def test_clamp_grain_duration_in_campioni():
+    assert bounds.clamp(
+        "grain.duration", 50, output_sr=48000, unit="samples"
+    ) == 50
+    assert bounds.clamp(
+        "grain.duration", 1, output_sr=48000, unit="samples"
+    ) == pytest.approx(bounds.MIN_GRAIN_SAMPLES)
 
 
 def test_span():
