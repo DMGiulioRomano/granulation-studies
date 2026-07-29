@@ -8,10 +8,6 @@
 study_id: study01_grain_density
 title: "Studio 01 — densità e grana (grain 50-300ms)"
 seed: 1988
-# Durata condivisa (secondi) del documento stack: il processo stack normalizza
-# i tempi dei suoi envelope su questa. Usata anche dalle varianti discrete se
-# base.duration manca.
-duration: 30
 # Cartella del corpus (relativa alla root del repo). Default: samples/
 samples_dir: samples
 
@@ -21,6 +17,9 @@ samples_dir: samples
 # of truth) — non vanno duplicati qui.
 base:
   onset: 0
+  # Durata (secondi) di questo stream: il processo la normalizza sui tempi dei
+  # suoi envelope, e le varianti discrete la usano come durata dei file.
+  duration: 30
   sample: silenzi.wav
   time_mode: normalized
   grain:
