@@ -37,6 +37,37 @@ _MANUAL_BOUNDS: Dict[str, Tuple[float, float]] = {
 # scende a 1 campione). Vedi ``bounds_for``.
 MIN_GRAIN_SAMPLES = 4
 
+# Unita' ammesse per ``grain.duration``/``grain.duration_range``, come
+# l'engine (``pge.core.stream.GRAIN_DURATION_UNITS``). I bounds del registry
+# sono in secondi: qui vive la conversione verso quel dominio.
+GRAIN_DURATION_UNITS = ("seconds", "samples", "milliseconds")
+
+_MS_PER_SECOND = 1000.0
+
+
+def grain_duration_factor(
+    unit: Optional[str],
+    output_sr: Optional[int] = None,
+) -> float:
+    """Fattore che porta un valore di ``grain.duration`` in secondi.
+
+    ``seconds`` (o unita' assente) -> 1.0; ``milliseconds`` -> 1e-3;
+    ``samples`` -> ``1/output_sr``, l'unica unita' che dipende dal sample rate
+    e quindi l'unica che pretende ``output_sr``.
+    """
+    if unit is None or unit == "seconds":
+        return 1.0
+    if unit == "milliseconds":
+        return 1.0 / _MS_PER_SECOND
+    if unit == "samples":
+        if output_sr is None:
+            raise ValueError("l'unita' 'samples' richiede output_sr")
+        return 1.0 / output_sr
+    raise ValueError(
+        f"unita' di grain.duration sconosciuta: {unit!r} "
+        f"(ammesse: {list(GRAIN_DURATION_UNITS)})"
+    )
+
 
 def known_paths() -> frozenset:
     """Tutti i path dotted noti (registry engine + manuali), senza import engine."""
@@ -82,27 +113,27 @@ def clamp(
     value: float,
     *,
     output_sr: Optional[int] = None,
-    in_samples: bool = False,
+    unit: Optional[str] = None,
 ) -> float:
     """Riporta ``value`` entro i bounds del path (no-op se path sconosciuto).
 
     ``output_sr``, se fornito, attiva il floor dinamico di ``grain.duration``
     (vedi ``bounds_for``) invece del fallback statico di 1ms.
 
-    ``in_samples``: ``value`` e' in campioni (``grain.duration_unit: samples``,
-    stream.py:415). I bounds del registry sono in secondi, quindi vanno scalati
-    in spazio-campioni (``* output_sr``) prima del confronto; il ritorno resta
-    in campioni. Richiede ``output_sr``.
+    ``unit``: unita' in cui e' espresso ``value``, quando il path e'
+    ``grain.duration`` e lo stream dichiara un ``grain.duration_unit``
+    (stream.py:415). I bounds del registry sono in secondi, quindi vengono
+    riportati nell'unita' di ``value`` prima del confronto; il ritorno resta
+    nell'unita' di partenza.
     """
     b = bounds_for(path, output_sr=output_sr)
     if b is None:
         return value
     lo, hi = b
-    if in_samples:
-        if output_sr is None:
-            raise ValueError("in_samples richiede output_sr")
-        lo = None if lo is None else lo * output_sr
-        hi = None if hi is None else hi * output_sr
+    factor = grain_duration_factor(unit, output_sr)
+    if factor != 1.0:
+        lo = None if lo is None else lo / factor
+        hi = None if hi is None else hi / factor
     if lo is not None and value < lo:
         return lo
     if hi is not None and value > hi:

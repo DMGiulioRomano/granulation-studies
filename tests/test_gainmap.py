@@ -344,6 +344,14 @@ def test_grain_duration_in_secondi(buffer_dir):
     assert debole["volume"] - forte["volume"] == pytest.approx(20.0, abs=0.5)
 
 
+def test_grain_duration_in_millisecondi(buffer_dir):
+    """``milliseconds`` misura la stessa finestra dei secondi equivalenti."""
+    grain = {"duration": 50 / SR * 1000, "duration_unit": "milliseconds"}
+    forte, debole = stream(0.1, grain=grain), stream(0.6, grain=grain)
+    gainmap.compensate([forte, debole], samples_dir=buffer_dir, alpha=1.0)
+    assert debole["volume"] - forte["volume"] == pytest.approx(20.0, abs=0.5)
+
+
 def test_pointer_start_normalized(buffer_dir):
     """Senza ``loop_unit`` lo start ricade su ``time_mode``, come nell'engine:
     normalized = frazione della durata del sample."""

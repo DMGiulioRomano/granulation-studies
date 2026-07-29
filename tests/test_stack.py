@@ -210,6 +210,62 @@ def test_document_emerging_values_clamped_to_engine_bounds():
     assert all(v == 0.001 for _, v in pts_static)
 
 
+def test_document_clamp_rispetta_duration_unit_milliseconds():
+    """Con ``duration_unit: milliseconds`` i valori dell'asse sono in ms: i
+    bounds engine (secondi) vanno riportati in ms prima di clampare, altrimenti
+    una grana di 50 ms verrebbe schiacciata al tetto di 10."""
+    from granstudies.stack import generate_stack_document
+
+    data = _study_data()
+    data["base"]["grain"] = {"duration_unit": "milliseconds"}
+    data["axes"]["grain_duration"] = {
+        "path": "grain.duration",
+        "baseline": 50,
+        "base": 50,
+        "range": 0,
+    }
+    data["stack"]["grain_duration"] = {"base": 2, "range": 0}
+
+    doc = generate_stack_document(_specs(data))
+    dur = doc["streams"][0]["grain"]["duration"]
+    pts = dur["points"] if isinstance(dur, dict) else [[0, dur]]
+    assert all(v == 50 for _, v in pts)
+
+
+def test_document_clamp_millisecondi_sotto_il_floor():
+    """Sotto il minimo (4 campioni @48k = 1/12 ms) il clamp resta in ms."""
+    from granstudies.stack import generate_stack_document
+
+    data = _study_data()
+    data["base"]["grain"] = {"duration_unit": "milliseconds"}
+    data["axes"]["grain_duration"] = {
+        "path": "grain.duration",
+        "baseline": 50,
+        "base": 0.00001,
+        "range": 0.00001,
+    }
+    data["stack"]["grain_duration"] = {"base": 2, "range": 0}
+
+    doc = generate_stack_document(_specs(data))
+    dur = doc["streams"][0]["grain"]["duration"]
+    pts = dur["points"] if isinstance(dur, dict) else [[0, dur]]
+    assert all(v == pytest.approx(4 / 48000 * 1000) for _, v in pts)
+
+
+def test_baseline_obbligatorio_con_duration_unit_dichiarata():
+    """Il default engine di ``grain.duration`` e' in secondi: con un'unita'
+    dichiarata non e' un valore in quell'unita', quindi il baseline va scritto.
+    Stessa regola dell'engine sulla ``grain.duration`` esplicita."""
+    from granstudies.errors import SpecError
+
+    data = _study_data()
+    data["base"]["grain"] = {"duration_unit": "milliseconds"}
+    data["axes"]["grain_duration"] = {"path": "grain.duration", "values": [50]}
+
+    with pytest.raises(SpecError, match="'baseline' e' obbligatorio"):
+        _specs(data)
+
+
 # --- unit della camminata-X alle seam dello stack ---------------------------------
 
 def test_axis_entry_unit_seconds_walks_in_period_space():

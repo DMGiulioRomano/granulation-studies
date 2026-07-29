@@ -40,6 +40,8 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 import numpy as np
 import soundfile as sf
 
+from . import bounds as bounds_mod
+
 # Sotto questa soglia lo stream legge silenzio: non si compensa (alzare il
 # silenzio non porta a galla niente) e non entra nel riferimento, altrimenti
 # trascina la media di tutti verso il basso.
@@ -140,7 +142,8 @@ def _window_samples(stream: Mapping[str, Any], sr: int) -> Optional[int]:
         return None
     if grain.get("duration_unit") == "samples":
         return max(1, int(round(dur)))
-    return max(1, int(round(dur * sr)))
+    dur_sec = dur * bounds_mod.grain_duration_factor(grain.get("duration_unit"))
+    return max(1, int(round(dur_sec * sr)))
 
 
 def _start_sample(stream: Mapping[str, Any], sr: int, n_frames: int) -> Optional[int]:
