@@ -162,13 +162,23 @@ def _merge_by_param(envelopes: List[Tuple[str, List, str, float, float]],
 
     out: List[Tuple[str, List, str, float, float]] = []
     for param, items in groups.items():
+        items.sort(key=lambda it: it[2])
         types = {env_type for _pts, env_type, _o, _d in items}
         # Type per-punto solo se serve: quando le versioni fuse hanno
         # interpolazioni diverse, il type del layer non basta piu' e va scritto
         # nella label di ogni punto. Le label gia' presenti restano intatte.
         mixed = len(types) > 1
         merged: List = []
+        prev_end: Optional[float] = None
         for points, env_type, onset, duration in items:
+            # Buco fra due segmenti della stessa voce (un altro gruppo suona in
+            # mezzo, o la voce tace): il parametro si chiude a zero invece di
+            # essere interpolato attraverso il silenzio. Segmenti contigui
+            # (onset == fine del precedente) restano una polilinea unica.
+            if prev_end is not None and onset - prev_end > 1e-6:
+                for t_gap in (prev_end, onset):
+                    merged.append([t_gap, 0, "linear"] if mixed else [t_gap, 0])
+            prev_end = onset + duration
             for point in points:
                 t_norm, value, label = _split_point(point)
                 t_abs = onset + t_norm * duration
