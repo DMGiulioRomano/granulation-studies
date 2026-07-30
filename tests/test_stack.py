@@ -102,8 +102,7 @@ def _study_data():
         "study_id": "s",
         "title": "Studio stack",
         "seed": 1988,
-        "duration": 30,
-        "base": {"sample": "x.wav", "volume": -6},
+        "base": {"sample": "x.wav", "volume": -6, "duration": 30},
         "axes": {
             "density": {
                 "path": "density",
@@ -454,11 +453,11 @@ def test_document_duration_covers_base_onset_too():
     assert doc["duration"] == 34
 
 
-def test_document_without_top_level_duration():
+def test_document_without_base_duration():
     from granstudies.stack import generate_stack_document
 
     data = _study_data()
-    del data["duration"]
+    del data["base"]["duration"]
     data["streams"]["voce_a"]["duration"] = 10
     data["streams"]["voce_b"] = {"duration": 25, "onset": 10}
     doc = generate_stack_document(_specs(data))
@@ -470,10 +469,8 @@ def test_document_without_top_level_duration():
 # --- base.duration nel ramo streams (issue #42) -----------------------------------
 
 def _base_duration_data():
-    data = _study_data()
-    del data["duration"]
-    data["base"]["duration"] = 30
-    return data
+    # _study_data la dichiara gia' in base (post-migrazione): alias esplicito.
+    return _study_data()
 
 
 def test_base_duration_survives_stream_construction():

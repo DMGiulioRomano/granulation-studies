@@ -15,7 +15,6 @@ from granstudies import __main__ as cli
 
 BASE_INCOMPLETE = {
     "study_id": "s_stack",
-    "duration": 10,
     "samples_dir": "samples",
     "base": {"onset": 0, "duration": 5, "sample": "corpus.wav"},
     "axes": {
@@ -73,7 +72,6 @@ def test_load_spec_invalid_stream_still_raises(tmp_path, monkeypatch):
 VERSIONS_DOC = {
     "study_id": "s_versions",
     "seed": 7,
-    "duration": 10,
     "samples_dir": "samples",
     "base": {"onset": 0, "sample": "corpus.wav"},
     "axes": {
@@ -89,7 +87,7 @@ VERSIONS_DOC = {
     },
     "stack": {},
     "streams": {"fermo": {"axes": {"density": {"base": {"expr": "env"}}}}, "mobile": {}},
-    "versions": {"d": {"values": [1, 2]}},
+    "versions": {"duration": 10, "d": {"values": [1, 2]}},
 }
 
 

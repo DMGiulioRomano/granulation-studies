@@ -506,6 +506,21 @@ def resolve_streams(
             hint="un onset globale che sposta tutti gli stream insieme e' "
             "ambiguo; ogni stream si posiziona col proprio 'onset'.",
         )
+    # ``duration`` top-level: vietata come ``onset`` (issue #42, D3). Si
+    # chiamava "durata del documento" e non lo e' mai stata — quella e' sempre
+    # dedotta, ``max(onset + duration)``. La durata di uno *stream* si dichiara
+    # accanto allo stream. Dopo il merge la ``duration:`` di una entry diventa
+    # top-level del documento merged, e ``parse_study_spec`` la legge senza
+    # obiettare: il divieto vale solo qui, sul documento ORIGINALE.
+    if "duration" in data:
+        raise ErrCtx(locs=locs).err(
+            "'duration' non e' una chiave top-level dello studio: la durata "
+            "del documento e' dedotta, non dichiarata.",
+            key=("duration",),
+            hint="per la durata di uno stream usa 'base.duration' (dentro "
+            "'base:', default per tutti gli stream) o 'duration:' nella entry; "
+            "per il passo delle versioni usa 'versions.duration'.",
+        )
     if not streams:
         return [parse_study_spec(data, sid, locs=locs)]
     # Nomi d'asse del documento base: risolvono il confine dei nomi dotted

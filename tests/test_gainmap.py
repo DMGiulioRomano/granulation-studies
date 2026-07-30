@@ -141,10 +141,10 @@ def _stack_study(gain=None):
     """Studio a due stream che leggono punti diversi dello stesso buffer."""
     data = {
         "study_id": "g",
-        "duration": 10,
         "base": {
             "sample": "t.wav",
             "volume": 0.0,
+            "duration": 10,
             "time_mode": "normalized",
             "grain": {"envelope": "hanning", "duration_unit": "samples"},
             "pointer": {"loop_unit": "absolute", "speed_ratio": 0},
@@ -211,7 +211,7 @@ def _versions_study():
     data["streams"]["debole"]["base"]["pointer"]["start"] = {
         "expr": "p", "let": {"p": 0.8}
     }
-    data["versions"] = {"p": {"values": [0.8, 0.5]}}
+    data["versions"] = {"duration": 10, "p": {"values": [0.8, 0.5]}}
     return data
 
 

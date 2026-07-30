@@ -581,12 +581,11 @@ def _build_versions(
     combos = axis_combos(axes, interleaved=chunk is not None)
     onsets, durations = parse_version_timeline(data, len(combos), locs=locs)
     if onsets is None:
-        # Concatenazione: servono le durate di versione per posizionare.
-        top = data.get("duration")
-        per_version = durations if durations is not None else (
-            [float(top)] * len(combos) if top is not None else None
-        )
-        if per_version is None:
+        # Concatenazione: serve 'versions.duration' come passo. Il 'duration:'
+        # top-level, che in #26 faceva anche da passo, non esiste piu' (#42):
+        # la sua meta' "passo" e' ora 'versions.duration', la sua meta' "durata
+        # di stream" e' 'base.duration' — e base.duration NON vale come passo.
+        if durations is None:
             raise ctx.err(
                 "versions: senza 'versions.onset' serve una durata di "
                 "versione per concatenare, e non c'e' nessuna "
@@ -598,6 +597,7 @@ def _build_versions(
                 "'base.duration' non vale: e' la durata di uno stream, non "
                 "il passo delle versioni.",
             )
+        per_version = durations
         onsets = []
         acc = 0.0
         for d in per_version:

@@ -23,11 +23,19 @@ from granstudies.versions import (
 # --- documento base condiviso dai test --------------------------------------
 
 def _study(versions):
+    # Ex 'duration: 20' top-level (#26): faceva sia da durata di stream sia da
+    # passo delle versioni. Post-#42 le due cose sono separate — durata di
+    # stream in 'base.duration', passo in 'versions.duration' — e questo helper
+    # le riproduce entrambe, cosi' i test che non dichiarano una timeline
+    # propria concatenano come prima. Con 'onset' o 'duration' gia' nel blocco
+    # (una timeline esplicita) il passo di default non si aggiunge.
+    versions = dict(versions)
+    if "onset" not in versions and "duration" not in versions:
+        versions["duration"] = 20
     return {
         "study_id": "vtest",
         "seed": 7,
-        "duration": 20,
-        "base": {"onset": 0, "sample": "corpus.wav"},
+        "base": {"onset": 0, "sample": "corpus.wav", "duration": 20},
         "axes": {
             "density": {
                 "path": "density",
@@ -107,9 +115,12 @@ def test_versions_requires_stack_block():
         generate_versions_document(data, "vtest", output_sr=None)
 
 
-def test_versions_requires_duration():
+def test_versions_requires_step_to_concatenate():
+    # Senza 'versions.onset' ne' 'versions.duration' non c'e' un passo con cui
+    # posizionare le versioni: errore (post-#42 il 'duration:' top-level, che
+    # in #26 faceva anche da passo, non esiste piu').
     data = _study({"d": {"values": [1]}})
-    del data["duration"]
+    del data["versions"]["duration"]          # tolgo il passo di default
     with pytest.raises(SpecError, match="duration"):
         generate_versions_document(data, "vtest", output_sr=None)
 
@@ -336,18 +347,16 @@ def test_duration_key_without_onset_concatenates_on_generated_durations():
     assert doc["duration"] == 15              # 13 + 2
 
 
-def test_reserved_duration_works_without_top_level_duration():
+def test_reserved_duration_generator_concatenates():
     data = _study({"d": {"values": [1, 2]}, "duration": {"values": [5, 8]}})
-    del data["duration"]
     doc = generate_versions_document(data, "vtest", output_sr=None)
     onsets = [s["onset"] for s in doc["streams"]]
     assert onsets == [0, 0, 5, 5]
     assert doc["duration"] == 13
 
 
-def test_onset_key_with_per_stream_durations_no_top_level():
+def test_onset_key_with_per_stream_durations():
     data = _study({"d": {"values": [1, 2]}, "onset": {"values": [0, 30]}})
-    del data["duration"]
     data["streams"]["fermo"] = {
         "duration": 10,
         "axes": {"density": {"base": {"expr": "env"}}},
@@ -501,7 +510,6 @@ def test_reserved_duration_accepts_scalar_broadcast_on_n():
     # Il caso di gran lunga piu' comune — tutte le versioni lunghe uguale —
     # era l'unico che non si poteva scrivere: pretendeva un generatore.
     data = _study({"d": {"values": [1, 2, 3]}, "duration": 5})
-    del data["duration"]
     doc = generate_versions_document(data, "vtest", output_sr=None)
     onsets = sorted({s["onset"] for s in doc["streams"]})
     assert onsets == [0, 5, 10]               # passo 5, broadcastato su N
@@ -511,14 +519,12 @@ def test_reserved_duration_accepts_scalar_broadcast_on_n():
 
 def test_reserved_duration_scalar_non_positive_errors():
     data = _study({"d": {"values": [1, 2]}, "duration": 0})
-    del data["duration"]
     with pytest.raises(SpecError, match="deve essere > 0"):
         generate_versions_document(data, "vtest", output_sr=None)
 
 
 def test_reserved_duration_scalar_non_numeric_errors():
     data = _study({"d": {"values": [1, 2]}, "duration": "cinque"})
-    del data["duration"]
     with pytest.raises(SpecError, match="scalare"):
         generate_versions_document(data, "vtest", output_sr=None)
 
@@ -537,7 +543,6 @@ def test_scalar_duration_is_version_default_and_stream_wins():
     # versione. Il default passa ora per base.duration, quindi una duration
     # di entry lo scavalca come qualsiasi altro default di documento.
     data = _study({"d": {"values": [1, 2]}, "duration": 5})
-    del data["duration"]
     data["streams"]["fermo"] = {
         "duration": 4,
         "axes": {"density": {"base": {"expr": "env"}}},
@@ -553,7 +558,6 @@ def test_version_duration_survives_a_document_with_base_duration():
     # base.duration del documento e' il default degli stream; la duration di
     # versione e' piu' specifica e la ombreggia (stesso posto, valore nuovo).
     data = _study({"d": {"values": [1, 2]}, "duration": 5})
-    del data["duration"]
     data["base"]["duration"] = 30
     doc = generate_versions_document(data, "vtest", output_sr=None)
     assert {s["duration"] for s in doc["streams"]} == {5}

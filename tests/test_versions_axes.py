@@ -111,12 +111,14 @@ def test_axis_combos_prodotto_fra_assi():
 # --- end-to-end: Forma 2 con envelope raggiunge il documento -----------------
 
 def test_end_to_end_forma2_envelope():
-    data = {"study_id": "t", "duration": 10,
-            "base": {"sample": "x.wav", "onset": 0, "time_mode": "normalized"},
+    data = {"study_id": "t",
+            "base": {"sample": "x.wav", "onset": 0, "time_mode": "normalized",
+                     "duration": 10},
             "axes": {"density": {"baseline": 10}},
             "stack": {"density": {"base": 2}},
             "streams": {"s": {"axes": {"density": {"base": {"expr": "d0"}, "range": 0}}}},
-            "versions": {"livello": {"basso": {"d0": 30}, "alto": {"d0": 300}}}}
+            "versions": {"duration": 10,
+                         "livello": {"basso": {"d0": 30}, "alto": {"d0": 300}}}}
     out = generate_versions_document(apply_document_let(data), samples_dir=None)
     ids = sorted(s["stream_id"] for s in out["streams"])
     assert ids == ["s__livello=basso", "s__livello=alto"] or \
