@@ -43,7 +43,7 @@ from .expr import is_expr_node
 from . import gainmap
 from .spread import spread_pad
 from .stack import build_stack_stream
-from .study_spec import resolve_streams
+from .study_spec import reject_top_level_duration, resolve_streams
 from .document_let import resolve_knobs
 from .sweep import _fmt
 from .value_generators import (
@@ -199,9 +199,12 @@ def _timeline_sequence(
 ) -> List[float]:
     """Risolve una chiave riservata (``onset``/``duration``) in N valori.
 
-    Uno **scalare** e' la forma corta e vale per tutte le versioni: e' il caso
-    piu' comune (versioni tutte lunghe uguale, passo costante) e va scritto
-    come si legge, ``versions: {duration: 50}`` (issue #42).
+    Uno **scalare** e' la forma corta: lo stesso valore per tutte le versioni.
+    Su ``duration`` e' il caso comune — versioni tutte lunghe uguale, passo
+    costante — e va scritto come si legge, ``versions: {duration: 50}``
+    (issue #42). Su ``onset`` lo scalare e' legittimo ma dice un'altra cosa:
+    tutte le versioni allo *stesso* istante, cioe' sovrapposte (il merge fa
+    overlay-add). Per scaglionarle serve una sequenza.
 
     Altrimenti il vocabolario e' quello delle variabili
     (``values``/``ramp``/banda), ma il conteggio lo possiede il prodotto
@@ -561,6 +564,11 @@ def _build_versions(
     """
     sid = study_id or data.get("study_id") or "study"
     ctx = ErrCtx(locs=locs)
+    # Il divieto di ``duration:`` top-level (#42, D3) va applicato QUI, sul
+    # documento originale: ``resolve_streams`` piu' sotto vede solo i
+    # documenti per-combo, dove la duration di versione e' gia' in
+    # ``base.duration``. Senza, uno studio non migrato passerebbe in silenzio.
+    reject_top_level_duration(data, locs)
     if "stack" not in data:
         raise ctx.err(
             "versions: richiede il blocco 'stack:' (le versioni sono "
@@ -587,9 +595,8 @@ def _build_versions(
         # di stream" e' 'base.duration' — e base.duration NON vale come passo.
         if durations is None:
             raise ctx.err(
-                "versions: senza 'versions.onset' serve una durata di "
-                "versione per concatenare, e non c'e' nessuna "
-                "'versions.duration'.",
+                "versions: senza 'versions.onset' serve 'versions.duration' "
+                "come passo per concatenare le versioni.",
                 key=("versions",),
                 hint="aggiungi 'duration: <secondi>' dentro il blocco "
                 "'versions:' (il passo della concatenazione) oppure "
@@ -622,13 +629,9 @@ def _build_versions(
             # documento della combo (issue #42): e' il default degli stream
             # della versione, quindi va scritta dove i default degli stream
             # vivono. Una ``duration:`` di entry la scavalca come sempre.
-            data_k.setdefault("base", {})["duration"] = durations[k]
-            # Rete della transizione: uno studio non ancora migrato porta
-            # ancora un ``duration:`` top-level, che nel documento merged e'
-            # indistinguibile da una duration di entry e vincerebbe su quella
-            # di versione. Non deve: la versione e' piu' specifica del default
-            # di documento. Sparira' da se' quando il top-level sara' vietato.
-            data_k.pop("duration", None)
+            # ``base:`` dichiarato vuoto e' None, non {}: la forma con ``or``
+            # evita il TypeError e tiene il resto dei default.
+            data_k["base"] = {**(data_k.get("base") or {}), "duration": durations[k]}
         docs.append(data_k)
     pad_n = spread_pad(docs, locs)
 

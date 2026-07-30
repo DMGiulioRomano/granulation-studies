@@ -472,6 +472,35 @@ def _replace_generators(merged: Dict[str, Any], override: Dict[str, Any]) -> Non
                 ax.pop(k, None)
 
 
+def reject_top_level_duration(
+    data: Dict[str, Any], locs: yaml_loc.Locations | None = None
+) -> None:
+    """Rifiuta ``duration:`` al top del documento ORIGINALE (issue #42, D3).
+
+    Si chiamava "durata del documento" e non lo e' mai stata — quella e'
+    sempre dedotta, ``max(onset + duration)``. La durata di uno *stream* si
+    dichiara accanto allo stream. Dopo il merge la ``duration:`` di una entry
+    diventa top-level del documento merged, e ``parse_study_spec`` la legge
+    senza obiettare: il divieto vale solo sul documento originale.
+
+    Vive fuori da ``resolve_streams`` perche' i rami ``versions:`` e
+    ``percorso:`` non le passano mai il documento originale — ci arrivano i
+    documenti per-combo, dove la ``base.duration`` iniettata ha gia'
+    sostituito il top-level. Senza questa chiamata all'ingresso dei due rami,
+    uno studio non migrato verrebbe accettato in silenzio proprio dove il
+    divieto serve.
+    """
+    if "duration" in data:
+        raise ErrCtx(locs=locs).err(
+            "'duration' non e' una chiave top-level dello studio: la durata "
+            "del documento e' dedotta, non dichiarata.",
+            key=("duration",),
+            hint="per la durata di uno stream usa 'base.duration' (dentro "
+            "'base:', default per tutti gli stream) o 'duration:' nella entry; "
+            "per il passo delle versioni usa 'versions.duration'.",
+        )
+
+
 def resolve_streams(
     data: Dict[str, Any],
     study_id: str | None = None,
@@ -506,21 +535,10 @@ def resolve_streams(
             hint="un onset globale che sposta tutti gli stream insieme e' "
             "ambiguo; ogni stream si posiziona col proprio 'onset'.",
         )
-    # ``duration`` top-level: vietata come ``onset`` (issue #42, D3). Si
-    # chiamava "durata del documento" e non lo e' mai stata — quella e' sempre
-    # dedotta, ``max(onset + duration)``. La durata di uno *stream* si dichiara
-    # accanto allo stream. Dopo il merge la ``duration:`` di una entry diventa
-    # top-level del documento merged, e ``parse_study_spec`` la legge senza
-    # obiettare: il divieto vale solo qui, sul documento ORIGINALE.
-    if "duration" in data:
-        raise ErrCtx(locs=locs).err(
-            "'duration' non e' una chiave top-level dello studio: la durata "
-            "del documento e' dedotta, non dichiarata.",
-            key=("duration",),
-            hint="per la durata di uno stream usa 'base.duration' (dentro "
-            "'base:', default per tutti gli stream) o 'duration:' nella entry; "
-            "per il passo delle versioni usa 'versions.duration'.",
-        )
+    # ``duration`` top-level: vietata come ``onset`` (issue #42, D3). Il
+    # controllo vive in ``reject_top_level_duration`` perche' lo condividono i
+    # rami versions/percorso, che qui passano gia' i documenti per-combo.
+    reject_top_level_duration(data, locs)
     if not streams:
         return [parse_study_spec(data, sid, locs=locs)]
     # Nomi d'asse del documento base: risolvono il confine dei nomi dotted

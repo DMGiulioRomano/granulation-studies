@@ -198,9 +198,20 @@ entry è l'override, e `onset` al top-level è **vietato** allo stesso modo.
 
 Un `duration:` al top-level del documento è un **errore**, con un messaggio che
 indica dove spostare la chiave (`base.duration` per la durata di stream,
-`versions.duration` per il passo delle versioni). Nota: i documenti *engine
-generati* (`generated/.../yaml/...`) hanno un `duration:` di documento — è
-l'output dedotto, quello che l'engine richiede, non l'input `study.yml`.
+`versions.duration` per il passo delle versioni). Vale in **tutti** i rami:
+anche uno studio con `versions:` o `percorso:`, dove la durata di replica viene
+iniettata come `base.duration`, viene fermato allo stesso modo — il divieto non
+dipende da quali altre chiavi sono presenti. Nota: i documenti *engine generati*
+(`generated/.../yaml/...`) hanno un `duration:` di documento — è l'output
+dedotto, quello che l'engine richiede, non l'input `study.yml`.
+
+Concatenare le versioni richiede `versions.duration`: senza né
+`versions.onset` né `versions.duration` è un **errore**, e `base.duration` non
+vale come ripiego — è la durata di uno stream, non il passo delle versioni.
+Nel blocco `versions:`, `onset` e `duration` accettano anche uno **scalare**
+(broadcast su tutte le versioni): su `duration` è il passo costante, la forma
+comune; su `onset` significa tutte le versioni allo stesso istante, cioè
+sovrapposte.
 
 ## Generatori di valori d'asse
 

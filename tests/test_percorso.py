@@ -635,7 +635,8 @@ def _gain_study(gain=None):
     tre istanze enumerate che si sovrappongono nel tempo."""
     data = {
         "study_id": "ptest",
-        "duration": 10,
+        # Niente 'duration:' top-level (#42): la durata la da' l'istanza
+        # ('percorso.duration'), che viaggia come base.duration del documento.
         "base": {
             "sample": "t.wav",
             "volume": 0.0,
@@ -753,3 +754,24 @@ def test_instance_duration_wins_over_document_base_duration():
     by_id = _by_id(doc)
     assert by_id["fermo__k=1"]["duration"] == 10
     assert doc["duration"] == 40                  # 25 + 15, non 25 + 99
+
+
+# --- divieto del duration: top-level anche nel ramo percorso (issue #42, D3) ---
+
+def test_top_level_duration_rejected_in_percorso():
+    # Come per versions: resolve_streams vede solo i documenti per-istanza, e
+    # il pop del top-level lo rendeva invisibile invece che vietato.
+    data = _study({"onset": {"values": [0, 10, 25]}, "w": 1})
+    data["duration"] = 999
+    with pytest.raises(SpecError, match=r"base\.duration"):
+        generate_percorso_document(data, "ptest", output_sr=None)
+
+
+def test_empty_base_block_takes_the_instance_duration():
+    # 'base:' dichiarato vuoto e' None, non {}: l'iniezione della duration
+    # d'istanza non deve inciamparci.
+    data = _study({"onset": {"values": [0, 10, 25]}, "w": 1})
+    data["base"] = None
+    data["streams"]["fermo"] = {"base": {"onset": 0, "sample": "corpus.wav"}}
+    doc = generate_percorso_document(data, "ptest", output_sr=None)
+    assert {s["duration"] for s in doc["streams"]} == {10, 15}

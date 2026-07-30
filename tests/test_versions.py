@@ -561,3 +561,42 @@ def test_version_duration_survives_a_document_with_base_duration():
     data["base"]["duration"] = 30
     doc = generate_versions_document(data, "vtest", output_sr=None)
     assert {s["duration"] for s in doc["streams"]} == {5}
+
+
+# --- divieto del duration: top-level anche nel ramo versions (issue #42, D3) ----
+
+def test_top_level_duration_rejected_with_versions_duration():
+    # Il ramo versions non passa mai il documento originale a resolve_streams:
+    # ci arrivano i documenti per-combo, dove base.duration e' gia' iniettata.
+    # Senza il divieto all'ingresso, un top-level residuo passava in silenzio.
+    data = _study({"d": {"values": [1, 2]}, "duration": 5})
+    data["duration"] = 999
+    with pytest.raises(SpecError, match=r"base\.duration"):
+        generate_versions_document(data, "vtest", output_sr=None)
+
+
+def test_top_level_duration_rejected_without_versions_duration():
+    # Stesso YAML sbagliato, stesso esito: prima l'errore dipendeva dalla
+    # presenza di 'versions.duration' (con, silenzio; senza, errore).
+    data = _study({"d": {"values": [1, 2]}, "onset": {"values": [0, 30]}})
+    data["duration"] = 999
+    with pytest.raises(SpecError, match=r"base\.duration"):
+        generate_versions_document(data, "vtest", output_sr=None)
+
+
+def test_top_level_duration_rejected_in_versions_documents_too():
+    data = _study({"d": {"values": [1, 2]}, "duration": 5})
+    data["duration"] = 999
+    with pytest.raises(SpecError, match="top-level"):
+        generate_versions_documents(data, "vtest", output_sr=None)
+
+
+def test_empty_base_block_takes_the_version_duration():
+    # 'base:' dichiarato vuoto e' None, non {}: l'iniezione della duration di
+    # versione non deve inciamparci (TypeError invece di un documento).
+    data = _study({"d": {"values": [1, 2]}, "duration": 5})
+    data["base"] = None
+    data["streams"]["fermo"]["base"] = {"sample": "corpus.wav"}
+    data["streams"]["mobile"]["base"] = {"sample": "corpus.wav"}
+    doc = generate_versions_document(data, "vtest", output_sr=None)
+    assert {s["duration"] for s in doc["streams"]} == {5}

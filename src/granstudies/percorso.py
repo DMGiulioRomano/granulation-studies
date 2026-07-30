@@ -684,12 +684,16 @@ def generate_percorso_document(
     from . import gainmap
     from .stack import build_stack_stream
     from .spread import spread_pad
-    from .study_spec import resolve_streams
+    from .study_spec import reject_top_level_duration, resolve_streams
     from .versions import inject_combo
     from .yaml_builder import build_multi_document
 
     sid = study_id or data.get("study_id") or "study"
     ctx = ErrCtx(locs=locs)
+    # Divieto di ``duration:`` top-level (#42, D3) sul documento originale:
+    # ``resolve_streams`` piu' sotto vede solo i documenti per-istanza, dove
+    # la duration d'istanza e' gia' in ``base.duration``.
+    reject_top_level_duration(data, locs)
     spec = parse_percorso(data, locs=locs)
     timeline = build_timeline(spec, sid, locs=locs)
     durations = resolve_durations(spec, timeline, sid, locs=locs)
@@ -712,11 +716,8 @@ def generate_percorso_document(
         # La duration d'istanza entra come ``base.duration`` del documento
         # dell'istanza (issue #42), gemella dell'iniezione di ``versions``:
         # e' il default degli stream dell'istanza, e li' vivono i default.
-        # Un ``duration:`` top-level residuo di uno studio non ancora migrato
-        # vincerebbe (nel merged e' indistinguibile da una duration di entry)
-        # e schiaccerebbe tutte le istanze sulla stessa durata: va scartato.
-        data_k.setdefault("base", {})["duration"] = durations[k]
-        data_k.pop("duration", None)
+        # ``base:`` dichiarato vuoto e' None, non {}.
+        data_k["base"] = {**(data_k.get("base") or {}), "duration": durations[k]}
         docs.append(data_k)
     pad_n = spread_pad(docs, locs)
 
