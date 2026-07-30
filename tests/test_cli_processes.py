@@ -21,9 +21,8 @@ from granstudies.errors import SpecError
 DOC_WITH_DEFAULT = {
     "study_id": "s_processes",
     "seed": 7,
-    "duration": 10,
     "samples_dir": "samples",
-    "base": {"onset": 0, "sample": "corpus.wav"},
+    "base": {"onset": 0, "sample": "corpus.wav", "duration": 10},
     "axes": {
         "density": {
             "path": "density",
@@ -35,7 +34,7 @@ DOC_WITH_DEFAULT = {
     },
     "stack": {},
     "streams": {"fermo": {}, "mobile": {}},
-    "versions": {"d": {"values": [1, 2]}},
+    "versions": {"duration": 10, "d": {"values": [1, 2]}},
 }
 
 
@@ -143,7 +142,9 @@ DOC_WITH_PERCORSO = {
     "study_id": "s_percorso",
     "seed": 7,
     "samples_dir": "samples",
-    "base": {"onset": 0, "sample": "corpus.wav"},
+    # base.duration serve a cmd_stack (che ignora il blocco percorso); il
+    # percorso la ombreggia con la durata di ogni istanza (arco/passo).
+    "base": {"onset": 0, "sample": "corpus.wav", "duration": 10},
     "axes": {
         "density": {
             "path": "density",
@@ -154,7 +155,6 @@ DOC_WITH_PERCORSO = {
         },
     },
     "stack": {},
-    "duration": 10,
     "streams": {"fermo": {}, "mobile": {}},
     "percorso": {"arco": 20, "passo": 10, "w": {"base": [[0, 0], [1, 1]]}},
 }

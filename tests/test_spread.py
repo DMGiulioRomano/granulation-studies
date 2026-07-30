@@ -499,8 +499,7 @@ def test_over_entry_with_two_strategies_raises():
 def _doc():
     return {
         "study_id": "s",
-        "duration": 30,
-        "base": {"onset": 0, "sample": "c.wav"},
+        "base": {"onset": 0, "sample": "c.wav", "duration": 30},
         "axes": {"a": {"path": "density", "baseline": 20, "values": [5, 50]}},
         "streams": {
             "base": {},
@@ -1274,8 +1273,7 @@ def test_spread_counts_with_global():
 def _global_doc():
     return {
         "study_id": "s",
-        "duration": 30,
-        "base": {"onset": 0, "sample": "c.wav"},
+        "base": {"onset": 0, "sample": "c.wav", "duration": 30},
         "axes": {"a": {"path": "density", "baseline": 20, "values": [5, 50]}},
         "spread": {"over": {"base.pointer.start.values": [0.1, 0.25, 0.4]}},
         "streams": {

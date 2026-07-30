@@ -32,7 +32,6 @@
 study_id: study01_stack_1-10ms
 title: "Studio 01 (stack) — grani 1-10 ms, 6 punti di lettura"
 seed: 1988
-duration: 50
 samples_dir: samples
 
 let:
@@ -44,6 +43,7 @@ gain_compensation:
 
 base:
   onset: 0
+  duration: 50   # durata di uno stream (default per chi non ne dichiara una)
   sample: silenzi.wav
   time_mode: normalized
   volume: 18                 # 6 stream sommati: vedi nota sul volume in fondo
@@ -114,5 +114,6 @@ streams:
 # di 10*log10(grana / grana_riferimento) rispetto a quel tetto: 18 dB.
 # E' un punto di partenza da correggere all'ascolto, non una misura.
 versions:
+  duration: 50   # passo della concatenazione: una versione ogni 50 s
   g0: {ramp: {start: 1, stop: 10, step: 3}}
   d0: {ramp: {start: 0, stop: 70, step: 3}}

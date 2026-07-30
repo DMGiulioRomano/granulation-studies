@@ -10,11 +10,13 @@
 study_id: study01_grain_density_stack
 title: "Studio 01 (stack) — densità e grana, curve non cartesiane"
 seed: 1988
-duration: 30
 samples_dir: samples
 
 base:
   onset: 0
+  # Durata dello stream. Qui e' inerte — questo studio gira in `mode:
+  # envelope` e la durata la calcolano plateau/transition — ma e' il numero
+  # pensato per i file discrete, se un giorno tornassero.
   duration: 6
   sample: silenzi.wav
   time_mode: normalized

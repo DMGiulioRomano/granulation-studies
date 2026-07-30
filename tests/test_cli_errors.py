@@ -10,9 +10,9 @@ from granstudies.errors import SpecError
 
 BROKEN = """\
 study_id: s_err
-duration: 10
 base:
   onset: 0
+  duration: 10
 axes:
   density:
     path: density

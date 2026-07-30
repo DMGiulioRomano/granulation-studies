@@ -45,8 +45,8 @@ def _gruppo(n, livello, *, respiro=None, off="i * 10", base=None, axes_extra=Non
 def _doc(streams, *, padre=None, **extra):
     d = {
         "study_id": "t",
-        "duration": 10,
-        "base": {"sample": "x.wav", "onset": 0, "time_mode": "normalized"},
+        "base": {"sample": "x.wav", "onset": 0, "time_mode": "normalized",
+                 "duration": 10},
         "axes": {
             "density": padre
             if padre is not None
@@ -183,7 +183,7 @@ def test_versions_inietta_dentro_axes_di_gruppo():
                 2, 90, base={"expr": "v * 2 + off", "let": {"v": 25, "off": 0}}
             ),
         },
-        versions={"v": {"values": [10, 100]}},
+        versions={"duration": 10, "v": {"values": [10, 100]}},
     )
     out = generate_versions_document(doc, samples_dir=None)
     assert sorted(s["stream_id"] for s in out["streams"]) == [

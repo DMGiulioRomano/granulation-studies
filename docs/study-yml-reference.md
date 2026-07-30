@@ -6,10 +6,10 @@ Sintassi completa con tutti i campi. I campi marcati `*` sono obbligatori.
  study_id: study01                # * etichetta per i documenti generati (fallback: nome cartella STUDY)
 title: "Studio 01 — ..."          # libero, finisce nell'header dei file generati
 seed: 1988                        # seed globale engine (finisce nei documenti generati)
-duration: 30                      # durata di default (s) degli stream: ogni stream può
-                                  #   dichiararne una propria (override, vedi `streams:`).
-                                  #   Con `stack:` ogni stream deve risolverne una,
-                                  #   propria o ereditata da qui.
+# NIENTE `duration:` qui. La durata del *documento* non si dichiara: è dedotta,
+# `max(onset + duration)` sugli stream. La durata di uno *stream* si scrive
+# accanto allo stream (`base.duration`, vedi sotto). Un `duration:` top-level
+# è un errore, con messaggio che indica dove spostarlo (issue #42).
 samples_dir: samples              # path relativo alla root del repo (default: samples/)
 
 let:                              # opzionale — manopole di documento: nomi condivisi,
@@ -24,7 +24,9 @@ gain_compensation:                # opzionale — pareggia il mascheramento fra 
 # Parametri fissi dello stream: tutto ciò che non è un asse.
 base:                             # *
   onset: 0
-  duration: 6                    # usato solo dalle varianti discrete
+  duration: 30                   # durata di default (s) di ogni stream: chi non ne
+                                 #   dichiara una propria (override in `streams:`) eredita
+                                 #   questa. Con `stack:` ogni stream deve risolverne una.
   sample: corpus.wav             # *
   time_mode: normalized
   volume: -6
@@ -96,7 +98,11 @@ sweep:
 versions:
   d: {values: [1, 2, 3]}          # variabile -> generatore Y (values | ramp | banda con n)
   onset: {values: [0, 10, 40]}    # chiave riservata (opzionale): posizioni assolute
-  duration: {values: [8, 8, 20]}  # chiave riservata (opzionale): durate per versione
+  duration: 8                     # chiave riservata: passo di concatenazione E default
+                                  #   degli stream della versione. Uno scalare vale per
+                                  #   tutte le versioni; un generatore (values/ramp/banda)
+                                  #   dà una durata per versione. Senza `versions.onset`
+                                  #   né `versions.duration` non c'è un passo: errore.
 
 # Processo percorso (attivo per presenza; richiede `stack:`): istanze di
 # spread distribuite sul tempo reale — i valori cambiano insieme, appaiati,
@@ -142,7 +148,7 @@ streams:
     axes.density.base.expr: "env"  # cambia solo l'expr; il let si eredita dal merge
 
   nome_stream:                   # chiave libera → diventa la sotto-cartella dell'output
-    duration: 60                 # durata propria (s): vince sul default top-level
+    duration: 60                 # durata propria (s): vince su base.duration
     onset: 5                     # posizione (s) dello stream nella timeline (default 0).
                                  # SOLO per-stream: `onset:` al top-level del documento
                                  # è rifiutato. Con `versions:` è relativo alla versione.
@@ -166,6 +172,46 @@ streams:
         base.pointer.start:
           ramp: {start: 0.1, step: 0.1}
 ```
+
+## Le quattro `duration` (issue #42)
+
+Ogni `duration` sta **accanto alla cosa di cui è la durata**. Non esiste una
+`duration:` al top-level del documento: si chiamava "durata del documento" e
+non lo è mai stata — la durata del documento è sempre **dedotta**,
+`max(onset + duration)` sugli stream costruiti.
+
+| Cos'è | Dove si scrive | Chi la legge |
+|---|---|---|
+| durata di **uno stream** (default di documento) | `base.duration` | tutti i rami (stack/sweep/versions/percorso) |
+| durata di **uno stream** (override) | `duration:` di una entry di `streams:` | vince su `base.duration` |
+| durata / **passo** di una versione | `versions.duration` | `versions:` — passo di concatenazione *e* default degli stream della versione |
+| durata di una **istanza** di percorso | `percorso.duration` (o dedotta da `arco`/`passo`) | `percorso:` — default degli stream dell'istanza |
+| durata del **documento** | *non si scrive* | dedotta: `max(onset + duration)` |
+
+Precedenza per la durata di uno stream: `duration:` di entry **>**
+`base.duration`. Nei processi che posizionano repliche (`versions`/`percorso`),
+la durata di versione/istanza è iniettata come `base.duration` del documento di
+quella replica, quindi fa da default e una `duration:` di entry la scavalca.
+
+Simmetrico con `onset`: `base.onset` è il default di documento, `onset:` di
+entry è l'override, e `onset` al top-level è **vietato** allo stesso modo.
+
+Un `duration:` al top-level del documento è un **errore**, con un messaggio che
+indica dove spostare la chiave (`base.duration` per la durata di stream,
+`versions.duration` per il passo delle versioni). Vale in **tutti** i rami:
+anche uno studio con `versions:` o `percorso:`, dove la durata di replica viene
+iniettata come `base.duration`, viene fermato allo stesso modo — il divieto non
+dipende da quali altre chiavi sono presenti. Nota: i documenti *engine generati*
+(`generated/.../yaml/...`) hanno un `duration:` di documento — è l'output
+dedotto, quello che l'engine richiede, non l'input `study.yml`.
+
+Concatenare le versioni richiede `versions.duration`: senza né
+`versions.onset` né `versions.duration` è un **errore**, e `base.duration` non
+vale come ripiego — è la durata di uno stream, non il passo delle versioni.
+Nel blocco `versions:`, `onset` e `duration` accettano anche uno **scalare**
+(broadcast su tutte le versioni): su `duration` è il passo costante, la forma
+comune; su `onset` significa tutte le versioni allo stesso istante, cioè
+sovrapposte.
 
 ## Generatori di valori d'asse
 
@@ -618,8 +664,8 @@ Il processo stack è il gemello verticale dello sweep: **collassa** tutti gli
 stream di `streams:` in un solo documento engine (`yaml/stack/stack.yml`),
 sommati. Parte solo se il blocco `stack:` è presente (anche vuoto: `stack: {}`);
 ogni stream deve **risolvere una `duration`** — propria (override nello stream)
-o ereditata dal default `duration:` top-level, che diventa opzionale se ogni
-stream dichiara la sua. Camminate-X ed envelope `time_mode: normalized` si
+o ereditata da `base.duration`, che diventa opzionale se ogni stream dichiara
+la sua. Camminate-X ed envelope `time_mode: normalized` si
 normalizzano sulla duration *propria* dello stream; uno stream con `onset:`
 proprio parte spostato nella timeline, e la durata documento copre tutto
 (`max(onset + duration)`).
@@ -829,14 +875,20 @@ versions:
     legittimo: sovrapposizioni e buchi emergono dai valori (il merge degli
     stem fa overlay-add con clip). L'`onset` per-stream resta **relativo alla
     propria versione**: `onset_finale = onset_versione + onset_stream`.
-  - `duration[k]` fa da **default** di `duration:` per gli stream della
-    versione k (iniettata prima del parse): una `duration` propria dello
-    stream vince comunque.
+  - `versions.duration` accetta anche uno **scalare**, broadcastato su tutte
+    le N versioni (`versions: {duration: 50}` = tutte lunghe 50): è il caso
+    più comune. La forma generatore (`values`/`ramp`/banda) dà una durata per
+    versione.
+  - `duration[k]` fa da **default** degli stream della versione k, iniettato
+    come `base.duration` del documento della combo prima del parse (issue #42):
+    una `duration:` propria dello stream vince comunque.
   - Chiavi assenti → le versioni si **concatenano** sulle durate di versione
-    (col solo `duration:` top-level è il classico `onset = k * duration`,
-    retrocompatibile). `duration:` top-level serve solo quando nessun'altra
-    fonte posiziona le versioni: con `versions.onset` (e durate risolte
-    per-stream) o `versions.duration` può mancare.
+    (con `versions.duration` scalare è il classico `onset = k * duration`).
+    Senza `versions.onset` e senza `versions.duration` non c'è un passo con cui
+    posizionare le versioni: è un **errore**. `base.duration` non vale come
+    passo — è la durata di uno stream, non il passo delle versioni (issue #42,
+    che ha separato i due lavori che il vecchio `duration:` top-level di #26
+    faceva insieme).
 - Il confine tra versioni è un confine naturale di stream (l'engine chiude
   una granulazione e ne apre un'altra): nessuna transizione interpolata tra
   versioni. Per ammorbidire il bordo si lavora con gli envelope di volume
@@ -987,8 +1039,9 @@ percorso:
   larghezza del K finale: in SV l'ordine alfabetico è quello cronologico).
   L'onset per-stream resta relativo alla propria istanza
   (`onset_finale = onset_istanza + onset_stream`); la `duration` d'istanza fa
-  da default del documento della singola istanza (una duration per-stream
-  vince). Durata documento = `max(onset + duration)`. Output:
+  da default degli stream della singola istanza — iniettata come
+  `base.duration` del suo documento (issue #42) — e una duration per-stream
+  vince. Durata documento = `max(onset + duration)`. Output:
   `yaml/percorso/percorso.yml` via `make percorso`; il render generico e il
   ramo sv lo raccolgono come gli altri processi.
 

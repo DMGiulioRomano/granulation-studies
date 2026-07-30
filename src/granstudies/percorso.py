@@ -670,9 +670,9 @@ def generate_percorso_document(
     ``max_shift`` piu' stretto sugli archi lunghi — sono scelte musicali
     lasciate all'utente e non sono implementate qui.
 
-    La ``duration`` d'istanza entra come ``duration:`` del documento della
-    singola istanza prima del parse: fa da default, una duration per-stream
-    vince. Lo ``stream_id`` e' suffissato ``__k=NN`` (1-based, zero-padded
+    La ``duration`` d'istanza entra come ``base.duration`` del documento della
+    singola istanza prima del parse (issue #42): fa da default, una duration
+    per-stream vince. Lo ``stream_id`` e' suffissato ``__k=NN`` (1-based, zero-padded
     sulla larghezza del K finale: l'ordine alfabetico in SV e' quello
     cronologico); l'onset per-stream resta relativo alla propria istanza
     (``onset_finale = onset_istanza + onset_stream``). Il padding dei nomi di
@@ -684,12 +684,16 @@ def generate_percorso_document(
     from . import gainmap
     from .stack import build_stack_stream
     from .spread import spread_pad
-    from .study_spec import resolve_streams
+    from .study_spec import reject_top_level_duration, resolve_streams
     from .versions import inject_combo
     from .yaml_builder import build_multi_document
 
     sid = study_id or data.get("study_id") or "study"
     ctx = ErrCtx(locs=locs)
+    # Divieto di ``duration:`` top-level (#42, D3) sul documento originale:
+    # ``resolve_streams`` piu' sotto vede solo i documenti per-istanza, dove
+    # la duration d'istanza e' gia' in ``base.duration``.
+    reject_top_level_duration(data, locs)
     spec = parse_percorso(data, locs=locs)
     timeline = build_timeline(spec, sid, locs=locs)
     durations = resolve_durations(spec, timeline, sid, locs=locs)
@@ -709,7 +713,11 @@ def generate_percorso_document(
     docs: List[Dict[str, Any]] = []
     for k, combo in enumerate(combos):
         data_k = inject_combo(base_data, combo)
-        data_k["duration"] = durations[k]
+        # La duration d'istanza entra come ``base.duration`` del documento
+        # dell'istanza (issue #42), gemella dell'iniezione di ``versions``:
+        # e' il default degli stream dell'istanza, e li' vivono i default.
+        # ``base:`` dichiarato vuoto e' None, non {}.
+        data_k["base"] = {**(data_k.get("base") or {}), "duration": durations[k]}
         docs.append(data_k)
     pad_n = spread_pad(docs, locs)
 

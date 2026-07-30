@@ -301,8 +301,7 @@ def _stack_specs():
         {
             "study_id": "s",
             "seed": 1,
-            "duration": 30,
-            "base": {"sample": "x.wav"},
+            "base": {"sample": "x.wav", "duration": 30},
             "axes": {
                 "density": {"path": "density", "baseline": 20, "values": [5, 50, 400]},
             },

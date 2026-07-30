@@ -18,11 +18,11 @@
 study_id: brano01
 title: "Brano 01"
 seed: 5
-duration: 190
 samples_dir: samples
 
 base:
   onset: 0
+  duration: 190   # durata dello stream, ereditata da chi non ne dichiara una
   sample: corpus.wav
   time_mode: normalized
   grain:

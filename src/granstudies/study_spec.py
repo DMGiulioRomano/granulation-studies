@@ -91,6 +91,9 @@ class StudySpec:
     study_id: str
     title: str | None
     seed: int | None
+    # Durata dello stream (s), risolta per catena ``duration:`` di entry >
+    # ``base.duration`` (issue #42). Non e' la durata del documento: quella e'
+    # sempre dedotta, ``max(onset + duration)`` sugli stream costruiti.
     duration: float | None
     # Onset dello stream sulla timeline (s). ``None`` = non dichiarato: lo
     # distingue da un esplicito ``onset: 0`` cosi' il processo stack non
@@ -469,6 +472,35 @@ def _replace_generators(merged: Dict[str, Any], override: Dict[str, Any]) -> Non
                 ax.pop(k, None)
 
 
+def reject_top_level_duration(
+    data: Dict[str, Any], locs: yaml_loc.Locations | None = None
+) -> None:
+    """Rifiuta ``duration:`` al top del documento ORIGINALE (issue #42, D3).
+
+    Si chiamava "durata del documento" e non lo e' mai stata — quella e'
+    sempre dedotta, ``max(onset + duration)``. La durata di uno *stream* si
+    dichiara accanto allo stream. Dopo il merge la ``duration:`` di una entry
+    diventa top-level del documento merged, e ``parse_study_spec`` la legge
+    senza obiettare: il divieto vale solo sul documento originale.
+
+    Vive fuori da ``resolve_streams`` perche' i rami ``versions:`` e
+    ``percorso:`` non le passano mai il documento originale — ci arrivano i
+    documenti per-combo, dove la ``base.duration`` iniettata ha gia'
+    sostituito il top-level. Senza questa chiamata all'ingresso dei due rami,
+    uno studio non migrato verrebbe accettato in silenzio proprio dove il
+    divieto serve.
+    """
+    if "duration" in data:
+        raise ErrCtx(locs=locs).err(
+            "'duration' non e' una chiave top-level dello studio: la durata "
+            "del documento e' dedotta, non dichiarata.",
+            key=("duration",),
+            hint="per la durata di uno stream usa 'base.duration' (dentro "
+            "'base:', default per tutti gli stream) o 'duration:' nella entry; "
+            "per il passo delle versioni usa 'versions.duration'.",
+        )
+
+
 def resolve_streams(
     data: Dict[str, Any],
     study_id: str | None = None,
@@ -503,6 +535,10 @@ def resolve_streams(
             hint="un onset globale che sposta tutti gli stream insieme e' "
             "ambiguo; ogni stream si posiziona col proprio 'onset'.",
         )
+    # ``duration`` top-level: vietata come ``onset`` (issue #42, D3). Il
+    # controllo vive in ``reject_top_level_duration`` perche' lo condividono i
+    # rami versions/percorso, che qui passano gia' i documenti per-combo.
+    reject_top_level_duration(data, locs)
     if not streams:
         return [parse_study_spec(data, sid, locs=locs)]
     # Nomi d'asse del documento base: risolvono il confine dei nomi dotted
@@ -666,15 +702,27 @@ def parse_study_spec(
             hint="l'accoppiamento degli assi (ex parallel) vive nel processo "
             "stack — stessa strategy-X e stesso n.",
         )
-    duration = data.get("duration")
-    if duration is not None and (
-        not isinstance(duration, (int, float)) or isinstance(duration, bool)
-        or duration <= 0
+    # Durata dello stream: si dichiara accanto allo stream (issue #42). La
+    # catena e' ``duration:`` di entry > ``base.duration``, risolta qui sul
+    # documento *merged* — dopo il merge la ``duration:`` di una entry e'
+    # diventata chiave top-level, esattamente come succede a ``onset``. Il
+    # ``duration:`` scritto a mano al top di uno studio e' l'ultima rete, in
+    # via di rimozione: la durata del documento non si dichiara, si deduce.
+    base_duration = (data.get("base") or {}).get("duration")
+    for value, label, key in (
+        (base_duration, "'base.duration'", ("base", "duration")),
+        (data.get("duration"), "'duration'", ("duration",)),
     ):
-        raise ctx.err(
-            f"'duration' deve essere un numero > 0 (ricevuto {duration!r}).",
-            key=("duration",),
-        )
+        if value is not None and (
+            not isinstance(value, (int, float)) or isinstance(value, bool)
+            or value <= 0
+        ):
+            raise ctx.err(
+                f"{label} deve essere un numero > 0 (ricevuto {value!r}).",
+                key=key,
+            )
+    top_duration = data.get("duration")
+    duration = top_duration if top_duration is not None else base_duration
     onset = data.get("onset")
     if onset is not None and (
         not isinstance(onset, (int, float)) or isinstance(onset, bool)
@@ -786,15 +834,15 @@ def parse_study_spec(
                 hint=f"gli assi dichiarati in 'axes:' sono {sorted(axis_names)}.",
             )
     # Il documento qui puo' essere il merge di uno stream: ``duration`` e'
-    # assente solo se lo stream non ne risolve nessuna (ne' propria ne'
-    # ereditata dal top-level, che e' un default, non un vincolo).
+    # assente solo se lo stream non ne risolve nessuna, ne' propria ne'
+    # ereditata da ``base.duration`` (che e' un default, non un vincolo).
     if stack_axes is not None and duration is None:
         raise ctx.err(
             "stack: lo stream non risolve nessuna 'duration' (ne' propria "
-            "ne' ereditata dal top-level).",
+            "ne' ereditata da 'base.duration').",
             key=("stack",),
-            hint="dichiara 'duration: <secondi>' al top del documento "
-            "(default per tutti gli stream) oppure nello stream.",
+            hint="dichiara 'base: {duration: <secondi>}' (default per tutti "
+            "gli stream) oppure 'duration:' nella entry dello stream.",
         )
     orderings = [list(o) for o in sweep_cfg.get("orderings", [])]
     # Default di ``orders`` condizionato dalla presenza di ``orderings``: se

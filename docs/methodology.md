@@ -84,7 +84,7 @@ curva d'interpolazione, seed-Y); **il processo possiede X e durata**. Sweep
 possiede X via `plateau`/`transition` e *deriva* la durata; stack possiede X
 via le **strategy-X** (`linear` equispaziata di default, `rand` alla rspline:
 tempi generati da una banda di frequenza, `n` emergente) e *legge* la durata
-condivisa dal `duration:` top-level, normalizzandoci sopra.
+di ogni stream (`base.duration`, override per-stream), normalizzandoci sopra.
 
 In stack gli assi **non si combinano**: ogni asse di ogni stream diventa un
 envelope indipendente sulla stessa durata. Due assi con la stessa strategy-X e

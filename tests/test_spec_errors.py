@@ -8,9 +8,9 @@ from granstudies.yaml_loc import loads
 
 BASE_TEXT = """\
 study_id: s
-duration: 10
 base:
   onset: 0
+  duration: 10
 axes:
   density:
     path: density
@@ -116,9 +116,9 @@ def test_str_keeps_message_for_match():
 
 RAMP_INCOMPLETE_TEXT = """\
 study_id: s
-duration: 10
 base:
   onset: 0
+  duration: 10
 axes:
   density:
     path: density
