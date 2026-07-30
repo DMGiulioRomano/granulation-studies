@@ -3,7 +3,7 @@ import os
 import xml.etree.ElementTree as ET
 
 from granstudies.envelope_sweep import envelope_breakpoints
-from granstudies.sv_export import _plateau_starts, _build_sv_xml, _find_envelopes
+from granstudies.sv_export import _plateau_starts, _build_sv_xml, _find_envelopes, _merge_by_param
 
 
 def _parse(compressed: bytes) -> ET.Element:
@@ -543,3 +543,23 @@ def test_vocabolario_interpolation_allineato_col_parser():
 
     assert set(VALID_INTERPOLATION) == _ENVELOPE_TYPES
     assert set(VALID_INTERPOLATION) == set(_PLOT_STYLE_BY_TYPE)
+
+
+def test_gap_between_versions_closes_param_to_zero():
+    # Due segmenti della stessa voce separati da un buco (in mezzo suona un
+    # altro gruppo): il parametro va a zero nel buco invece di essere
+    # interpolato dritto. Segmenti contigui restano una polilinea unica.
+    envs = [
+        ("v__a/density", [[0.0, 5], [1.0, 10]], "linear", 0.0, 10.0),
+        ("v__b/density", [[0.0, 20], [1.0, 40]], "linear", 30.0, 10.0),
+    ]
+    merged = _merge_by_param(envs, group="v")
+    assert merged[0][1] == [[0.0, 5], [10.0, 10], [10.0, 0], [30.0, 0],
+                            [30.0, 20], [40.0, 40]]
+
+    contiguo = [
+        ("v__a/density", [[0.0, 5], [1.0, 10]], "linear", 0.0, 10.0),
+        ("v__b/density", [[0.0, 20], [1.0, 40]], "linear", 10.0, 10.0),
+    ]
+    assert _merge_by_param(contiguo, group="v")[0][1] == [
+        [0.0, 5], [10.0, 10], [10.0, 20], [20.0, 40]]
