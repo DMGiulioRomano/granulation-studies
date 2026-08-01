@@ -73,7 +73,8 @@ def test_forma2_stati_nominati():
 def test_forma2_envelope_da_generatore():
     """Dentro uno stato, un ramp e' un ENVELOPE (non una sequenza di versioni)."""
     data = {"study_id": "t",
-            "versions": {"col": {"caldo": {"respiro": {"ramp": {"start": 20, "stop": 60, "step": 10}}}}},
+            "versions": {"col": {"caldo": {"respiro": {"linear_env": {
+                "ramp": {"start": 20, "stop": 60, "step": 10}}}}}},
             "axes": {"density": {"base": {"expr": "respiro"}}}}
     axes = parse_version_axes(data)
     env = axes["col"][0][1]["respiro"]

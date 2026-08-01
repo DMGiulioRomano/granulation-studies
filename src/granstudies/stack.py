@@ -30,6 +30,10 @@ from .yaml_builder import build_multi_document, build_stream
 # cui ``study_spec`` popola ``Axis.generator``): la banda ha chiave ``band``,
 # non piu' ``rand``. Nello YAML la banda si riconosce invece dalla presenza di
 # ``base`` (vedi ``value_generators.y_generator``).
+#
+# La Y viene sempre da ``axes:``, che e' Famiglia 1 (i valori di test, letti
+# per indice): ``values`` qui resta ``values``, il wrapper ``linear_env:``
+# della Famiglia 2 non entra in questo blocco (issue #47).
 _Y_KEYS = frozenset({"values", "ramp", "band"})
 
 

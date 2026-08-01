@@ -7,6 +7,14 @@ consolida. Ogni affermazione sul comportamento attuale è marcata **[eseguito]**
 (verificata lanciando codice in scratchpad) o **[dedotto]** (letta nel codice,
 non eseguita).
 
+> **Nota di aggiornamento (issue #47).** Gli esempi di questo documento che
+> mettono una banda, un `ramp` o `values` **dentro un `let:`** sono scritti con
+> la sintassi precedente alla separazione dei due ruoli di `values`. Da #47
+> quella posizione vuole il wrapper di ruolo: `respiro: {linear_env: {ramp:
+> {...}}}`. Il vocabolario dei generatori e le decisioni di design qui prese
+> non cambiano — cambia solo il marcatore della *forma nel tempo*. Vedi la
+> sezione «I due ruoli di una lista» in `docs/study-yml-reference.md`.
+
 ---
 
 ## L'esito in breve

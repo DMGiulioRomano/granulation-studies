@@ -213,6 +213,60 @@ Nel blocco `versions:`, `onset` e `duration` accettano anche uno **scalare**
 comune; su `onset` significa tutte le versioni allo stesso istante, cioè
 sovrapposte.
 
+## I due ruoli di una lista: `values:` e `linear_env:`
+
+Una lista di numeri significa due cose diverse a seconda del **ruolo** che ha
+nel punto in cui è scritta, e il vocabolario dei generatori
+(`values` / `ramp` / banda) non lo dice: dice solo **da dove vengono i numeri**.
+
+| Ruolo | Come si legge | Marcatore |
+|---|---|---|
+| **serie indicizzata** | la posizione *k* è l'elemento *k* — i valori di test di un asse, un valore per voce, una sequenza di versioni | `values:` (o `ramp`/banda) nella posizione che la ospita |
+| **forma nel tempo** | i valori diventano i **breakpoint** di un envelope su tempi equispaziati, e il valore in mezzo esce dall'interpolazione | il wrapper `linear_env:` |
+
+Nella maggior parte dei contesti la posizione disambigua da sola. In un `let:`
+no: i due ruoli sono plausibili allo stesso livello di annidamento, con la
+stessa forma, senza nessun indizio. `{values: [2, 3, 4, 7]}` in un `let:`
+produceva un envelope — a `t = 0.5` il valore era `3.5` — mentre un lettore
+ragionevole ci vedeva una lista. Di qui la separazione: **`values:` resta il
+marcatore della serie indicizzata, la forma nel tempo si marca con
+`linear_env:`.**
+
+`linear_env:` è un **wrapper di ruolo**, non una chiave-generatore: dentro
+accetta l'intero vocabolario, così anche le forme *generate* hanno il loro
+marcatore invece di restare nude.
+
+```yaml
+let:
+  sagoma:  {linear_env: [2, 3, 4, 7]}                        # lista esplicita
+  identica: {linear_env: {values: [2, 3, 4, 7]}}             # la forma lunga
+  curva:   {linear_env: {ramp: {start: 1, stop: 8, step: 1}}}
+  pescata: {linear_env: {n: 6, base: 2, range: 6, seed: 42}}
+  a_scatti: {linear_env: [0, 1, 0], type: step}              # type/curve ACCANTO
+```
+
+`type` e `curve` stanno **accanto** al wrapper, non dentro: descrivono
+l'envelope prodotto, non il generatore — e una lista letterale non avrebbe
+dove ospitarli. Metterli dentro è errore esplicito.
+
+**Dove serve `linear_env:`** (i tre contesti in cui una lista si legge per
+tempo):
+
+| Contesto | Esempio |
+|---|---|
+| un bordo di `Env`: `base`/`range` di banda Y, `base`/`range` della camminata-X, `step` di `ramp`, `step` di `drift` | `base: {linear_env: [0, 10]}` |
+| `let:` di documento e di gruppo | `respiro: {linear_env: {ramp: {...}}}` |
+| un bundle di `versions:` Forma 2 | `caldo: {respiro: {linear_env: [20, 60]}}` |
+
+**Dove `values:` resta `values:`** (la lista si legge per indice): i valori di
+test di un asse, `spread.over.<path>`, le sequenze di `versions:` (Forma 1 e
+forma piatta), `versions.onset`/`duration`, `percorso.onset` enumerato.
+
+Sbagliare famiglia è errore in entrambe le direzioni, con il messaggio che
+indica la forma giusta. Le forme **statiche** di `Env` (`[a, b]`,
+`[[t, v], ...]`, `{type, points, curve}`, la forma compatta a cicli) non sono
+generatori e non vogliono nessun wrapper: restano nude.
+
 ## Generatori di valori d'asse
 
 I valori di test di un asse si danno con **esattamente una** chiave-generatore
@@ -293,7 +347,7 @@ due accetta queste forme:
 | `[a, b]` | rampa lineare `a → b` lungo la sequenza (esattamente due scalari) |
 | `[[t, v], ...]` | breakpoint temporizzati, `t` in `[0, 1]`, interpolati **linear** (hold fuori dai bordi) |
 | `{type, points, curve}` | breakpoint con `type` esplicito (`linear`/`step`) ed eventuale `curve` (vedi sotto) |
-| nodo generatore (`{values}` \| `{ramp}` \| `{n, base, range, seed}`, più `type`/`curve` opzionali) | breakpoint **generati** invece che scritti a mano (vedi «Generatori annidati») |
+| nodo `{linear_env: ...}` (dentro: lista, `{values}`, `{ramp}` o `{n, base, range, seed}`; accanto: `type`/`curve` opzionali) | breakpoint **generati** invece che scritti a mano (vedi «Generatori annidati») |
 | nodo-expr `{expr, let}` | Env **calcolato** da un'espressione aritmetica su sagome e scalari (vedi «Il nodo-expr») |
 
 Esempio con banda mobile (si apre dopo il 60% della sequenza):
@@ -393,28 +447,28 @@ base: {points: [[0, 10], [1, 90]], curve: 2}   # sale lento, accelera in coda
 ### Generatori annidati — un bordo di banda generato
 
 I `points` di un bordo (`base`/`range` di banda Y, `base`/`range` della
-camminata-X, `step` di `ramp`) si possono **generare** invece di scriverli a
-mano: al posto della forma statica si mette un **nodo**, un dict nella stessa
-grammatica piatta dell'asse — `values`, `ramp`, oppure la banda
-(`n`/`base`/`range`/`seed`), più le opzionali `type` (`linear`/`step`) e
-`curve`. Il nodo si compila in breakpoint su tempi equispaziati (X implicita
-lineare) e da lì in poi si comporta esattamente come dei `points` scritti a
-mano. Ricorsivo: i `base`/`range` del nodo accettano a loro volta nodi
-(guardia di profondità: 8).
+camminata-X, `step` di `ramp`, `step` di `drift`) si possono **generare**
+invece di scriverli a mano: al posto della forma statica si mette un **nodo**
+`linear_env:`, che dentro parla la stessa grammatica piatta dell'asse —
+`values`, `ramp`, oppure la banda (`n`/`base`/`range`/`seed`) — con le
+opzionali `type` (`linear`/`step`) e `curve` **accanto** al wrapper. Il nodo si
+compila in breakpoint su tempi equispaziati (X implicita lineare) e da lì in
+poi si comporta esattamente come dei `points` scritti a mano. Ricorsivo: i
+`base`/`range` del nodo accettano a loro volta nodi (guardia di profondità: 8).
+
+Il wrapper è obbligatorio: qui la lista si legge **per tempo**, ed è
+esattamente il ruolo che `linear_env:` marca. Un generatore nudo in questa
+posizione è errore, con il rimedio nel messaggio.
 
 ```yaml
 density:
   path: density
   n: 40
   base:                      # il pavimento vaga: 6 quote pescate tra 2 e 8
-    n: 6
-    base: 2
-    range: 6
+    linear_env: {n: 6, base: 2, range: 6}
   range:                     # la larghezza salta a plateau tra 4 e 14
-    type: step
-    n: 6
-    base: 4
-    range: 10
+    type: step               # accanto al wrapper: descrive l'envelope prodotto
+    linear_env: {n: 6, base: 4, range: 10}
 ```
 
 E nella camminata-X (frequenza di generazione essa stessa stocastica):
@@ -422,7 +476,7 @@ E nella camminata-X (frequenza di generazione essa stessa stocastica):
 ```yaml
 stack:
   density:
-    base: {n: 8, base: 2, range: 4}     # la base salta tra 2 e 6 Hz
+    base: {linear_env: {n: 8, base: 2, range: 4}}   # la base salta tra 2 e 6 Hz
     range: 0.5
 ```
 
@@ -438,7 +492,8 @@ Regole:
   nodo congela solo quel sottoalbero.
 - **Bordi correlati gratis**: banda che trasla a larghezza costante = `base`
   annidato + `range` scalare (nessun seed da coordinare).
-- **`type`/`curve` nel nodo** valgono come nella forma `{type, points, curve}`:
+- **`type`/`curve` accanto al wrapper** valgono come nella forma
+  `{type, points, curve}`:
   `type: step` fa saltare il bordo tra le quote generate (plateau di banda),
   `curve` piega i segmenti. Solo `linear`/`step` (niente `cubic` nelle bande).
 - Il nodo è un dict: negli override di stream **si fonde** come ogni dict
@@ -579,9 +634,11 @@ streams:
   ne nomina la chiave — la stessa meccanica di `versions`. Un `let` locale che
   non nomina la manopola resta intatto.
 - **`let:` di documento** (top-level). Valori: scalare, envelope disegnato
-  (`[[t, v], ...]`), banda/`ramp`/`values` (pescati/generati in envelope **una
-  volta**, con seed `stable_seed("<study>:let:<nome>")`), o nodo-expr derivato
-  che referenzia altre manopole (risolto al load). Iniettato **prima** di ogni
+  (`[[t, v], ...]`), envelope **generato** `{linear_env: ...}` (pescato o
+  costruito **una volta**, con seed `stable_seed("<study>:let:<nome>")`), o
+  nodo-expr derivato che referenzia altre manopole (risolto al load). Un
+  generatore *nudo* qui è errore: il `let:` è il contesto in cui la posizione
+  non dice il ruolo, e il ruolo lo marca `linear_env:`. Iniettato **prima** di ogni
   processo: è il **riposo**, che `versions:`/`percorso:` poi **ombreggiano**
   (iniettano dopo e vincono — stessa manopola, riposo e movimento). Attivo
   anche in `make stack`.
@@ -589,8 +646,9 @@ streams:
   risolti una volta per gruppo (seed `stable_seed("<entry>:let:<nome>")`) e
   iniettati nelle espressioni dell'entry — axes e blocco `spread` — **prima**
   dell'espansione, così tutte le voci del gruppo condividono il valore. È la
-  traiettoria condivisa dalle voci (`comune`), disegnata o pescata. Due gruppi diversi con
-  lo stesso nome sono indipendenti (come i loro `axes:`).
+  traiettoria condivisa dalle voci (`comune`), disegnata o pescata — e se
+  pescata, avvolta in `linear_env:` come nel `let:` di documento. Due gruppi
+  diversi con lo stesso nome sono indipendenti (come i loro `axes:`).
 - **`spread.let`** (dentro `spread:`, accanto a `n`/`over`). Manopole di
   **voce**: un valore per stream generato, iniettato per nome. Due forme, come
   le strategy: `expr` con `i`/`n` (deterministico per voce) o **banda** (un
@@ -783,24 +841,27 @@ versions:
 ```
 
 **Forma 2 — stati nominati.** Un asse il cui valore è un dict di **stati**,
-ognuno un **bundle** di manopole. I valori di un bundle possono essere
-**envelope** (prodotti da qualunque generatore: `ramp`, banda, breakpoint
-espliciti — come una manopola di gruppo). La lunghezza dell'asse è il numero di
-stati; un bundle **parziale** lascia le manopole non nominate al **riposo di
-`let:`**.
+ognuno un **bundle** di manopole. I valori di un bundle si scrivono come quelli
+di un `let:` — scalare, breakpoint espliciti, o envelope generato
+(`{linear_env: ...}`, con dentro `ramp`/banda/lista). La lunghezza dell'asse è
+il numero di stati; un bundle **parziale** lascia le manopole non nominate al
+**riposo di `let:`**.
 
 ```yaml
 versions:
   densita:                    # un asse, due stati alternativi
-    estrema: {d0: 500, comune: {ramp: {start: 20, stop: 60, step: 5}}}  # comune = envelope
+    estrema:
+      d0: 500
+      comune: {linear_env: {ramp: {start: 20, stop: 60, step: 5}}}  # envelope
     minima:  {d0: 2}                              # bundle parziale
 # grana × densita = 8 × 2 = 16 versioni
 ```
 
-- **Lo stesso generatore ha due significati per posizione.** `{ramp: ...}` come
-  figlio diretto dell'asse (Forma 1) è una **sequenza di versioni**; dentro uno
-  stato (Forma 2) è un **envelope** (una forma nel tempo, in una versione sola).
-  Si distinguono dalla posizione, non dalla forma del valore.
+- **I due ruoli non dipendono più dalla posizione.** `{ramp: ...}` come figlio
+  diretto dell'asse è una **sequenza di versioni** (Forma 1, letta per indice);
+  dentro uno stato serve una **forma nel tempo**, e la si marca `linear_env:`.
+  Un generatore nudo dentro un bundle è errore, e `linear_env:` come entry di
+  un asse è l'errore simmetrico.
 - **Discriminatore.** Un asse è Forma 1 se **tutte** le entry sono sequenze
   (generatore/lista), Forma 2 se **tutte** sono bundle (dict non-generatore).
   Mescolarle in un asse è errore; separale in due assi. Le etichette nello
@@ -963,7 +1024,9 @@ percorso:
   opzionali), nodo-expr (`{expr, let}`), o scalare nudo = costante. **Mai
   `values`/`ramp`**: sono generatori di sequenze e appartengono ai contesti
   indicizzati (`onset` enumerato, `spread`, `versions`) — usarli in una
-  traiettoria è errore con hint. Una banda con `n` è errore: le traiettorie
+  traiettoria è errore con hint; per una forma disegnata dentro un bordo si
+  usa `linear_env:` (`base: {linear_env: [0, 1, 0]}`). Una banda con `n` è
+  errore: le traiettorie
   non possiedono mai il conteggio (sono leggi sul tempo: le campioni in 3 o
   300 istanze e sono le stesse). Una banda con `drift` è una traiettoria a
   **deriva correlata**: ogni istanza vicina alla precedente, il passo

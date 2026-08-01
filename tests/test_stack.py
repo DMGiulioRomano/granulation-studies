@@ -307,7 +307,7 @@ def test_document_stack_unit_seconds_end_to_end():
 
 def test_nested_base_in_y_band_follows_generated_floor():
     # range 0: la banda collassa e insegue il pavimento generato [0 -> 10].
-    y = {"band": {"n": 4, "base": {"values": [0, 10]}, "range": 0}}
+    y = {"band": {"n": 4, "base": {"linear_env": [0, 10]}, "range": 0}}
     env = axis_envelope(y, None, duration=10.0)
     assert [v for _, v in env] == [
         pytest.approx(0.0), pytest.approx(10 / 3),
@@ -316,14 +316,15 @@ def test_nested_base_in_y_band_follows_generated_floor():
 
 
 def test_nested_base_with_type_step_makes_plateaus():
-    y = {"band": {"n": 4, "base": {"type": "step", "values": [0, 10]}, "range": 0}}
+    y = {"band": {"n": 4, "base": {"type": "step", "linear_env": [0, 10]},
+                  "range": 0}}
     env = axis_envelope(y, None, duration=10.0)
     assert [v for _, v in env] == [0.0, 0.0, 0.0, 10.0]
 
 
 def test_nested_in_x_walk_base_deterministic():
     y = {"band": {"base": 0, "range": 10}}
-    x = {"base": {"values": [5, 5]}, "range": 0}
+    x = {"base": {"linear_env": [5, 5]}, "range": 0}
     a = axis_envelope(y, x, duration=10.0, y_seed=1, x_seed=2)
     b = axis_envelope(y, x, duration=10.0, y_seed=1, x_seed=2)
     assert a == b
@@ -333,9 +334,11 @@ def test_nested_in_x_walk_base_deterministic():
 def test_nested_third_level_in_x_walk():
     y = {"band": {"base": 0, "range": 10}}
     x = {
-        "base": {"n": 8, "base": 2, "range": 4},
-        "range": {"n": 5, "base": 0.5,
-                  "range": {"ramp": {"start": 1, "stop": 4, "step": 1}}},
+        "base": {"linear_env": {"n": 8, "base": 2, "range": 4}},
+        "range": {"linear_env": {
+            "n": 5, "base": 0.5,
+            "range": {"linear_env": {"ramp": {"start": 1, "stop": 4, "step": 1}}},
+        }},
     }
     a = axis_envelope(y, x, duration=10.0, y_seed=1, x_seed=2)
     b = axis_envelope(y, x, duration=10.0, y_seed=1, x_seed=2)
@@ -391,7 +394,8 @@ def test_gaussian_in_y_band_with_n_and_x_linear():
 def test_drift_step_nested_node_at_stack_seam():
     # drift.step come nodo-generatore: l'espansione alla seam lo compila.
     y = {"band": {"base": 0, "range": 10,
-                  "drift": {"step": {"n": 3, "base": 0.01, "range": 0.1}}}}
+                  "drift": {"step": {"linear_env": {"n": 3, "base": 0.01,
+                                                    "range": 0.1}}}}}
     x = {"base": 5, "range": 0}
     a = axis_envelope(y, x, duration=10.0, y_seed=1, x_seed=2)
     b = axis_envelope(y, x, duration=10.0, y_seed=1, x_seed=2)

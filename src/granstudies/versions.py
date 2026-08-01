@@ -50,6 +50,7 @@ from .value_generators import (
     band,
     expand_params,
     is_generator_node,
+    is_linear_env_node,
     ramp,
     stable_seed,
     y_generator,
@@ -411,6 +412,7 @@ def parse_version_axes(
 
 def _parse_axis(axis: str, cfg: Any, sid: str, ctx: ErrCtx) -> List[AxisState]:
     key = ("versions", axis)
+    _reject_linear_env(axis, None, cfg, ctx, key)
     # Asse a singola manopola (forma piatta storica): generatore o lista nuda.
     if is_generator_node(cfg) or isinstance(cfg, list):
         seed = stable_seed(f"{sid}:versions:{axis}")
@@ -426,6 +428,7 @@ def _parse_axis(axis: str, cfg: Any, sid: str, ctx: ErrCtx) -> List[AxisState]:
     # una sequenza (generatore/lista) o un bundle (dict non-generatore).
     kinds = {}
     for name, v in cfg.items():
+        _reject_linear_env(axis, name, v, ctx, ("versions", axis, name))
         if isinstance(v, dict) and not is_generator_node(v):
             kinds[name] = "bundle"
         elif is_generator_node(v) or isinstance(v, list):
@@ -447,6 +450,29 @@ def _parse_axis(axis: str, cfg: Any, sid: str, ctx: ErrCtx) -> List[AxisState]:
         "stati nominati (Forma 2) — un asse e' o l'uno o l'altro.",
         key=key,
         hint="separa le due cose in due assi distinti.",
+    )
+
+
+def _reject_linear_env(
+    axis: str, entry: str | None, cfg: Any, ctx: ErrCtx, key: tuple
+) -> None:
+    """``linear_env:`` come *entry* di un asse e' Famiglia 2 dove serve la 1.
+
+    Senza questa guardia il wrapper cadrebbe nel ramo bundle del
+    discriminatore e ``linear_env`` diventerebbe il nome di una manopola: un
+    errore piu' avanti, e fuorviante. Dentro un bundle di Forma 2 il wrapper
+    e' invece la forma giusta — la' il valore e' un envelope (issue #47).
+    """
+    if not is_linear_env_node(cfg):
+        return
+    dove = f"l'asse '{axis}', entry '{entry}'" if entry else f"l'asse '{axis}'"
+    raise ctx.err(
+        f"versions: {dove} usa 'linear_env:', che marca una forma nel tempo — "
+        "qui serve una sequenza di versioni, letta per indice.",
+        key=key,
+        hint="dichiara 'values', 'ramp' o una banda direttamente; "
+        "'linear_env:' vale dentro un bundle di Forma 2, dove il valore di "
+        "una manopola e' un envelope.",
     )
 
 

@@ -331,7 +331,17 @@ def band_at(
 # Le chiavi che marcano il generatore Y di un asse (mutuamente esclusive): la
 # lista esplicita ``values``, la griglia ``ramp``, e ``base`` (la banda piatta —
 # non piu' un wrapper ``rand:``, ma la coppia base/range direttamente sull'asse).
+#
+# Il vocabolario dei generatori dice **da dove vengono i numeri**, non come si
+# leggono: e' condiviso dalle due famiglie di ruolo (issue #47). Il ruolo lo
+# dichiara la posizione (serie indicizzata) o il wrapper ``linear_env:`` (forma
+# nel tempo).
 Y_GENERATOR_KEYS = frozenset({"values", "ramp", "base"})
+
+# Il wrapper di ruolo della Famiglia 2: quello che ci sta dentro diventa i
+# breakpoint di un envelope su tempi equispaziati, non una serie letta per
+# indice. Simmetrico a ``list:`` (il corredo), che si legge per indice.
+LINEAR_ENV_KEY = "linear_env"
 
 # Chiavi che accompagnano ``base`` nella banda piatta (viaggiano con essa).
 _BAND_KEYS = frozenset({"base", "range", "n", "seed", "distribution", "drift"})
@@ -350,6 +360,14 @@ def y_generator(cfg: Dict[str, Any]) -> tuple:
             "il wrapper 'rand:' non esiste piu': dichiara la banda piatta "
             "(base/range/n/seed direttamente sull'asse). Es. 'rand: {n, base, "
             "range}' -> 'n: ...', 'base: ...', 'range: ...'."
+        )
+    if LINEAR_ENV_KEY in cfg:
+        raise ValueError(
+            f"'{LINEAR_ENV_KEY}:' marca una forma nel tempo (i valori "
+            "diventano i breakpoint di un envelope), ma qui la lista si legge "
+            "per indice — la posizione k e' l'elemento k di una serie. "
+            f"Dichiara il generatore direttamente: '{{{LINEAR_ENV_KEY}: "
+            "{values: [...]}}}' -> '{values: [...]}'."
         )
     markers = [k for k in cfg if k in Y_GENERATOR_KEYS]
     if len(markers) != 1:
@@ -408,6 +426,78 @@ def is_generator_node(spec: Any) -> bool:
     return isinstance(spec, dict) and any(k in Y_GENERATOR_KEYS for k in spec)
 
 
+def is_linear_env_node(spec: Any) -> bool:
+    """True se ``spec`` e' il wrapper di ruolo ``linear_env:`` (Famiglia 2).
+
+    Il wrapper dichiara il **ruolo** — questa lista si legge per tempo — e
+    accetta dentro di se' l'intero vocabolario dei generatori, che dichiara
+    **come** si producono i numeri: lista letterale, ``values``, ``ramp``,
+    banda. Le chiavi di forma (``type``/``curve``) stanno *accanto* al
+    wrapper, non dentro: descrivono l'envelope prodotto, non il generatore, e
+    una lista letterale non avrebbe dove ospitarle.
+    """
+    return isinstance(spec, dict) and LINEAR_ENV_KEY in spec
+
+
+def _unwrap_linear_env(spec: Dict[str, Any], path: str) -> Dict[str, Any]:
+    """Il nodo-generatore dentro ``linear_env:``, con ``type``/``curve`` accanto."""
+    node = dict(spec)
+    inner = node.pop(LINEAR_ENV_KEY)
+    extra = set(node) - _NODE_SHAPE_KEYS
+    if extra:
+        raise ValueError(
+            f"{path}: {LINEAR_ENV_KEY}, chiavi non ammesse {sorted(extra)} — "
+            f"accanto al wrapper stanno solo {sorted(_NODE_SHAPE_KEYS)}, il "
+            "generatore va dentro."
+        )
+    if isinstance(inner, (list, tuple)):
+        node["values"] = list(inner)
+        return node
+    if not isinstance(inner, dict):
+        raise ValueError(
+            f"{path}: {LINEAR_ENV_KEY} vuole una lista o un generatore "
+            f"(values | ramp | banda), ricevuto {inner!r}."
+        )
+    shape = sorted(_NODE_SHAPE_KEYS & set(inner))
+    if shape:
+        raise ValueError(
+            f"{path}: {LINEAR_ENV_KEY}, {shape} va accanto al wrapper, non "
+            f"dentro — descrive l'envelope prodotto, non il generatore. Es. "
+            f"'{{{LINEAR_ENV_KEY}: {{...}}, type: step}}'."
+        )
+    if LINEAR_ENV_KEY in inner:
+        raise ValueError(
+            f"{path}: {LINEAR_ENV_KEY} annidato in se stesso — il wrapper "
+            "dichiara il ruolo una volta sola."
+        )
+    node.update(inner)
+    return node
+
+
+def _migration_to_linear_env(spec: Dict[str, Any], path: str) -> ValueError:
+    """L'errore per un generatore nudo in posizione di Famiglia 2 (issue #47)."""
+    marker = next(k for k in spec if k in Y_GENERATOR_KEYS)
+    if marker == "values":
+        rimedio = (
+            f"'{{values: [...]}}' -> '{{{LINEAR_ENV_KEY}: [...]}}' (la lista "
+            f"nuda basta) oppure '{{{LINEAR_ENV_KEY}: {{values: [...]}}}}'"
+        )
+    elif marker == "ramp":
+        rimedio = (
+            f"'{{ramp: {{...}}}}' -> '{{{LINEAR_ENV_KEY}: {{ramp: {{...}}}}}}'"
+        )
+    else:
+        rimedio = (
+            f"'{{n: .., base: .., range: ..}}' -> '{{{LINEAR_ENV_KEY}: "
+            "{n: .., base: .., range: ..}}'"
+        )
+    return ValueError(
+        f"{path}: '{marker}:' qui si legge **per tempo** — i valori diventano "
+        "i breakpoint di un envelope su tempi equispaziati, non una serie "
+        f"letta per indice. Marca il ruolo con '{LINEAR_ENV_KEY}:'. {rimedio}."
+    )
+
+
 def is_compact_env(spec: Any) -> bool:
     """True se ``spec`` e' la forma compatta a cicli dell'engine.
 
@@ -462,11 +552,18 @@ def expand_compact(spec: Sequence[Any], path: str) -> List[List[float]]:
 
 
 def expand_env(spec: Threshold, *, seed: int, path: str, depth: int = 0) -> Threshold:
-    """Compila un nodo-generatore in una forma statica di ``Env`` (breakpoint).
+    """Compila un nodo ``linear_env:`` in una forma statica di ``Env``.
 
-    I valori del nodo si stendono su tempi equispaziati ``t_i = i/(n-1)`` (X
-    implicita lineare, come la X-linear degli assi). Con ``type``/``curve`` nel
-    nodo la resa e' la forma dict ``{type, points, curve}``; senza, la lista
+    E' il consumatore della **Famiglia 2** (issue #47): la lista si legge per
+    tempo, non per indice. Il ruolo lo dichiara il wrapper ``linear_env:``;
+    dentro sta l'intero vocabolario dei generatori (lista letterale,
+    ``values``, ``ramp``, banda). Un generatore *nudo* qui e' errore di
+    migrazione: la posizione da sola non basta piu' a distinguere i due ruoli
+    di ``values``.
+
+    I valori si stendono su tempi equispaziati ``t_i = i/(n-1)`` (X implicita
+    lineare, come la X-linear degli assi). Con ``type``/``curve`` accanto al
+    wrapper la resa e' la forma dict ``{type, points, curve}``; senza, la lista
     ``[[t, v], ...]``. Le forme statiche passano invariate. Ricorsivo: gli
     ``Env`` dentro il nodo (``base``/``range``/``step``) accettano a loro volta
     nodi, fino a ``MAX_ENV_DEPTH``.
@@ -490,14 +587,19 @@ def expand_env(spec: Threshold, *, seed: int, path: str, depth: int = 0) -> Thre
         return out
     if is_compact_env(spec):
         return expand_compact(spec, path)
-    if not is_generator_node(spec):
+    if is_linear_env_node(spec):
+        node = _unwrap_linear_env(spec, path)
+    elif is_generator_node(spec):
+        # Famiglia 1 in posizione di Famiglia 2: la posizione non basta piu' a
+        # disambiguare i due ruoli di ``values`` (issue #47).
+        raise _migration_to_linear_env(spec, path)
+    else:
         return spec
     if depth >= MAX_ENV_DEPTH:
         raise ValueError(
             f"{path}: profondita' di annidamento oltre {MAX_ENV_DEPTH} — "
             "config degenere (alias YAML ricorsivo?)."
         )
-    node = dict(spec)
     kind = node.pop("type", None)
     curve = node.pop("curve", None)
     if kind not in (None, "linear", "step"):
@@ -538,7 +640,7 @@ def expand_env(spec: Threshold, *, seed: int, path: str, depth: int = 0) -> Thre
 def expand_params(
     params: Dict[str, Any], *, seed: int, path: str = "", depth: int = 0
 ) -> Dict[str, Any]:
-    """Espande i nodi-generatore nei parametri di un generatore (walk generico).
+    """Espande i nodi ``linear_env:`` nei parametri di un generatore (walk generico).
 
     Cammina il dict senza schema per-strategia: ogni valore che e' un nodo
     (``base``/``range`` di banda e camminata, ``step`` di ramp e di drift, e
@@ -553,7 +655,12 @@ def expand_params(
     out: Dict[str, Any] = {}
     for k, v in params.items():
         sub = f"{path}.{k}" if path else k
-        if isinstance(v, dict) and not is_generator_node(v) and not is_expr_node(v):
+        if (
+            isinstance(v, dict)
+            and not is_generator_node(v)
+            and not is_expr_node(v)
+            and not is_linear_env_node(v)
+        ):
             out[k] = expand_params(v, seed=seed, path=sub, depth=depth)
         else:
             out[k] = expand_env(v, seed=seed, path=sub, depth=depth)

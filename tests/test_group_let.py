@@ -50,7 +50,7 @@ def test_banda_di_gruppo_pescata_una_volta_come_envelope():
     pescaggio per gruppo — la traiettoria comune 'pescata'."""
     streams = {
         "cugini": _stream(
-            {"respiro": {"base": 50, "range": 5, "n": 6}},
+            {"respiro": {"linear_env": {"base": 50, "range": 5, "n": 6}}},
             axes={"density": {"base": {"expr": "respiro"}}},
         )
     }
