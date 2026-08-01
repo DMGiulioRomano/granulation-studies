@@ -13,7 +13,7 @@ import random
 import zlib
 from typing import Any, Dict, List, Sequence, Union
 
-from .expr import eval_expr, is_expr_node, parse_expr_node
+from .expr import CORREDO_KEY, eval_expr, is_corredo, is_expr_node, parse_expr_node
 
 Threshold = Union[float, Sequence[float], Dict[str, Any]]
 
@@ -496,6 +496,51 @@ def _migration_to_linear_env(spec: Dict[str, Any], path: str) -> ValueError:
         "i breakpoint di un envelope su tempi equispaziati, non una serie "
         f"letta per indice. Marca il ruolo con '{LINEAR_ENV_KEY}:'. {rimedio}."
     )
+
+
+# --- il corredo: una lista nominata, letta per indice -------------------------
+#
+# Non collide con la macchina esistente: ``list`` non e' in
+# ``Y_GENERATOR_KEYS``, quindi ``is_generator_node`` non lo vede, e non e'
+# ``linear_env``. Il ruolo e' il terzo del trio: ``values``/``ramp``/banda
+# dicono da dove vengono i numeri, ``linear_env:`` che si leggono per tempo,
+# ``list:`` che si leggono per indice.
+
+# Chiavi ammesse accanto a ``list`` nella dichiarazione di un corredo.
+_CORREDO_KEYS = frozenset({CORREDO_KEY})
+
+
+def parse_corredo(spec: Dict[str, Any], name: str) -> Dict[str, Any]:
+    """Il corredo validato e normalizzato, come dict ``{list: [...]}``.
+
+    Un corredo **possiede la propria lunghezza**: non la eredita mai da uno
+    spread. Per questo gli elementi devono esistere gia' alla dichiarazione.
+    """
+    extra = set(spec) - _CORREDO_KEYS
+    if extra:
+        raise ValueError(
+            f"corredo '{name}': chiavi non ammesse {sorted(extra)} "
+            f"(solo {sorted(_CORREDO_KEYS)})."
+        )
+    elems = spec[CORREDO_KEY]
+    if not isinstance(elems, (list, tuple)):
+        raise ValueError(
+            f"corredo '{name}': 'list' vuole una lista di valori "
+            f"(ricevuto {elems!r})."
+        )
+    if not elems:
+        raise ValueError(
+            f"corredo '{name}': un corredo vuoto non ha niente da indicizzare "
+            "— toglilo, oppure dagli almeno un elemento."
+        )
+    for k, v in enumerate(elems):
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            raise ValueError(
+                f"corredo '{name}': l'elemento {k} non e' un numero ({v!r}) — "
+                "i corredi di sagome e di valori non numerici sono fuori "
+                "dalla v1 (issue #44)."
+            )
+    return {CORREDO_KEY: list(elems)}
 
 
 def is_compact_env(spec: Any) -> bool:

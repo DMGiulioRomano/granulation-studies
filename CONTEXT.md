@@ -59,6 +59,17 @@ l'ultimo onset nella forma enumerata), non dentro il tempo di una voce.
 _Evita_: scriverla con `values`/`ramp` → sono generatori di sequenze, appartengono ai
 contesti indicizzati (`onset` enumerato, `spread`, `versions`)
 
+**corredo**:
+Una lista nominata, dichiarata con `list:` in un `let:` (di documento o di gruppo) e letta
+**solo per indice**: `ratio[0]` è la fondamentale del corredo, `ratio[i]` il valore di quella
+voce. Serve al caso che le manopole non coprivano: una serie **irregolare e decisa a orecchio**
+— quattro rapporti scelti, non una formula — condivisa da più assi. Un corredo possiede la
+propria lunghezza e non la eredita mai da uno spread; può invece darla (`n: {expr: "len(ratio)"}`).
+Nelle espressioni una lista non è mai un valore: compare solo indicizzata.
+_Evita_: chiamare corredo una **sequenza** (Forma 1 di `versions`: valori consumati uno per
+versione, non indicizzabili) o una **sagoma** (un Env: si legge per tempo e interpola in mezzo,
+mentre un corredo è discreto per natura — fra il terzo e il quarto rapporto non c'è nessuna voce)
+
 **arco**:
 L'estensione temporale totale del percorso nella strategy a camminata. È il tempo che la
 camminata degli onset consuma: si genera un'istanza dopo l'altra finché l'onset resta dentro

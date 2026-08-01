@@ -10,14 +10,22 @@ unione dei breakpoint. L'unica porta Env⊙Env e' la primitiva ``mix(A, B, w)``
 ricampionamento sull'unione dei tempi (vedi ``_mix``).
 
 Grammatica (whitelist AST, ``mode="eval"``): numeri, nomi, ``+ - * / // % **``,
-unario ``-``, parentesi, le chiamate alle funzioni primitive di ``_FUNCTIONS``
+unario ``-``, parentesi, l'indicizzazione di un corredo ``nome[expr]``, le
+chiamate alle funzioni primitive di ``_FUNCTIONS``
 (``abs``/``floor``/``ceil``/``sqrt``/``exp``/``log``/``sin``/``cos``/``tan``/
 ``atan``/``min``/``max``/``mix``) e le costanti ``pi``/``e`` (ombreggiabili
 dallo scope). Una chiamata con un argomento-Env agisce elementwise sulle y
 (es. ``min(env, 10)`` e' un clamp); due Env nella stessa chiamata sono un
 errore, come per gli operatori — tranne ``mix``, che di due (o tre) Env vive.
-Niente subscript, confronti o keyword: il parser rifiuta ogni altro costrutto
-col frammento incriminato.
+Niente confronti o keyword: il parser rifiuta ogni altro costrutto col
+frammento incriminato.
+
+Il **corredo** (``{list: [...]}`` in un ``let:``) e' un tipo a parte: una lista
+nominata, letta solo per indice. La linea di confine e' dichiarata e stretta —
+*una lista non e' mai un valore*: puo' comparire solo come ``nome[expr]``, non
+si passa a una funzione, non ci si fa aritmetica, non si restituisce. Cosi' il
+tipo di ogni **espressione** resta ``scalare | Env`` e i corredi sono un
+namespace di dichiarazione separato.
 
 I valori di ``let`` sono scalari, forme statiche di Env, oppure altri
 nodi-expr (issue #28): un nodo annidato si risolve *lazy* alla prima
@@ -79,6 +87,22 @@ _FUNCTIONS = {
 
 # Chiavi ammesse nel nodo-expr.
 _NODE_KEYS = frozenset({"expr", "let"})
+
+# Il corredo: una lista nominata, dichiarata in un ``let:`` e letta **solo per
+# indice**. Vive come dict ``{list: [...]}`` anche dopo la risoluzione — una
+# lista non e' un valore, quindi non c'e' niente in cui trasformarla, e la
+# forma-dict resta serializzabile nei documenti intermedi.
+CORREDO_KEY = "list"
+
+
+def is_corredo(v: Any) -> bool:
+    """True se ``v`` e' un corredo (dict con chiave ``list``)."""
+    return isinstance(v, dict) and CORREDO_KEY in v
+
+
+def corredo_values(v: Dict[str, Any]) -> list:
+    """Gli elementi di un corredo gia' risolto."""
+    return v[CORREDO_KEY]
 
 # Guardia di profondita' degli expr annidati in ``let`` (issue #28): vale sia
 # per l'annidamento sintattico (let dentro let, al parse) sia per la catena di
@@ -261,9 +285,16 @@ def _is_pairs(v: Any) -> bool:
 
 
 def _checked(name: str, v: Any) -> Any:
-    """Il valore di scope ``name``, se ha una forma ammessa."""
+    """Il valore di scope ``name``, se ha una forma ammessa.
+
+    Ammette anche i corredi: sono binding legittimi (l'iniezione per nome li
+    mette negli scope ``let`` come ogni altra manopola). E' ``_eval`` sul nome
+    nudo a rifiutarli — un corredo si legge solo per indice.
+    """
     if _is_scalar(v):
         return v
+    if is_corredo(v):
+        return _checked_corredo(name, v)
     if _is_pairs(v):
         return v
     if (
@@ -275,8 +306,31 @@ def _checked(name: str, v: Any) -> Any:
         return v
     raise ValueError(
         f"expr: '{name}' ha una forma non riconosciuta ({v!r}) — in scope "
-        "solo scalari o forme statiche di Env (niente nodi-generatore)."
+        "solo scalari, forme statiche di Env o corredi (niente "
+        "nodi-generatore)."
     )
+
+
+def _checked_corredo(name: str, v: Dict[str, Any]) -> Dict[str, Any]:
+    """Un corredo in scope, se e' gia' risolto e ben formato.
+
+    La validazione alla *dichiarazione* vive in ``value_generators``, dove ci
+    sono le coordinate dello YAML; qui si controlla solo cio' che serve a non
+    valutare su una struttura rotta — un corredo puo' arrivare in scope anche
+    scritto a mano nel ``let`` di un nodo-expr.
+    """
+    elems = v[CORREDO_KEY]
+    if not isinstance(elems, list) or not elems:
+        raise ValueError(
+            f"expr: il corredo '{name}' e' vuoto o malformato ({v!r}) — "
+            "'list' vuole una lista non vuota."
+        )
+    if not all(_is_scalar(x) for x in elems):
+        raise ValueError(
+            f"expr: il corredo '{name}' contiene elementi non scalari — "
+            "i corredi di sagome sono fuori dalla v1 (issue #44)."
+        )
+    return v
 
 
 def _map_y(env: Any, fn) -> Any:
@@ -296,13 +350,24 @@ def _eval(node: ast.AST, scope: Mapping[str, Any]) -> Any:
         return node.value
     if isinstance(node, ast.Name):
         if node.id in scope:
-            return _checked(node.id, scope[node.id])
+            v = _checked(node.id, scope[node.id])
+            if is_corredo(v):
+                # La linea di confine della grammatica: una lista non e' mai un
+                # valore. Puo' comparire solo come ``nome[expr]``.
+                raise ValueError(
+                    f"expr: '{node.id}' e' un corredo — si legge solo per "
+                    f"indice ('{node.id}[0]'), non come valore: non si passa "
+                    "a una funzione, non ci si fa aritmetica."
+                )
+            return v
         if node.id in _CONSTANTS:
             return _CONSTANTS[node.id]
         names = ", ".join(sorted(set(scope) | set(_CONSTANTS))) or "nessuno"
         raise ValueError(
             f"expr: nome ignoto '{node.id}' (disponibili: {names})."
         )
+    if isinstance(node, ast.Subscript):
+        return _subscript(node, scope)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
         v = _eval(node.operand, scope)
         if isinstance(node.op, ast.UAdd):
@@ -329,6 +394,56 @@ def _eval(node: ast.AST, scope: Mapping[str, Any]) -> Any:
         f"expr: costrutto non ammesso {ast.unparse(node)!r} "
         "(solo numeri, nomi, + - * / // % **, funzioni primitive, parentesi)."
     )
+
+
+def _subscript(node: ast.Subscript, scope: Mapping[str, Any]) -> Any:
+    """``nome[expr]``: l'elemento di un corredo.
+
+    La base e' un **nome**, non un'espressione qualunque: una lista non e' mai
+    un valore, quindi non c'e' niente altro che possa produrne una. L'indice
+    invece e' un'espressione libera, purche' valuti a un intero — un indice
+    frazionario e' errore, la quantizzazione si scrive con ``//`` o ``floor``.
+    """
+    if not isinstance(node.value, ast.Name):
+        raise ValueError(
+            f"expr: si indicizza solo un corredo per nome, non "
+            f"{ast.unparse(node.value)!r} — una lista non e' mai un valore."
+        )
+    name = node.value.id
+    if name not in scope:
+        names = ", ".join(sorted(set(scope) | set(_CONSTANTS))) or "nessuno"
+        raise ValueError(f"expr: nome ignoto '{name}' (disponibili: {names}).")
+    corredo = _checked(name, scope[name])
+    if not is_corredo(corredo):
+        raise ValueError(
+            f"expr: '{name}' non e' un corredo, non si puo' indicizzare "
+            f"({corredo!r}) — l'indicizzazione legge le liste dichiarate con "
+            "'list:' in un 'let:'."
+        )
+    return _element(name, corredo, _eval(node.slice, scope))
+
+
+def _element(name: str, corredo: Dict[str, Any], idx: Any) -> Any:
+    """L'elemento di ``corredo`` all'indice ``idx``, validato."""
+    if not _is_scalar(idx):
+        raise ValueError(
+            f"expr: l'indice di '{name}' non e' un numero ({idx!r}) — un Env "
+            "non indicizza."
+        )
+    if isinstance(idx, float):
+        if not idx.is_integer():
+            raise ValueError(
+                f"expr: l'indice di '{name}' non e' intero ({idx}) — fra due "
+                "elementi non c'e' niente. Quantizza con '//' o 'floor()'."
+            )
+        idx = int(idx)
+    elems = corredo_values(corredo)
+    if not 0 <= idx < len(elems):
+        raise ValueError(
+            f"expr: indice {idx} fuori dal corredo '{name}', che ha "
+            f"{len(elems)} elementi (indici 0..{len(elems) - 1})."
+        )
+    return elems[idx]
 
 
 def _call(node: ast.Call, scope: Mapping[str, Any]) -> Any:
