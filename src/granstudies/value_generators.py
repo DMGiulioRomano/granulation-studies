@@ -510,11 +510,20 @@ def _migration_to_linear_env(spec: Dict[str, Any], path: str) -> ValueError:
 _CORREDO_KEYS = frozenset({CORREDO_KEY})
 
 
-def parse_corredo(spec: Dict[str, Any], name: str) -> Dict[str, Any]:
+def parse_corredo(
+    spec: Dict[str, Any], name: str, *, seed: int = 0
+) -> Dict[str, Any]:
     """Il corredo validato e normalizzato, come dict ``{list: [...]}``.
 
-    Un corredo **possiede la propria lunghezza**: non la eredita mai da uno
-    spread. Per questo gli elementi devono esistere gia' alla dichiarazione.
+    ``list:`` dichiara il **tipo**; come si producono gli elementi e' una
+    domanda ortogonale, a cui risponde il vocabolario dei generatori — la
+    stessa composizione che il sistema fa per i generatori annidati in un
+    ``Env``. Un corredo **possiede la propria lunghezza** e non la eredita mai
+    da uno spread, quindi il suo generatore deve possedere un conteggio.
+
+    ``seed`` e' il seed effettivo del blocco (``stable_seed(f"{prefisso}:
+    {nome}")``): un corredo pescato senza ``seed`` proprio lo usa, come ogni
+    altra manopola generata.
     """
     extra = set(spec) - _CORREDO_KEYS
     if extra:
@@ -523,10 +532,12 @@ def parse_corredo(spec: Dict[str, Any], name: str) -> Dict[str, Any]:
             f"(solo {sorted(_CORREDO_KEYS)})."
         )
     elems = spec[CORREDO_KEY]
+    if isinstance(elems, dict):
+        elems = _generate_corredo(elems, name, seed)
     if not isinstance(elems, (list, tuple)):
         raise ValueError(
-            f"corredo '{name}': 'list' vuole una lista di valori "
-            f"(ricevuto {elems!r})."
+            f"corredo '{name}': 'list' vuole una lista di valori o un "
+            f"generatore che possieda il proprio conteggio (ricevuto {elems!r})."
         )
     if not elems:
         raise ValueError(
@@ -541,6 +552,50 @@ def parse_corredo(spec: Dict[str, Any], name: str) -> Dict[str, Any]:
                 "dalla v1 (issue #44)."
             )
     return {CORREDO_KEY: list(elems)}
+
+
+def _generate_corredo(node: Dict[str, Any], name: str, seed: int) -> List[float]:
+    """Gli elementi di un corredo generato, dal vocabolario dei generatori.
+
+    La legge: **un corredo possiede la propria lunghezza**. Passano solo le
+    forme che possiedono un conteggio — lista/``values`` per costruzione, il
+    ramp pieno per la griglia, la banda con ``n`` esplicito. Le forme che il
+    conteggio se lo fanno dare da fuori (``ramp`` parziale, banda senza ``n``)
+    sono le stesse che in ``spread.over`` lo ereditano; nel corredo non c'e'
+    nessun fuori.
+    """
+    if LINEAR_ENV_KEY in node:
+        raise ValueError(
+            f"corredo '{name}': '{LINEAR_ENV_KEY}:' marca una forma nel tempo, "
+            "ma un corredo si legge per indice — dentro 'list' va il "
+            "generatore diretto (lista, 'values', 'ramp' o banda)."
+        )
+    try:
+        key, params = y_generator(node)
+    except ValueError as exc:
+        raise ValueError(f"corredo '{name}': {exc}") from None
+    if key == "values":
+        return list(params)
+    if key == "ramp":
+        missing = sorted({"start", "stop", "step"} - set(params))
+        if missing:
+            raise ValueError(
+                f"corredo '{name}': il ramp non possiede il proprio conteggio "
+                f"(manca {', '.join(missing)}) — un corredo possiede la propria "
+                "lunghezza e non eredita 'n' da nessuno. Dichiara "
+                "'{start, stop, step}', che ha la griglia."
+            )
+        return ramp(**expand_params(params, seed=seed))
+    if "n" not in params:
+        raise ValueError(
+            f"corredo '{name}': la banda non possiede il proprio conteggio "
+            "(manca 'n') — un corredo possiede la propria lunghezza e non "
+            "eredita 'n' dallo spread. Per un pescaggio *per voce* usa la "
+            "banda in 'spread.let'."
+        )
+    band_params = dict(params)
+    band_params.setdefault("seed", seed)
+    return band(**expand_params(band_params, seed=band_params["seed"]))
 
 
 def is_compact_env(spec: Any) -> bool:

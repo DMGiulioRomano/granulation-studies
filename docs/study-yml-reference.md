@@ -302,6 +302,53 @@ quarto rapporto non c'è nessuna voce. **Un corredo è discreto per natura.**
 letture, senza errore e con il suono sbagliato — e due voci in rapporto 3:2 è
 materiale che si scrive davvero.
 
+### Cosa può stare dentro `list:`
+
+`list:` dichiara il **tipo**; come si producono gli elementi è una domanda
+ortogonale, a cui risponde il vocabolario dei generatori già esistente — la
+stessa composizione che il sistema fa per i generatori annidati in un `Env`.
+
+```yaml
+let:
+  scelto:   {list: [2, 3, 4, 7]}                          # a mano
+  armonica: {list: {ramp: {start: 1, stop: 8, step: 1}}}  # [1..8]
+  pescato:  {list: {n: 5, base: 2, range: 6, seed: 1988}} # 5 rapporti in [2, 8]
+```
+
+**La legge: un corredo possiede la propria lunghezza**, quindi il suo
+generatore deve possedere un conteggio.
+
+| Forma | Ammessa | Perché |
+|---|---|---|
+| lista letterale | sì | possiede `len` |
+| `{values: [...]}` | sì, ridondante | possiede `len` |
+| `{ramp: {start, stop, step}}` | sì | la griglia possiede il conteggio |
+| `{ramp: {start, step}}` | **no** | progressione infinita |
+| `{ramp: {start, stop}}` | **no** | il conteggio andrebbe ereditato |
+| banda `{n, base, range, seed}` | sì | `n` esplicito |
+| banda senza `n` | **no** | nessun conteggio |
+
+Le due forme di `ramp` escluse sono le stesse che in `spread.over` non
+possiedono `n` e se lo fanno dare da fuori. Nel corredo **non c'è nessun
+fuori**: non eredita mai `n` dallo spread — sarebbe circolare con
+`spread.n: {expr: "len(ratio)"}`, impossibile per un corredo di documento che
+uno spread non ce l'ha, e svuoterebbe l'oggetto (con `len == n` per
+costruzione il fuori range non esiste e il warning `n < len` non si emette
+mai).
+
+**Il corredo pescato** apre un caso che prima non esisteva. La banda di
+`spread.let` fa un pescaggio *per voce*, e l'insieme non esiste come oggetto:
+non se ne può nominare la fondamentale, non si può misurare. Pescato una volta
+e poi indicizzato, `ratio[i] / ratio[0]` — ogni voce in rapporto alla prima
+estratta — diventa scrivibile. Senza `seed` esplicito il seed si deriva dalla
+catena gerarchica, come per ogni altra manopola generata
+(`stable_seed("<study>:let:<nome>")` a documento,
+`stable_seed("<entry>:let:<nome>")` a gruppo).
+
+I bordi `base`/`range` della banda restano `Env`: dentro ci va `linear_env:`
+come sempre. `linear_env:` **direttamente** dentro `list:` è invece errore —
+i due wrapper marcano ruoli opposti.
+
 ### Dove vive
 
 | Blocco | Corredo ammesso |
