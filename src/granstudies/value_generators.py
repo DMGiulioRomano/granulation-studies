@@ -13,7 +13,14 @@ import random
 import zlib
 from typing import Any, Dict, List, Sequence, Union
 
-from .expr import CORREDO_KEY, eval_expr, is_corredo, is_expr_node, parse_expr_node
+from .expr import (
+    CORREDO_KEY,
+    CYCLE_KEY,
+    eval_expr,
+    is_corredo,
+    is_expr_node,
+    parse_expr_node,
+)
 
 Threshold = Union[float, Sequence[float], Dict[str, Any]]
 
@@ -507,7 +514,7 @@ def _migration_to_linear_env(spec: Dict[str, Any], path: str) -> ValueError:
 # ``list:`` che si leggono per indice.
 
 # Chiavi ammesse accanto a ``list`` nella dichiarazione di un corredo.
-_CORREDO_KEYS = frozenset({CORREDO_KEY})
+_CORREDO_KEYS = frozenset({CORREDO_KEY, CYCLE_KEY})
 
 
 def parse_corredo(
@@ -551,7 +558,19 @@ def parse_corredo(
                 "i corredi di sagome e di valori non numerici sono fuori "
                 "dalla v1 (issue #44)."
             )
-    return {CORREDO_KEY: list(elems)}
+    out: Dict[str, Any] = {CORREDO_KEY: list(elems)}
+    cycle = spec.get(CYCLE_KEY, False)
+    if not isinstance(cycle, bool):
+        raise ValueError(
+            f"corredo '{name}': '{CYCLE_KEY}' vuole true o false "
+            f"(ricevuto {cycle!r})."
+        )
+    if cycle:
+        # Un corredo senza la chiave e' un accordo: la politica si dichiara
+        # una volta, nel punto di dichiarazione, e vale uniformemente per gli
+        # indici costanti e per quelli calcolati.
+        out[CYCLE_KEY] = True
+    return out
 
 
 def _generate_corredo(node: Dict[str, Any], name: str, seed: int) -> List[float]:

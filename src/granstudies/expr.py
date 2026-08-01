@@ -97,10 +97,21 @@ _NODE_KEYS = frozenset({"expr", "let"})
 # forma-dict resta serializzabile nei documenti intermedi.
 CORREDO_KEY = "list"
 
+# La politica del corredo. Non e' un flag di comodo: sono due oggetti
+# compositivi diversi. Un **accordo** e' un insieme fisso di rapporti — se ne
+# chiedi il quinto, la domanda e' sbagliata. Un **pattern** e' periodico per
+# natura — il quinto elemento *e'* il primo, come in un ciclo ritmico.
+CYCLE_KEY = "cycle"
+
 
 def is_corredo(v: Any) -> bool:
     """True se ``v`` e' un corredo (dict con chiave ``list``)."""
     return isinstance(v, dict) and CORREDO_KEY in v
+
+
+def is_cyclic(v: Dict[str, Any]) -> bool:
+    """True se il corredo e' un pattern (si avvolge) invece che un accordo."""
+    return bool(v.get(CYCLE_KEY))
 
 
 def corredo_values(v: Dict[str, Any]) -> list:
@@ -339,6 +350,11 @@ def _checked_corredo(name: str, v: Dict[str, Any]) -> Dict[str, Any]:
             f"expr: il corredo '{name}' contiene elementi non scalari — "
             "i corredi di sagome sono fuori dalla v1 (issue #44)."
         )
+    if CYCLE_KEY in v and not isinstance(v[CYCLE_KEY], bool):
+        raise ValueError(
+            f"expr: il corredo '{name}': '{CYCLE_KEY}' vuole true o false "
+            f"(ricevuto {v[CYCLE_KEY]!r})."
+        )
     return v
 
 
@@ -485,15 +501,20 @@ def _element(name: str, corredo: Dict[str, Any], idx: Any) -> Any:
         idx = int(idx)
     elems = corredo_values(corredo)
     size = len(elems)
+    if is_cyclic(corredo):
+        # Un pattern e' periodico per natura: il quinto elemento *e'* il primo.
+        # Il modulo di Python porta con se' i negativi gratis (``-1 % 4 == 3``),
+        # quindi il senso di lettura invertito resta coerente.
+        return elems[idx % size]
     # Indici negativi: ``ratio[-1]`` e' l'ultimo. Servono a invertire il senso
-    # di lettura del corredo; su un corredo ciclico cadono fuori gratis dal
-    # modulo (``-1 % 4 == 3``).
+    # di lettura del corredo.
     pos = idx + size if idx < 0 else idx
     if not 0 <= pos < size:
         raise ValueError(
             f"expr: indice {idx} fuori dal corredo '{name}', che ha {size} "
             f"elementi (indici 0..{size - 1} dall'inizio, -1..-{size} dalla "
-            "fine)."
+            f"fine) — e' un accordo, un insieme fisso. Per un pattern che si "
+            f"ripete dichiara '{CYCLE_KEY}: true' accanto a 'list'."
         )
     return elems[pos]
 

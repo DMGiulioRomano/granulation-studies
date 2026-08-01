@@ -809,3 +809,188 @@ def test_bordi_annidati_dentro_una_banda_di_corredo():
         {"list": {"n": 4, "base": {"linear_env": [0, 30]}, "range": 0, "seed": 1}}
     )
     assert got == pytest.approx([0.0, 10.0, 20.0, 30.0])
+
+
+# =============================================================================
+# Fetta 3/7 (issue #50): cycle — accordo o pattern
+# =============================================================================
+
+def _politica(elems, cycle=None):
+    node = {"list": elems}
+    if cycle is not None:
+        node["cycle"] = cycle
+    out = apply_document_let(
+        _doc({"ratio": node}, axes={"d": {"base": {"expr": "ratio[0]"}}})
+    )
+    return out["axes"]["d"]["base"]["let"]["ratio"]
+
+
+def test_senza_cycle_il_corredo_e_un_accordo():
+    assert _politica([2, 3, 4, 7]) == {"list": [2, 3, 4, 7]}
+
+
+def test_cycle_true_lo_rende_un_pattern():
+    assert _politica([2, 3, 4, 7], True) == {"list": [2, 3, 4, 7], "cycle": True}
+
+
+def test_cycle_false_e_esplicitamente_un_accordo():
+    assert _politica([2, 3, 4, 7], False) == {"list": [2, 3, 4, 7]}
+
+
+# --- l'avvolgimento ----------------------------------------------------------
+
+@pytest.mark.parametrize("k, atteso", [(4, 2), (5, 3), (9, 3), (12, 2)])
+def test_l_indice_si_avvolge(k, atteso):
+    c = _politica([2, 3, 4, 7], True)
+    assert eval_expr(f"ratio[{k}]", {"ratio": c}) == atteso
+
+
+def test_la_regola_vale_identica_per_indici_costanti_e_calcolati():
+    """Se dipendesse dall'essere l'indice costante o calcolato, tornerebbe a
+    dipendere dall'uso — che e' cio' che il design ha scartato tre volte."""
+    c = _politica([2, 3, 4, 7], True)
+    costante = eval_expr("ratio[9]", {"ratio": c})
+    calcolato = eval_expr("ratio[i]", {"ratio": c, "i": 9})
+    assert costante == calcolato == 3
+
+
+@pytest.mark.parametrize("k, atteso", [(-1, 7), (-4, 2), (-5, 7), (-6, 4)])
+def test_i_negativi_cadono_fuori_gratis_dal_modulo(k, atteso):
+    c = _politica([2, 3, 4, 7], True)
+    assert eval_expr(f"ratio[{k}]", {"ratio": c}) == atteso
+
+
+def test_su_un_accordo_lo_stesso_indice_e_errore():
+    c = _politica([2, 3, 4, 7])
+    with pytest.raises(ValueError, match="accordo"):
+        eval_expr("ratio[9]", {"ratio": c})
+
+
+def test_il_messaggio_dell_accordo_indica_cycle():
+    c = _politica([2, 3, 4, 7])
+    with pytest.raises(ValueError) as exc:
+        eval_expr("ratio[9]", {"ratio": c})
+    assert "cycle: true" in str(exc.value)
+
+
+# --- le guardie --------------------------------------------------------------
+
+def test_corredo_vuoto_ciclico_resta_errore():
+    """Sarebbe anche un modulo per zero."""
+    with pytest.raises(SpecError, match="vuoto"):
+        apply_document_let(
+            _doc(
+                {"ratio": {"list": [], "cycle": True}},
+                axes={"d": {"base": {"expr": "ratio[0]"}}},
+            )
+        )
+
+
+def test_cycle_senza_list_e_errore():
+    with pytest.raises(SpecError, match="senza 'list'"):
+        apply_document_let(
+            _doc({"ratio": {"cycle": True}}, axes={"d": {"base": {"expr": "ratio"}}})
+        )
+
+
+def test_cycle_non_booleano_e_errore():
+    with pytest.raises(SpecError, match="true o false"):
+        apply_document_let(
+            _doc(
+                {"ratio": {"list": [2, 3], "cycle": "si"}},
+                axes={"d": {"base": {"expr": "ratio[0]"}}},
+            )
+        )
+
+
+def test_cycle_si_combina_con_un_corredo_generato():
+    """Nessun caso speciale: `cycle` e' la politica, il generatore produce gli
+    elementi (criterio rimandato qui dalla fetta 5/7)."""
+    c = _politica({"ramp": {"start": 1, "stop": 3, "step": 1}}, True)
+    assert c == {"list": [1, 2, 3], "cycle": True}
+    assert eval_expr("ratio[4]", {"ratio": c}) == 2
+
+
+def test_cycle_si_combina_con_un_corredo_pescato():
+    from granstudies.value_generators import band
+
+    c = _politica({"n": 3, "base": 2, "range": 6, "seed": 1988}, True)
+    assert c["list"] == band(3, 2, 6, seed=1988)
+    assert eval_expr("ratio[3]", {"ratio": c}) == c["list"][0]
+
+
+# --- i due casi d'ascolto ----------------------------------------------------
+
+def test_ispessimento_tre_voci_per_rapporto():
+    """Tre voci per rapporto, ognuna che legge un punto diverso del buffer:
+    stesso periodo, contenuto e fase diversi. L'accordo si ispessisce senza
+    cambiare le altezze."""
+    out = _spread(
+        _accordo(
+            {"ratio": {"list": [2, 3, 4, 7], "cycle": True}},
+            {"r": {"expr": "ratio[i]"}},
+            n=12,
+            over={"base.pointer.start": {"ramp": {"start": 0.05, "step": 0.075}}},
+        )
+    )
+    assert _r(out) == [2, 3, 4, 7, 2, 3, 4, 7, 2, 3, 4, 7]
+    starts = [v["base"]["pointer"]["start"] for v in out.values()]
+    assert len(set(starts)) == 12          # ogni voce legge un punto diverso
+
+
+def test_isoritmo_due_corredi_coprimi():
+    """Color e talea: due corredi ciclici di lunghezze coprime scorrono uno
+    contro l'altro, e il pattern combinato ha periodo lcm(4, 3) = 12. Cade
+    fuori da due `cycle: true`, senza sintassi dedicata.
+
+    (Il design doc dice «la coppia non si ripete prima della voce 12»: con
+    `durate: [1, 1, 2]`, che ha un duplicato, singole coppie *si* ripetono —
+    e' la **sequenza** ad avere periodo 12, non ogni coppia a essere unica.)
+    """
+    streams = {
+        "isoritmo": {
+            "let": {
+                "d": 1,
+                "ratio": {"list": [2, 3, 4, 7], "cycle": True},
+                "durate": {"list": [1, 1, 2], "cycle": True},
+            },
+            "spread": {
+                "n": 12,
+                "let": {"r": {"expr": "ratio[i]"}, "dur": {"expr": "durate[i]"}},
+                # `durate[i]` di nuovo, non `dur`: le manopole di `spread.let`
+                # sono iniettate negli stream generati, non nelle strategy di
+                # `over` che corrono in parallelo a loro.
+                "over": {"duration": {"expr": "durate[i] * 8"}},
+            },
+            "axes": {"density": {"base": {"expr": "d * r"}}},
+        }
+    }
+    out = _spread(streams)
+    rapporti = [v["axes"]["density"]["base"]["let"]["r"] for v in out.values()]
+    durate = [v["duration"] for v in out.values()]
+    # i due corredi scorrono uno contro l'altro: 4 e 3 sono coprimi
+    assert rapporti == [2, 3, 4, 7] * 3
+    assert durate == [8, 8, 16] * 4
+    coppie = list(zip(rapporti, durate))
+    assert coppie[0] == (2, 8)
+    # il periodo minimo della sequenza di coppie e' 12, non uno dei divisori
+    assert all(
+        coppie[:12 - p] != coppie[p:]
+        for p in (1, 2, 3, 4, 6)
+    )
+
+
+def test_end_to_end_ispessimento():
+    _, specs = _fixture("corredo_ispessimento.yml")
+    assert len(specs) == 12
+    periodi = [s.axis("density").values[0] for s in specs]
+    assert periodi == pytest.approx([2, 3, 4, 7] * 3)
+
+
+def test_end_to_end_isoritmo():
+    _, specs = _fixture("corredo_isoritmo.yml")
+    assert len(specs) == 12
+    assert [s.axis("density").values[0] for s in specs] == pytest.approx(
+        [2, 3, 4, 7] * 3
+    )
+    assert [s.duration for s in specs] == pytest.approx([8, 8, 16] * 4)
