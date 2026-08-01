@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
 from .errors import KeyPath, SpecError
-from .expr import CORREDO_KEY, corredo_values, is_corredo, is_expr_node
+from .expr import corredo_values, is_corredo, is_expr_node
 from .inject import expr_names
 from .value_generators import parse_corredo, stable_seed
 from .yaml_loc import Locations
@@ -149,39 +149,47 @@ def check_corredi(data: Dict[str, Any], locs: Locations | None = None) -> List[D
         n = _static_n(entry["spread"], visibili, scalari)
         if n is None:
             continue
-        for var, elems in visibili.items():
+        for var, corredo in visibili.items():
+            elems = corredo_values(corredo)
             if len(elems) <= n:
                 continue
             if not _read_per_voice(entry, var):
                 continue
             dove = ("streams", name, "let", var) if var in gruppo else ("let", var)
+            inutilizzati = _unused(entry, var, corredo, n, scalari)
+            if inutilizzati is None:
+                coda = "il corredo non e' consumato tutto."
+            else:
+                quali = ", ".join(str(k) for k in inutilizzati)
+                coda = f"gli elementi agli indici {quali} non sono usati."
             ctx.warn(
                 f"il corredo '{var}' del gruppo '{name}' ha {len(elems)} "
-                f"elementi, ma lo spread genera {n} voci: gli elementi da "
-                f"indice {n} non sono usati.",
+                f"elementi, ma lo spread genera {n} voci: {coda}",
                 code=CORREDO_SOTTO_CONSUMATO,
                 key=dove,
-                hint=f"e' legittimo (un sottoinsieme dell'accordo); per "
-                f"consumarlo tutto scrivi \"n: {{expr: 'len({var})'}}\".",
+                hint=_hint(entry, var),
             )
     return dedup(ctx.items)
 
 
-def _corredi(block: Any, seed_prefix: str, _sid: str) -> Dict[str, list]:
+def _corredi(block: Any, seed_prefix: str, _sid: str) -> Dict[str, Dict[str, Any]]:
     """I corredi di un blocco ``let:``, risolti; i valori rotti si saltano.
+
+    Rende il corredo **intero**, non i soli elementi: la politica di ``cycle``
+    serve a normalizzare un indice calcolato (su un pattern si avvolge).
 
     Un corredo malformato e' gia' un **errore** del load, con posizione e
     rimedio: qui si tace, perche' un warning che duplica un errore e' rumore.
     """
     if not isinstance(block, dict):
         return {}
-    out: Dict[str, list] = {}
+    out: Dict[str, Dict[str, Any]] = {}
     for name, val in block.items():
         if not is_corredo(val):
             continue
         try:
-            out[name] = corredo_values(
-                parse_corredo(val, name, seed=stable_seed(f"{seed_prefix}:{name}"))
+            out[name] = parse_corredo(
+                val, name, seed=stable_seed(f"{seed_prefix}:{name}")
             )
         except ValueError:
             continue
@@ -201,7 +209,7 @@ def _scalari(block: Any) -> Dict[str, Any]:
 
 def _static_n(
     spread: Dict[str, Any],
-    corredi: Dict[str, list],
+    corredi: Dict[str, Dict[str, Any]],
     scalari: Dict[str, Any] | None = None,
 ) -> int | None:
     """``spread.n`` quando e' decidibile senza generare, altrimenti ``None``.
@@ -219,7 +227,7 @@ def _static_n(
     if not is_expr_node(n):
         return None
     scope: Dict[str, Any] = dict(scalari or {})
-    scope.update({k: {CORREDO_KEY: v} for k, v in corredi.items()})
+    scope.update(corredi)
     if not expr_names(n["expr"]) <= set(scope):
         return None
     from .expr import eval_expr
@@ -235,6 +243,90 @@ def _read_per_voice(entry: Dict[str, Any], var: str) -> bool:
     """True se il gruppo indicizza ``var`` con un indice che dipende da ``i``."""
     return any(
         _depends_on_i(text, var) for text in _expr_texts(entry.get("spread"))
+    )
+
+
+def _index_sources(entry: Dict[str, Any], var: str) -> List[str]:
+    """I testi degli indici con cui il gruppo legge ``var`` per voce.
+
+    Serve a dire *quali* elementi restano fuori invece di presumerlo: il
+    corredo si legge all'indice che c'e' scritto, non necessariamente ``i``.
+    """
+    out: List[str] = []
+    for text in _expr_texts(entry.get("spread")):
+        try:
+            tree = ast.parse(text, mode="eval")
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Subscript)
+                and isinstance(node.value, ast.Name)
+                and node.value.id == var
+            ):
+                out.append(ast.unparse(node.slice))
+    return out
+
+
+def _is_identity(entry: Dict[str, Any], var: str) -> bool:
+    """True se ``var`` si legge sempre e solo come ``var[i]``."""
+    fonti = _index_sources(entry, var)
+    return bool(fonti) and all(s == "i" for s in fonti)
+
+
+def _unused(
+    entry: Dict[str, Any],
+    var: str,
+    corredo: Dict[str, Any],
+    n: int,
+    scalari: Dict[str, Any],
+) -> List[int] | None:
+    """Gli indici di ``var`` che le ``n`` voci non toccano, o ``None``.
+
+    ``None`` quando l'indice non e' valutabile staticamente (dipende da una
+    manopola che qui non si vede): meglio tacere su *quali* elementi che
+    affermare il falso.
+    """
+    from .expr import eval_expr, is_cyclic
+
+    elems = corredo_values(corredo)
+    size = len(elems)
+    letti: set = set()
+    fonti = _index_sources(entry, var)
+    if not fonti:
+        return None
+    for voce in range(n):
+        scope = {**scalari, var: corredo, "i": voce, "n": n}
+        for sorgente in fonti:
+            try:
+                idx = eval_expr(sorgente, scope)
+            except ValueError:
+                return None
+            if not isinstance(idx, (int, float)) or isinstance(idx, bool):
+                return None
+            if float(idx) != int(idx):
+                return None
+            idx = int(idx)
+            pos = idx % size if is_cyclic(corredo) else idx + size if idx < 0 else idx
+            if not 0 <= pos < size:
+                return None
+            letti.add(pos)
+    return sorted(set(range(size)) - letti)
+
+
+def _hint(entry: Dict[str, Any], var: str) -> str:
+    """Il rimedio, che dipende da *come* il corredo viene letto.
+
+    ``n: {expr: "len(var)"}`` consuma il corredo solo se l'indice e' ``i``: su
+    un indice traslato alzare ``n`` lo manderebbe fuori range, quindi li' il
+    consiglio romperebbe lo studio invece di aggiustarlo.
+    """
+    base = "e' legittimo (un sottoinsieme dell'accordo)"
+    if _is_identity(entry, var):
+        return f"{base}; per consumarlo tutto scrivi \"n: {{expr: 'len({var})'}}\"."
+    return (
+        f"{base}; il corredo si legge a un indice calcolato, quindi per "
+        "consumarlo tutto vanno rivisti insieme 'n' e l'indice."
     )
 
 

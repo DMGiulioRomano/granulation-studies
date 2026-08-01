@@ -248,3 +248,49 @@ def test_un_blocco_versions_rotto_non_fa_esplodere_il_controllo():
         streams=_gruppo({}, 2),
     )
     assert len(check_corredi_combos(doc)) == 1
+
+
+# --- quali elementi sono davvero non usati ------------------------------------
+#
+# La frase «gli elementi da indice n non sono usati» vale solo se l'indice e'
+# ``ratio[i]``. Con un indice qualunque il corredo si legge altrove, e dire
+# «da indice n» e' falso — con ``ratio[i + 2]`` e' esattamente rovesciato.
+
+def _msg(let, n, expr):
+    ds = check_corredi(_doc(streams=_gruppo(let, n, expr=expr)))
+    assert len(ds) == 1, f"atteso un rilievo, trovati {len(ds)}"
+    return ds[0].msg
+
+
+CORREDO = {"ratio": {"list": [2, 3, 4, 7]}}
+
+
+def test_indice_identita_nomina_gli_indici_di_coda():
+    """``ratio[i]`` con n=2 legge 0 e 1: restano 2 e 3."""
+    assert "2, 3" in _msg(CORREDO, 2, "ratio[i]")
+
+
+def test_indice_traslato_nomina_gli_indici_di_testa():
+    """``ratio[i + 2]`` con n=2 legge 2 e 3: restano 0 e 1, non «da indice 2»."""
+    msg = _msg(CORREDO, 2, "ratio[i + 2]")
+    assert "0, 1" in msg
+    assert "da indice 2" not in msg
+
+
+def test_indice_a_passo_due_nomina_gli_indici_dispari():
+    """``ratio[i * 2]`` con n=2 legge 0 e 2: restano 1 e 3."""
+    assert "1, 3" in _msg(CORREDO, 2, "ratio[i * 2]")
+
+
+def test_indice_invertito_nomina_gli_indici_di_testa():
+    """``ratio[-1 - i]`` con n=2 legge 3 e 2: restano 0 e 1."""
+    assert "0, 1" in _msg(CORREDO, 2, "ratio[-1 - i]")
+
+
+def test_il_rimedio_len_solo_quando_consumerebbe_davvero():
+    """``n: len(ratio)`` e' il rimedio giusto solo per l'indice identita': con
+    ``ratio[i + 2]`` alzare n manderebbe l'indice fuori range."""
+    ds = check_corredi(_doc(streams=_gruppo(CORREDO, 2, expr="ratio[i]")))
+    assert "len(ratio)" in (ds[0].hint or "")
+    ds = check_corredi(_doc(streams=_gruppo(CORREDO, 2, expr="ratio[i + 2]")))
+    assert "len(ratio)" not in (ds[0].hint or "")
