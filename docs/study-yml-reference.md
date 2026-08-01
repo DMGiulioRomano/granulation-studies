@@ -349,6 +349,73 @@ I bordi `base`/`range` della banda restano `Env`: dentro ci va `linear_env:`
 come sempre. `linear_env:` **direttamente** dentro `list:` è invece errore —
 i due wrapper marcano ruoli opposti.
 
+### `cycle:` — accordo o pattern
+
+```yaml
+let:
+  ratio:  {list: [2, 3, 4, 7]}                # accordo: insieme finito
+  durate: {list: [1, 1, 2], cycle: true}      # pattern: si ripete
+```
+
+Non è un flag di comodo: sono **due oggetti compositivi diversi**. Un accordo
+è un insieme fisso di rapporti — se ne chiedi il quinto, la domanda è
+sbagliata. Un pattern è periodico per natura — il quinto elemento *è* il
+primo, come in un ciclo ritmico. Che il primo dia errore fuori range e il
+secondo si avvolga non è una regola arbitraria: è la differenza fra i due
+oggetti.
+
+Il default è l'accordo: un corredo senza `cycle:` è un insieme finito.
+
+La politica la decide il **corredo**, non il punto d'uso, e vale
+uniformemente per gli indici costanti e per quelli calcolati. Su un corredo di
+4 elementi `ratio[9]` è errore se è un accordo e vale `ratio[1]` se è un
+pattern, esattamente come `ratio[i]` con `i = 9`. Se la regola dipendesse
+dall'essere l'indice costante o calcolato, tornerebbe a dipendere dall'uso.
+
+Su un pattern gli **indici negativi** restano coerenti senza un caso speciale:
+il modulo di Python li porta con sé (`-1 % 4 == 3`).
+
+`cycle:` senza `list:` è errore — è la politica di un corredo, non un valore a
+sé. E `{list: [], cycle: true}` resta errore alla dichiarazione, come ogni
+corredo vuoto: qui sarebbe anche un modulo per zero.
+
+#### I due casi che rende scrivibili
+
+**L'ispessimento.** Tre voci per rapporto, ognuna che legge un punto diverso
+del buffer: stesso periodo, contenuto e fase diversi — l'accordo si
+ispessisce senza cambiare le altezze.
+
+```yaml
+let:
+  ratio: {list: [2, 3, 4, 7], cycle: true}
+spread:
+  n: 12
+  let:
+    r: {expr: "ratio[i]"}          # 2,3,4,7, 2,3,4,7, 2,3,4,7
+  over:
+    base.pointer.start: {ramp: {start: 0.05, step: 0.075}}
+```
+
+**L'isoritmo.** Due corredi ciclici di lunghezze coprime scorrono uno contro
+l'altro: il pattern (rapporto, durata) ha periodo `lcm(4, 3) = 12`. È **color
+e talea**, e cade fuori da due `cycle: true` senza sintassi dedicata.
+
+```yaml
+let:
+  ratio:  {list: [2, 3, 4, 7], cycle: true}   # color, len 4
+  durate: {list: [1, 1, 2],    cycle: true}   # talea, len 3
+spread:
+  n: 12
+  let:
+    r: {expr: "ratio[i]"}
+  over:
+    duration: {expr: "durate[i] * 8"}
+```
+
+> Nota: `spread.let` e `spread.over` corrono **in parallelo** — le manopole di
+> voce sono iniettate negli stream generati, non nelle strategy di `over`.
+> Un corredo serve quindi indicizzato in entrambi i posti, come qui.
+
 ### Dove vive
 
 | Blocco | Corredo ammesso |
@@ -443,7 +510,9 @@ un namespace di dichiarazione separato.
 - **corredo vuoto** (`{list: []}`) → errore alla dichiarazione, con il nome nel
   messaggio: non c'è niente da indicizzare;
 - **elementi non scalari** → errore (i corredi di sagome sono rimandati);
-- **indice fuori range** → errore che nomina il corredo e la sua lunghezza;
+- **indice fuori range** su un accordo → errore che nomina il corredo, la sua
+  lunghezza e la forma per farne un pattern (su un pattern non c'è fuori
+  range: l'indice si avvolge);
 - **indicizzare un nome che non è un corredo** → errore che dice cos'è;
 - **corredo non referenziato** → errore, per estensione della guardia
   anti-refuso esistente: `ratio[0]` registra `ratio` fra i nomi referenziati,

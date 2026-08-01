@@ -27,7 +27,7 @@ import copy
 from typing import Any, Dict
 
 from .errors import ErrCtx
-from .expr import eval_expr, is_corredo, is_expr_node
+from .expr import CYCLE_KEY, eval_expr, is_corredo, is_expr_node
 from .inject import expr_names as _expr_names
 from .inject import inject as _inject
 from .inject import referenced_names as _referenced_names
@@ -108,6 +108,18 @@ def resolve_knobs(
                 resolved[name] = parse_corredo(
                     val, name, seed=stable_seed(f"{seed_prefix}:{name}")
                 )
+        elif isinstance(val, dict) and CYCLE_KEY in val and not is_expr_node(val):
+            # ``cycle`` e' la politica di un corredo: da sola non significa
+            # niente, e senza questa guardia il dict finirebbe in scope come
+            # «forma non riconosciuta», con un errore che non nomina la causa.
+            raise ctx.err(
+                f"let: '{name}' dichiara '{CYCLE_KEY}' senza 'list' — "
+                f"'{CYCLE_KEY}' e' la politica di un corredo (accordo o "
+                "pattern), non un valore a se'.",
+                key=key_prefix + (name,),
+                hint=f"per un pattern che si ripete: "
+                f"'{name}: {{list: [...], {CYCLE_KEY}: true}}'.",
+            )
         elif is_expr_node(val):
             pending[name] = val
         elif (
