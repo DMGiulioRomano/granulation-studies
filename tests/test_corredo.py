@@ -659,3 +659,153 @@ def test_accordo_replicato_per_ottave():
 def test_nessuna_altra_funzione_accetta_un_corredo(text):
     with pytest.raises(ValueError, match="solo per indice"):
         eval_expr(text, {"ratio": {"list": [2, 3]}})
+
+
+# =============================================================================
+# Fetta 5/7 (issue #52): generatori dentro list:
+# =============================================================================
+
+def _corredo_risolto(node, nome="ratio"):
+    """Il corredo come lo vede un'espressione, passando per il ``let:``."""
+    out = apply_document_let(
+        _doc({nome: node}, axes={"d": {"base": {"expr": f"{nome}[0]"}}})
+    )
+    return out["axes"]["d"]["base"]["let"][nome]["list"]
+
+
+def test_corredo_da_ramp_pieno():
+    assert _corredo_risolto({"list": {"ramp": {"start": 1, "stop": 8, "step": 1}}}) == [
+        1, 2, 3, 4, 5, 6, 7, 8
+    ]
+
+
+def test_corredo_da_values_equivale_alla_lista_letterale():
+    assert _corredo_risolto({"list": {"values": [2, 3, 4, 7]}}) == _corredo_risolto(
+        {"list": [2, 3, 4, 7]}
+    )
+
+
+def test_corredo_pescato():
+    from granstudies.value_generators import band
+
+    got = _corredo_risolto({"list": {"n": 5, "base": 2, "range": 6, "seed": 1988}})
+    assert got == band(5, 2, 6, seed=1988)
+    assert all(2 <= v <= 8 for v in got)
+
+
+def test_corredo_pescato_deterministico_fra_run():
+    node = {"list": {"n": 12, "base": 2, "range": 6, "seed": 1988}}
+    assert _corredo_risolto(node) == _corredo_risolto(node)
+
+
+def test_corredo_pescato_senza_seed_deriva_dalla_catena_gerarchica():
+    """Stessa derivazione delle altre manopole generate: il prefisso del blocco
+    piu' il nome della manopola."""
+    from granstudies.value_generators import band, stable_seed
+
+    got = _corredo_risolto({"list": {"n": 4, "base": 2, "range": 6}})
+    assert got == band(4, 2, 6, seed=stable_seed("t:let:ratio"))
+
+
+def test_corredo_pescato_di_gruppo_deriva_dal_nome_del_gruppo():
+    from granstudies.value_generators import band, stable_seed
+
+    out = apply_group_let(
+        {
+            "cugini": {
+                "let": {"ratio": {"list": {"n": 4, "base": 2, "range": 6}}},
+                "axes": {"density": {"base": {"expr": "ratio[0]"}}},
+            }
+        }
+    )
+    got = out["cugini"]["axes"]["density"]["base"]["let"]["ratio"]["list"]
+    assert got == band(4, 2, 6, seed=stable_seed("cugini:let:ratio"))
+
+
+def test_l_insieme_pescato_esiste_come_oggetto():
+    """Il caso che oggi non esisteva: la banda di ``spread.let`` pesca per
+    voce e l'insieme non e' un oggetto — non se ne puo' nominare la
+    fondamentale. Pescato una volta e indicizzato, `ratio[i] / ratio[0]`
+    diventa scrivibile."""
+    out = _spread(
+        _accordo(
+            {"ratio": {"list": {"n": 4, "base": 2, "range": 6, "seed": 1988}}},
+            {"r": {"expr": "ratio[i] / ratio[0]"}},
+        )
+    )
+    rapporti = _r(out)
+    assert rapporti[0] == 1.0                     # la prima estratta e' l'unita'
+    assert len({round(x, 9) for x in rapporti}) == 4
+
+
+def test_len_di_un_corredo_generato():
+    out = apply_document_let(
+        _doc(
+            {"ratio": {"list": {"ramp": {"start": 1, "stop": 8, "step": 1}}}},
+            axes={"d": {"base": {"expr": "len(ratio)"}}},
+        )
+    )
+    nodo = out["axes"]["d"]["base"]
+    assert eval_expr(nodo["expr"], nodo["let"]) == 8
+
+
+# --- le forme senza conteggio proprio sono errore ----------------------------
+
+@pytest.mark.parametrize(
+    "gen, atteso",
+    [
+        ({"ramp": {"start": 1, "step": 1}}, "stop"),
+        ({"ramp": {"start": 1, "stop": 8}}, "step"),
+        ({"base": 2, "range": 6}, "n"),
+    ],
+)
+def test_generatore_senza_conteggio_proprio_e_errore(gen, atteso):
+    with pytest.raises(SpecError) as exc:
+        apply_document_let(
+            _doc({"ratio": {"list": gen}}, axes={"d": {"base": {"expr": "ratio[0]"}}})
+        )
+    msg = str(exc.value)
+    assert atteso in msg
+    assert "possiede la propria lunghezza" in msg
+
+
+def test_il_messaggio_della_banda_rimanda_a_spread_let():
+    with pytest.raises(SpecError) as exc:
+        apply_document_let(
+            _doc(
+                {"ratio": {"list": {"base": 2, "range": 6}}},
+                axes={"d": {"base": {"expr": "ratio[0]"}}},
+            )
+        )
+    assert "spread.let" in str(exc.value)
+
+
+def test_linear_env_dentro_list_e_errore():
+    """I due wrapper marcano ruoli opposti: uno si legge per tempo, l'altro
+    per indice. Annidarli e' una contraddizione."""
+    with pytest.raises(SpecError, match="per indice"):
+        apply_document_let(
+            _doc(
+                {"ratio": {"list": {"linear_env": [2, 3]}}},
+                axes={"d": {"base": {"expr": "ratio[0]"}}},
+            )
+        )
+
+
+def test_generatore_senza_marcatore_dentro_list_e_errore():
+    with pytest.raises(SpecError, match="chiave-generatore"):
+        apply_document_let(
+            _doc(
+                {"ratio": {"list": {"boh": 1}}},
+                axes={"d": {"base": {"expr": "ratio[0]"}}},
+            )
+        )
+
+
+def test_bordi_annidati_dentro_una_banda_di_corredo():
+    """``base``/``range`` della banda restano Env: un ``linear_env`` dentro si
+    espande come sempre."""
+    got = _corredo_risolto(
+        {"list": {"n": 4, "base": {"linear_env": [0, 30]}, "range": 0, "seed": 1}}
+    )
+    assert got == pytest.approx([0.0, 10.0, 20.0, 30.0])

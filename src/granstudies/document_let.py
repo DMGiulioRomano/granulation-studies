@@ -105,7 +105,9 @@ def resolve_knobs(
             # manopola derivata legittima, qualunque sia l'ordine di
             # dichiarazione.
             with ctx.wrapping(key=key_prefix + (name,)):
-                resolved[name] = parse_corredo(val, name)
+                resolved[name] = parse_corredo(
+                    val, name, seed=stable_seed(f"{seed_prefix}:{name}")
+                )
         elif is_expr_node(val):
             pending[name] = val
         elif (

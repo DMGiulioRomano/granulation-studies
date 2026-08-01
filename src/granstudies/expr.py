@@ -323,6 +323,12 @@ def _checked_corredo(name: str, v: Dict[str, Any]) -> Dict[str, Any]:
     scritto a mano nel ``let`` di un nodo-expr.
     """
     elems = v[CORREDO_KEY]
+    if isinstance(elems, dict):
+        raise ValueError(
+            f"expr: il corredo '{name}' non e' stato generato — un corredo con "
+            "un generatore dentro 'list' si dichiara in un 'let:' di documento "
+            "o di gruppo, che lo risolve al load; qui arriva gia' fatto."
+        )
     if not isinstance(elems, list) or not elems:
         raise ValueError(
             f"expr: il corredo '{name}' e' vuoto o malformato ({v!r}) — "
