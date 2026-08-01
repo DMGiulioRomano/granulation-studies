@@ -27,7 +27,7 @@ import copy
 from typing import Any, Dict
 
 from .errors import ErrCtx
-from .expr import CYCLE_KEY, eval_expr, is_corredo, is_expr_node
+from .expr import CYCLE_KEY, eval_expr, is_corredo, is_cyclic, is_expr_node
 from .inject import expr_names as _expr_names
 from .inject import inject as _inject
 from .inject import referenced_names as _referenced_names
@@ -53,9 +53,10 @@ def apply_document_let(
     ``let`` per nome e rimuove il blocco dal documento.
     """
     ctx = ErrCtx(locs=locs)
-    # Guardia anti-ombreggiamento sui tre livelli: gira al load, prima che
-    # l'iniezione consumi i nomi (documento e gruppo spariscono dopo).
+    # Guardie che girano al load, prima che l'iniezione consumi i nomi
+    # (documento e gruppo spariscono dopo).
     _check_shadowing(data, ctx)
+    _check_moved_corredi(data, ctx)
     block = data.get("let")
     if block is None:
         return data
@@ -200,6 +201,94 @@ def _check_shadowing(data: Dict[str, Any], ctx: ErrCtx) -> None:
                 key=("streams", name, "spread", "let", var),
                 hint="dai un nome diverso alla manopola di voce.",
             )
+
+
+# Chiavi di ``percorso:`` che non sono traiettorie (vedi ``percorso.py``).
+_PERCORSO_RESERVED = frozenset({"k", "onset", "arco", "passo", "duration"})
+
+# Chiavi riservate di ``versions:`` (vedi ``versions.py``).
+_VERSIONS_RESERVED = frozenset({"onset", "duration", "chunk"})
+
+
+def _declared_corredi(data: Dict[str, Any]) -> Dict[str, Any]:
+    """I corredi dichiarati nei ``let:`` di documento e di gruppo."""
+    out: Dict[str, Any] = {}
+    for block in [data.get("let")] + [
+        e.get("let")
+        for e in (data.get("streams") or {}).values()
+        if isinstance(e, dict)
+    ]:
+        if isinstance(block, dict):
+            out.update({k: v for k, v in block.items() if is_corredo(v)})
+    return out
+
+
+def _check_moved_corredi(data: Dict[str, Any], ctx: ErrCtx) -> None:
+    """Il **tipo** lo fissa la dichiarazione in ``let:``.
+
+    ``versions:`` e ``percorso:`` muovono il *valore* di una manopola, mai il
+    suo tipo ne' la sua politica. Uno stato che sostituisce un corredo deve
+    fornire un corredo, e della stessa politica di ``cycle`` — altrimenti la
+    validita' dello studio cambierebbe da una versione all'altra, e un fuori
+    range comparirebbe solo in alcune combinazioni del prodotto cartesiano.
+    """
+    corredi = _declared_corredi(data)
+    if not corredi:
+        return
+    _walk_versions(data.get("versions"), corredi, ctx, ("versions",))
+    percorso = data.get("percorso")
+    if isinstance(percorso, dict):
+        for name in percorso:
+            if name in corredi and name not in _PERCORSO_RESERVED:
+                raise ctx.err(
+                    f"percorso: '{name}' e' dichiarato come corredo nel 'let:' "
+                    "— una traiettoria e' una legge sul tempo, non una lista, "
+                    "e il tipo lo fissa la dichiarazione.",
+                    key=("percorso", name),
+                    hint="muovi un'altra manopola, oppure togli il corredo dal "
+                    "'let:' se volevi una traiettoria.",
+                )
+
+
+def _walk_versions(
+    node: Any, corredi: Dict[str, Any], ctx: ErrCtx, key: tuple
+) -> None:
+    """Cerca in ``versions:`` i valori assegnati a un nome dichiarato corredo."""
+    if not isinstance(node, dict):
+        return
+    for name, val in node.items():
+        if name in _VERSIONS_RESERVED and len(key) == 1:
+            continue
+        sub = key + (name,)
+        if name in corredi:
+            _check_replacement(name, corredi[name], val, ctx, sub)
+            continue
+        _walk_versions(val, corredi, ctx, sub)
+
+
+def _check_replacement(
+    name: str, dichiarato: Any, mosso: Any, ctx: ErrCtx, key: tuple
+) -> None:
+    """Il valore che ``versions:`` mette al posto di un corredo."""
+    if not is_corredo(mosso):
+        raise ctx.err(
+            f"versions: '{name}' e' dichiarato come corredo nel 'let:', ma "
+            f"questo stato lo sostituisce con {mosso!r} — 'versions:' muove il "
+            "valore di una manopola, mai il suo tipo.",
+            key=key,
+            hint=f"dai allo stato un corredo: \"{name}: {{list: [...]}}\".",
+        )
+    if is_cyclic(mosso) != is_cyclic(dichiarato):
+        atteso = "un pattern (cycle: true)" if is_cyclic(dichiarato) else "un accordo"
+        raise ctx.err(
+            f"versions: '{name}' e' dichiarato come {atteso} nel 'let:', ma "
+            "questo stato ne cambia la politica di 'cycle' — la dichiarazione "
+            "fissa il tipo, 'versions:' muove solo il valore.",
+            key=key,
+            hint="altrimenti la validita' dello studio cambierebbe da una "
+            "versione all'altra: un fuori range comparirebbe solo in alcune "
+            "combinazioni.",
+        )
 
 
 def _guard_referenced(

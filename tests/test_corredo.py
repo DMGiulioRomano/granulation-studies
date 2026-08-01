@@ -994,3 +994,184 @@ def test_end_to_end_isoritmo():
         [2, 3, 4, 7] * 3
     )
     assert [s.duration for s in specs] == pytest.approx([8, 8, 16] * 4)
+
+
+# =============================================================================
+# Fetta 7/7 (issue #54): corredi sotto versions: e percorso:
+# =============================================================================
+
+def _versioni(data):
+    """Le voci generate per ogni combinazione di ``versions:``."""
+    from granstudies.spread import expand_spreads
+    from granstudies.versions import axis_combos, inject_combo, parse_version_axes
+
+    axes = parse_version_axes(data)
+    doc = apply_document_let(data)
+    out = {}
+    for label, combo in axis_combos(axes):
+        d = inject_combo(doc, combo)
+        out[label] = expand_spreads(apply_group_let(d["streams"]))
+    return out
+
+
+def _due_intonazioni(n, **extra):
+    return {
+        "study_id": "t",
+        "let": {"ratio": {"list": [2, 3, 4, 7]}, **extra.pop("let", {})},
+        "versions": {
+            "intonazione": {
+                "giusta": {"ratio": {"list": [2, 3, 4, 7]}},
+                "stretta": {"ratio": {"list": [2, 3, 4]}},
+            }
+        },
+        "streams": {
+            "cugini": {
+                "spread": {
+                    "n": n,
+                    "let": {"r": {"expr": "ratio[i]"}},
+                    "over": {"base.pan": {"expr": "i"}},
+                },
+                "axes": {"density": {"base": {"expr": "r"}}},
+            }
+        },
+        **extra,
+    }
+
+
+def test_uno_stato_puo_sostituire_un_corredo():
+    """Due insiemi di rapporti a confronto all'ascolto: due intonazioni."""
+    got = _versioni(_due_intonazioni({"expr": "len(ratio)"}))
+    assert _r(got["intonazione=giusta"]) == [2, 3, 4, 7]
+    assert _r(got["intonazione=stretta"]) == [2, 3, 4]
+
+
+def test_la_popolazione_segue_il_corredo_della_versione():
+    got = _versioni(_due_intonazioni({"expr": "len(ratio)"}))
+    assert len(got["intonazione=giusta"]) == 4
+    assert len(got["intonazione=stretta"]) == 3
+
+
+def test_il_pad_dei_nomi_e_stabile_fra_versioni():
+    """Il pad si fissa sul massimo dell'intero prodotto cartesiano (#39): la
+    stessa voce logica ha lo stesso nome ovunque esista."""
+    from granstudies.versions import generate_versions_document
+
+    data = _due_intonazioni({"expr": "len(ratio)"})
+    data["versions"]["duration"] = 10        # il passo della concatenazione
+    data.update(
+        {
+            "base": {"sample": "corpus.wav", "duration": 10, "onset": 0},
+            "axes": {"density": {"path": "density", "baseline": 20, "n": 2,
+                                 "base": 20, "range": 0}},
+            "stack": {},
+        }
+    )
+    data["streams"]["cugini"]["axes"] = {
+        "density": {"base": {"expr": "r"}, "range": 0}
+    }
+    doc = generate_versions_document(data, "t", output_sr=None)
+    ids = [s["stream_id"] for s in doc["streams"]]
+    giusta = sorted(i.split("__")[0] for i in ids if "giusta" in i)
+    stretta = sorted(i.split("__")[0] for i in ids if "stretta" in i)
+    assert giusta == ["cugini_1", "cugini_2", "cugini_3", "cugini_4"]
+    assert stretta == ["cugini_1", "cugini_2", "cugini_3"]
+
+
+# --- il tipo lo fissa la dichiarazione ---------------------------------------
+
+def test_uno_stato_che_sostituisce_un_corredo_con_altro_e_errore():
+    data = _due_intonazioni(2)
+    data["versions"]["intonazione"]["stretta"] = {"ratio": 5}
+    with pytest.raises(SpecError, match="mai il suo tipo"):
+        apply_document_let(data)
+
+
+def test_uno_stato_che_cambia_la_politica_cycle_e_errore():
+    data = _due_intonazioni(2)
+    data["versions"]["intonazione"]["stretta"] = {
+        "ratio": {"list": [2, 3, 4], "cycle": True}
+    }
+    with pytest.raises(SpecError, match="politica di 'cycle'"):
+        apply_document_let(data)
+
+
+def test_il_messaggio_spiega_perche_la_politica_non_si_muove():
+    data = _due_intonazioni(2)
+    data["versions"]["intonazione"]["stretta"] = {
+        "ratio": {"list": [2, 3, 4], "cycle": True}
+    }
+    with pytest.raises(SpecError) as exc:
+        apply_document_let(data)
+    assert "da una versione all'altra" in str(exc.value)
+
+
+def test_un_pattern_puo_essere_sostituito_da_un_altro_pattern():
+    data = _due_intonazioni(2)
+    data["let"]["ratio"]["cycle"] = True
+    for stato in data["versions"]["intonazione"].values():
+        stato["ratio"]["cycle"] = True
+    assert apply_document_let(data)
+
+
+def test_un_corredo_di_gruppo_mosso_da_versions():
+    data = {
+        "study_id": "t",
+        "versions": {"i18e": {"g": {"ratio": {"list": [2, 3]}}}},
+        "streams": {
+            "cugini": {
+                "let": {"ratio": {"list": [2, 3, 4, 7]}},
+                "spread": {"n": 2, "let": {"r": {"expr": "ratio[i]"}},
+                           "over": {"base.pan": {"expr": "i"}}},
+                "axes": {"density": {"base": {"expr": "r"}}},
+            }
+        },
+    }
+    assert apply_document_let(data)
+    data["versions"]["i18e"]["g"]["ratio"] = 5
+    with pytest.raises(SpecError, match="mai il suo tipo"):
+        apply_document_let(data)
+
+
+def test_una_traiettoria_di_percorso_non_puo_sostituire_un_corredo():
+    data = _due_intonazioni(2)
+    del data["versions"]
+    data["percorso"] = {"k": 3, "arco": 10, "passo": 2, "ratio": 5}
+    with pytest.raises(SpecError, match="legge sul tempo"):
+        apply_document_let(data)
+
+
+# --- la guardia anti-refuso ---------------------------------------------------
+
+def test_la_guardia_di_versions_riconosce_l_uso_per_indicizzazione():
+    """`ratio[i]` registra `ratio` fra i nomi referenziati: la guardia non ha
+    richiesto modifiche."""
+    from granstudies.versions import parse_version_axes
+
+    data = _due_intonazioni({"expr": "len(ratio)"})
+    assert parse_version_axes(data)          # nessun «non e' referenziata»
+
+
+def test_uno_stato_che_muove_un_corredo_mai_indicizzato_e_errore():
+    data = _due_intonazioni(2)
+    data["streams"]["cugini"]["spread"]["let"] = {"r": {"expr": "i"}}
+    data["streams"]["cugini"]["axes"] = {"density": {"base": {"expr": "r"}}}
+    from granstudies.versions import parse_version_axes
+
+    with pytest.raises(SpecError, match="non e' referenziata"):
+        parse_version_axes(data)
+
+
+# --- make stack ignora versions ------------------------------------------------
+
+def test_stack_usa_il_corredo_del_let_non_quello_di_versions():
+    """`versions:` resta analisi: `make stack` non lo vede, e legge il corredo
+    dichiarato in `let:` — l'istanza di partenza."""
+    data = _due_intonazioni({"expr": "len(ratio)"})
+    out = expand_spreads_from(apply_document_let(data))
+    assert _r(out) == [2, 3, 4, 7]           # il riposo, non 'stretta'
+
+
+def expand_spreads_from(doc):
+    from granstudies.spread import expand_spreads
+
+    return expand_spreads(apply_group_let(doc["streams"]))
