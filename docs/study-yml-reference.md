@@ -459,6 +459,42 @@ combinazioni che dicono la stessa cosa danno un rilievo solo, ma due `n` diversi
 restano due fatti diversi. Quando `n` dipende da qualcosa che il riposo non
 conosce, il controllo tace invece di indovinare.
 
+### Corredi mobili: `versions:` e `percorso:`
+
+Un asse di `versions:` può sostituire un corredo, così da confrontare
+all'ascolto due insiemi di rapporti — due intonazioni, due accordi, due tagli
+dello stesso materiale:
+
+```yaml
+let:
+  ratio: {list: [2, 3, 4, 7]}       # il riposo
+
+versions:
+  intonazione:
+    giusta:  {ratio: {list: [2, 3, 4, 7]}}
+    stretta: {ratio: {list: [2, 3, 4]}}
+```
+
+Con `spread.n: {expr: "len(ratio)"}` la popolazione **segue il corredo**:
+quattro voci in una versione, tre nell'altra. Il pad dei nomi resta stabile
+sull'intero prodotto cartesiano (`cugini_1 … cugini_4` e `cugini_1 …
+cugini_3`), e la voce mancante consuma in silenzio una patch che la nomini.
+
+**La regola: il tipo lo fissa la dichiarazione.** `versions:` muove il
+*valore* di una manopola, mai il suo tipo né la sua politica. Uno stato che
+sostituisce un corredo deve fornire un corredo, e della **stessa politica di
+`cycle`** — altrimenti la validità dello studio cambierebbe da una versione
+all'altra, e un fuori range comparirebbe solo in alcune combinazioni. Entrambe
+le violazioni sono errore al load.
+
+Vale identico per `percorso:`: una traiettoria è una legge sul tempo, non una
+lista, quindi non può muovere un nome dichiarato come corredo. `spread.n` può
+invece cambiare per istanza come sempre, e `{expr: "len(ratio)"}` continua a
+seguire il corredo del riposo.
+
+`make stack` continua a ignorare `versions:` — resta analisi — e usa il
+corredo dichiarato in `let:`, cioè l'istanza di partenza.
+
 ### Dove vive
 
 | Blocco | Corredo ammesso |
