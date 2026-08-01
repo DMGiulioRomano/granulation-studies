@@ -63,12 +63,28 @@ def _load_data(study: str) -> Dict[str, Any]:
         return yaml.safe_load(fh)
 
 
+def _emit(items) -> None:
+    """Stampa la diagnostica non fatale su stderr. **Non** tocca l'exit code.
+
+    Prefisso ``[warn]`` e lo stesso blocco degli errori: un rilievo e un
+    errore devono leggersi allo stesso modo. La lista arriva da funzioni pure
+    (``granstudies.diagnostics``), che il language server consuma tali e
+    quali.
+    """
+    for d in items:
+        print(f"[warn] {d.code}\n\n{d.format_block()}\n", file=sys.stderr)
+
+
 def _load_specs(study: str, stream: str | None = None) -> list:
+    from .diagnostics import check_corredi
     from .study_spec import resolve_streams
     from .yaml_loc import load as load_with_locations
 
     path = os.path.join(study_dir(study), "study.yml")
     data, locs = load_with_locations(path)
+    # Diagnostica non fatale sul documento **grezzo**: apply_document_let
+    # consuma e rimuove il blocco ``let:``, dove i corredi sono dichiarati.
+    _emit(check_corredi(data, locs))
     # Manopole di documento (`let:` top-level): risolte e iniettate al load,
     # prima del parse degli stream — il riposo che versions/percorso poi muovono.
     data = apply_document_let(data, locs)
@@ -238,6 +254,11 @@ def cmd_versions(study: str) -> int:
 
     path = os.path.join(study_dir(study), "study.yml")
     raw, locs = load_with_locations(path)
+    # Il rilievo dipende dalla combinazione quando ``versions:`` muove
+    # ``spread.n`` o un corredo: si controlla ogni combinazione e si deduplica.
+    from .diagnostics import check_corredi_combos
+
+    _emit(check_corredi_combos(raw, locs))
     # Manopole di documento: il riposo va iniettato PRIMA che versions muova
     # le variabili per-combo (il movimento ombreggia il riposo, non viceversa).
     raw = apply_document_let(raw, locs)
@@ -278,6 +299,9 @@ def cmd_percorso(study: str) -> int:
 
     path = os.path.join(study_dir(study), "study.yml")
     raw, locs = load_with_locations(path)
+    from .diagnostics import check_corredi
+
+    _emit(check_corredi(raw, locs))
     # Manopole di documento: il riposo va iniettato PRIMA che il percorso muova
     # le traiettorie nei let (il movimento ombreggia il riposo, non viceversa).
     raw = apply_document_let(raw, locs)

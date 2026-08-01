@@ -416,6 +416,49 @@ spread:
 > voce sono iniettate negli stream generati, non nelle strategy di `over`.
 > Un corredo serve quindi indicizzato in entrambi i posti, come qui.
 
+### Il warning `n < len`
+
+Un corredo **sotto-consumato** — lo spread genera meno voci di quanti elementi
+ha il corredo — è legittimo: si sta ascoltando un sottoinsieme dell'accordo. È
+però anche il sintomo più comune di un refuso, quindi il sistema lo segnala
+senza fermarsi:
+
+```
+[warn] corredo-sotto-consumato
+
+  posizione:  studies/cugini/study.yml:14  (streams.cugini.let.ratio)
+  contesto:   stream 'cugini'
+  problema:   il corredo 'ratio' del gruppo 'cugini' ha 4 elementi, ma lo
+              spread genera 2 voci: gli elementi da indice 2 non sono usati.
+  rimedio:    è legittimo (un sottoinsieme dell'accordo); per consumarlo
+              tutto scrivi "n: {expr: 'len(ratio)'}".
+```
+
+Caratteristiche:
+
+- **per corredo**, non per gruppo: con due corredi di lunghezza diversa uno può
+  essere sotto-consumato e l'altro no;
+- solo per i corredi che quel gruppo legge **per voce** (con un indice che
+  dipende da `i`). Un corredo letto con il solo indice costante — `ratio[0]`,
+  la fondamentale — non è sotto-consumato da nessun `n`;
+- si emette alla **generazione** (`sweep`/`stack`/`versions`/`percorso`), non
+  al `render`: il corredo si risolve al load, e le posizioni nello YAML
+  esistono solo lì;
+- va su **stderr** e **non** cambia l'exit code.
+
+Nessun warning quando `n == len`, né quando `n > len` — quello è errore su un
+accordo e silenzio su un pattern, in nessuno dei due casi materia di questo
+rilievo.
+
+**Il limite, da conoscere.** Il controllo è statico solo nel caso semplice.
+Con `spread.n` letterale, `{expr: "len(ratio)"}` o un'espressione sulle
+manopole del `let:` è decidibile senza generare niente. Con `spread.n` mosso da
+`versions:` o da `percorso:` dipende dal prodotto cartesiano o dalle istanze:
+il rilievo si emette allora **una volta per combinazione**, con deduplica — due
+combinazioni che dicono la stessa cosa danno un rilievo solo, ma due `n` diversi
+restano due fatti diversi. Quando `n` dipende da qualcosa che il riposo non
+conosce, il controllo tace invece di indovinare.
+
 ### Dove vive
 
 | Blocco | Corredo ammesso |
