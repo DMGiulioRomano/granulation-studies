@@ -1,0 +1,343 @@
+"""Il corredo: una lista nominata, dichiarata in un ``let:`` e letta **solo per
+indice** (issue #48, design in ``docs/plans/corredo-liste-indicizzabili.md``).
+
+Il buco che colma: un valore *scelto a mano* — quattro rapporti decisi a
+orecchio, non una formula — non era condivisibile fra due assi. Pescato
+(banda in ``spread.let``) e calcolato (``{expr}`` con ``i``/``n``) lo erano
+gia'; scelto no, perche' ``values`` in ``spread.over`` scrive su un path solo.
+
+Il corredo aggira l'obiezione invece di combatterla: la lista vive nel ``let:``
+di gruppo o di documento, dove non esiste nessun indice e quindi nessuna
+pretesa sul conteggio.
+
+Questa fetta e' la catena minima: dichiarazione, risoluzione delle manopole,
+valutazione con **indice costante**, iniezione per nome, documento engine.
+Niente ``i``, niente ``cycle:``, niente ``len()``.
+"""
+import pytest
+
+from granstudies.document_let import apply_document_let
+from granstudies.errors import SpecError
+from granstudies.expr import eval_expr, is_corredo
+from granstudies.group_let import apply_group_let
+from granstudies.value_generators import (
+    expand_env,
+    is_generator_node,
+    is_linear_env_node,
+    parse_corredo,
+)
+
+
+def _doc(let, **rest):
+    d = {"study_id": "t", "let": let}
+    d.update(rest)
+    return d
+
+
+# --- il corredo non collide con la macchina esistente ------------------------
+
+def test_riconosciuto_come_corredo():
+    assert is_corredo({"list": [2, 3, 4, 7]})
+    assert not is_corredo({"values": [2, 3]})
+    assert not is_corredo([2, 3])
+
+
+def test_non_e_un_nodo_generatore_ne_un_linear_env():
+    """``list`` non e' in ``Y_GENERATOR_KEYS``: nessuna collisione."""
+    node = {"list": [2, 3, 4, 7]}
+    assert not is_generator_node(node)
+    assert not is_linear_env_node(node)
+
+
+def test_expand_env_lo_lascia_passare():
+    """Non e' un envelope: ``expand_env`` non ha niente da compilare."""
+    node = {"list": [2, 3]}
+    assert expand_env(node, seed=0, path="base") == node
+
+
+# --- dichiarazione: `let:` di documento e di gruppo --------------------------
+
+def test_corredo_di_documento_produce_una_lista_non_un_envelope():
+    out = apply_document_let(
+        _doc(
+            {"ratio": {"list": [2, 3, 4, 7]}},
+            axes={"density": {"base": {"expr": "ratio[0]"}}},
+        )
+    )
+    iniettato = out["axes"]["density"]["base"]["let"]["ratio"]
+    assert iniettato == {"list": [2, 3, 4, 7]}
+    # e NON i breakpoint che ``{values: [...]}`` avrebbe prodotto
+    assert iniettato != [[0.0, 2], [1 / 3, 3], [2 / 3, 4], [1.0, 7]]
+
+
+def test_corredo_di_gruppo():
+    out = apply_group_let(
+        {
+            "cugini": {
+                "let": {"ratio": {"list": [2, 3, 4, 7]}},
+                "axes": {"density": {"base": {"expr": "ratio[1]"}}},
+            }
+        }
+    )
+    assert out["cugini"]["axes"]["density"]["base"]["let"]["ratio"] == {
+        "list": [2, 3, 4, 7]
+    }
+
+
+def test_corredo_di_documento_letto_da_due_gruppi():
+    out = apply_document_let(
+        _doc(
+            {"ratio": {"list": [2, 3, 4, 7]}},
+            streams={
+                "a": {"axes": {"density": {"base": {"expr": "ratio[0]"}}}},
+                "b": {"axes": {"density": {"base": {"expr": "ratio[3]"}}}},
+            },
+        )
+    )
+    for g in ("a", "b"):
+        assert out["streams"][g]["axes"]["density"]["base"]["let"]["ratio"] == {
+            "list": [2, 3, 4, 7]
+        }
+
+
+# --- l'indice costante -------------------------------------------------------
+
+@pytest.mark.parametrize("k, atteso", [(0, 2), (1, 3), (2, 4), (3, 7)])
+def test_indice_costante(k, atteso):
+    assert eval_expr(f"ratio[{k}]", {"ratio": {"list": [2, 3, 4, 7]}}) == atteso
+
+
+def test_la_fondamentale_del_corredo_in_una_espressione():
+    """``ratio[0]`` dice «la fondamentale del corredo» una volta sola: senza,
+    servirebbe un ``d0: 2`` accanto alla lista, che diverge in silenzio appena
+    si ritocca il primo rapporto."""
+    scope = {"d": 1, "ratio": {"list": [2, 3, 4, 7]}}
+    assert eval_expr("d * ratio[0] / 40", scope) == pytest.approx(0.05)
+
+
+def test_indice_come_espressione_costante():
+    scope = {"ratio": {"list": [2, 3, 4, 7]}}
+    assert eval_expr("ratio[1 + 1]", scope) == 4
+    assert eval_expr("ratio[floor(2.9)]", scope) == 4
+
+
+def test_indice_intero_scritto_come_float():
+    """``4 / 2`` vale 2.0, che *e'* un intero: la guardia e' sui frazionari."""
+    assert eval_expr("ratio[4 / 2]", {"ratio": {"list": [2, 3, 4, 7]}}) == 4
+
+
+# --- la manopola derivata che legge il corredo -------------------------------
+
+def test_manopola_derivata_da_un_corredo():
+    out = apply_document_let(
+        _doc(
+            {"ratio": {"list": [2, 3, 4, 7]}, "doppio": {"expr": "ratio[0] * 2"}},
+            axes={"density": {"base": {"expr": "doppio"}}},
+        )
+    )
+    assert out["axes"]["density"]["base"]["let"]["doppio"] == 4
+
+
+def test_ordine_di_dichiarazione_irrilevante():
+    """I corredi si risolvono nella prima passata, prima del fixpoint."""
+    out = apply_document_let(
+        _doc(
+            {"doppio": {"expr": "ratio[0] * 2"}, "ratio": {"list": [2, 3, 4, 7]}},
+            axes={"density": {"base": {"expr": "doppio"}}},
+        )
+    )
+    assert out["axes"]["density"]["base"]["let"]["doppio"] == 4
+
+
+# --- la linea di confine: una lista non e' mai un valore ---------------------
+
+def test_il_nome_nudo_e_errore():
+    with pytest.raises(ValueError, match="solo per indice"):
+        eval_expr("ratio", {"ratio": {"list": [2, 3]}})
+
+
+def test_aritmetica_su_un_corredo_e_errore():
+    with pytest.raises(ValueError, match="solo per indice"):
+        eval_expr("ratio * 2", {"ratio": {"list": [2, 3]}})
+
+
+def test_un_corredo_passato_a_una_funzione_e_errore():
+    with pytest.raises(ValueError, match="solo per indice"):
+        eval_expr("min(ratio, 2)", {"ratio": {"list": [2, 3]}})
+
+
+def test_indicizzare_qualcosa_che_non_e_un_nome_e_errore():
+    """La base di ``[]`` e' un nome, non un'espressione qualunque: niente
+    altro nella grammatica puo' produrre una lista. (Le parentesi non contano:
+    ``(ratio)[0]`` ha lo stesso AST di ``ratio[0]``.)"""
+    with pytest.raises(ValueError, match="per nome"):
+        eval_expr("min(1, 2)[0]", {"ratio": {"list": [2, 3]}})
+
+
+def test_indice_env_e_errore():
+    with pytest.raises(ValueError, match="non e' un numero"):
+        eval_expr("ratio[s]", {"ratio": {"list": [2, 3]}, "s": [[0, 0], [1, 1]]})
+
+
+# --- le guardie --------------------------------------------------------------
+
+def test_corredo_vuoto_e_errore_alla_dichiarazione():
+    with pytest.raises(SpecError, match="vuoto"):
+        apply_document_let(
+            _doc({"ratio": {"list": []}}, axes={"d": {"base": {"expr": "ratio[0]"}}})
+        )
+
+
+def test_il_messaggio_del_corredo_vuoto_nomina_il_corredo():
+    with pytest.raises(SpecError) as exc:
+        apply_document_let(
+            _doc({"ratio": {"list": []}}, axes={"d": {"base": {"expr": "ratio[0]"}}})
+        )
+    assert "ratio" in str(exc.value)
+
+
+def test_list_non_lista_e_errore():
+    with pytest.raises(SpecError, match="lista"):
+        apply_document_let(
+            _doc({"ratio": {"list": 5}}, axes={"d": {"base": {"expr": "ratio[0]"}}})
+        )
+
+
+def test_elemento_non_numerico_e_errore():
+    """I corredi di sagome e di valori non numerici sono rimandati (#44)."""
+    with pytest.raises(SpecError, match="#44|non e' un numero"):
+        apply_document_let(
+            _doc(
+                {"ratio": {"list": [2, [[0, 1], [1, 2]]]}},
+                axes={"d": {"base": {"expr": "ratio[0]"}}},
+            )
+        )
+
+
+def test_chiave_estranea_accanto_a_list_e_errore():
+    with pytest.raises(SpecError, match="chiavi non ammesse"):
+        apply_document_let(
+            _doc(
+                {"ratio": {"list": [2, 3], "boh": 1}},
+                axes={"d": {"base": {"expr": "ratio[0]"}}},
+            )
+        )
+
+
+def test_indice_non_intero_e_errore_con_hint():
+    with pytest.raises(ValueError) as exc:
+        eval_expr("ratio[0.5]", {"ratio": {"list": [2, 3]}})
+    msg = str(exc.value)
+    assert "//" in msg and "floor" in msg
+
+
+def test_indice_fuori_range_e_errore_che_nomina_corredo_e_len():
+    with pytest.raises(ValueError) as exc:
+        eval_expr("ratio[9]", {"ratio": {"list": [2, 3, 4, 7]}})
+    msg = str(exc.value)
+    assert "ratio" in msg and "4 elementi" in msg
+
+
+def test_indicizzare_un_nome_che_non_e_un_corredo_e_errore():
+    with pytest.raises(ValueError, match="non e' un corredo"):
+        eval_expr("d[0]", {"d": 25})
+
+
+def test_indicizzare_un_envelope_e_errore():
+    with pytest.raises(ValueError, match="non e' un corredo"):
+        eval_expr("s[0]", {"s": [[0, 1], [1, 2]]})
+
+
+def test_indicizzare_un_nome_ignoto_e_errore():
+    with pytest.raises(ValueError, match="nome ignoto"):
+        eval_expr("boh[0]", {"d": 1})
+
+
+def test_corredo_non_referenziato_e_errore():
+    """La guardia anti-refuso vale per i corredi come per ogni manopola: non
+    ha richiesto modifiche, perche' ``ast.walk`` registra ``ratio`` anche da
+    ``ratio[0]``."""
+    with pytest.raises(SpecError, match="non e' referenziata"):
+        apply_document_let(
+            _doc({"ratio": {"list": [2, 3]}}, axes={"d": {"base": {"expr": "1"}}})
+        )
+
+
+def test_un_corredo_referenziato_solo_per_indice_e_referenziato():
+    out = apply_document_let(
+        _doc({"ratio": {"list": [2, 3]}}, axes={"d": {"base": {"expr": "ratio[0]"}}})
+    )
+    assert out["axes"]["d"]["base"]["let"]["ratio"] == {"list": [2, 3]}
+
+
+def test_corredo_che_ombreggia_una_manopola_di_documento_e_errore():
+    with pytest.raises(SpecError, match="ombreggiare"):
+        apply_document_let(
+            _doc(
+                {"ratio": {"list": [2, 3]}},
+                streams={
+                    "a": {
+                        "let": {"ratio": {"list": [5, 6]}},
+                        "axes": {"d": {"base": {"expr": "ratio[0]"}}},
+                    }
+                },
+            )
+        )
+
+
+# --- parse_corredo, direttamente ---------------------------------------------
+
+def test_parse_corredo_normalizza_in_lista():
+    assert parse_corredo({"list": (2, 3)}, "ratio") == {"list": [2, 3]}
+
+
+def test_parse_corredo_rifiuta_i_booleani():
+    with pytest.raises(ValueError, match="non e' un numero"):
+        parse_corredo({"list": [True, 2]}, "ratio")
+
+
+# --- end-to-end: dal file al documento engine --------------------------------
+
+def _fixture(nome):
+    import os
+
+    import yaml
+
+    from granstudies.document_let import apply_document_let
+    from granstudies.study_spec import resolve_streams
+
+    path = os.path.join(os.path.dirname(__file__), "fixtures", nome)
+    with open(path, "r", encoding="utf-8") as fh:
+        data = yaml.safe_load(fh)
+    data = apply_document_let(data)
+    return data, resolve_streams(data, data["study_id"])
+
+
+def test_end_to_end_indice_costante():
+    """Il corredo attraversa tutti gli strati e arriva ai valori d'asse."""
+    _, specs = _fixture("corredo_indice_costante.yml")
+    spec = specs[0]
+    # base = d * ratio[0] * 10 = 1 * 2 * 10 = 20, range 0 -> banda collassata
+    assert spec.axis("density").values == pytest.approx([20.0] * 4)
+    # base = d * ratio[3] / 1000 = 7 / 1000
+    assert spec.axis("grain_duration").values == pytest.approx([0.007] * 4)
+
+
+def test_end_to_end_il_documento_engine_porta_i_valori_del_corredo():
+    """Il corredo si consuma al load: nel documento engine restano solo i
+    numeri che ha prodotto, nessuna traccia della dichiarazione."""
+    from granstudies.envelope_sweep import generate_envelope_variants
+    from granstudies.render import _envelope_document
+
+    _, specs = _fixture("corredo_indice_costante.yml")
+    spec = specs[0]
+    variants = generate_envelope_variants(spec)
+    assert variants, "lo sweep deve produrre almeno una variante"
+    doc = _envelope_document(spec, variants[0])
+    testo = repr(doc)
+    assert "list" not in testo and "expr" not in testo
+    stream = doc["streams"][0]
+    # gli assi sono mossi da envelope: ogni breakpoint porta il valore che il
+    # corredo ha prodotto (range 0 -> banda collassata, quattro plateau uguali)
+    assert {y for _, y in stream["density"]["points"]} == {20.0}
+    assert {y for _, y in stream["grain"]["duration"]["points"]} == {0.007}

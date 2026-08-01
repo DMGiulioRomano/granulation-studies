@@ -12,7 +12,8 @@ stream dopo la propria iniezione, e il riposo sovrascriverebbe il movimento.
 Valori ammessi: scalare, envelope disegnato (lista ``[[t, v], ...]`` o
 ``[a, b]``, forma statica di Env che ``eval_expr`` consuma tale e quale),
 envelope **generato** (``{linear_env: ...}``, con dentro il vocabolario dei
-generatori: lista, ``values``, ``ramp``, banda), la forma compatta a cicli, o
+generatori: lista, ``values``, ``ramp``, banda), la forma compatta a cicli,
+**corredo** (``{list: [...]}``: una lista nominata, letta solo per indice), o
 nodo-expr derivato (``{expr: "..."}``) che referenzia altre manopole.
 
 Un ``let:`` e' il punto in cui la posizione **non** disambigua i due ruoli di
@@ -26,7 +27,7 @@ import copy
 from typing import Any, Dict
 
 from .errors import ErrCtx
-from .expr import eval_expr, is_expr_node
+from .expr import eval_expr, is_corredo, is_expr_node
 from .inject import expr_names as _expr_names
 from .inject import inject as _inject
 from .inject import referenced_names as _referenced_names
@@ -35,6 +36,7 @@ from .value_generators import (
     is_compact_env,
     is_generator_node,
     is_linear_env_node,
+    parse_corredo,
     stable_seed,
 )
 from .yaml_loc import Locations
@@ -84,8 +86,9 @@ def resolve_knobs(
 ) -> Dict[str, Any]:
     """Risolve i valori di un blocco di manopole (documento o gruppo).
 
-    Scalari ed envelope statici (liste) sono gia' valori di scope; una banda
-    (o ``ramp``/``values``) e la forma compatta a cicli (``[pattern, 1, n_reps,
+    Scalari ed envelope statici (liste) sono gia' valori di scope; i corredi
+    (``{list: [...]}``) si validano nella prima passata e restano dict; un
+    ``linear_env`` e la forma compatta a cicli (``[pattern, 1, n_reps,
     ...]``) si compilano in envelope una volta, con seed
     ``stable_seed(f"{seed_prefix}:{nome}")`` — un pescaggio condiviso; i nodi-
     expr derivati si valutano contro le manopole gia' risolte, a fixpoint
@@ -95,7 +98,15 @@ def resolve_knobs(
     resolved: Dict[str, Any] = {}
     pending: Dict[str, Any] = {}
     for name, val in block.items():
-        if is_expr_node(val):
+        if is_corredo(val):
+            # I corredi si risolvono nella **prima passata**, prima del
+            # fixpoint delle manopole derivate: una lista non e' mai derivata
+            # (non e' un valore), e cosi' ``{expr: "ratio[0] * 2"}`` e' una
+            # manopola derivata legittima, qualunque sia l'ordine di
+            # dichiarazione.
+            with ctx.wrapping(key=key_prefix + (name,)):
+                resolved[name] = parse_corredo(val, name)
+        elif is_expr_node(val):
             pending[name] = val
         elif (
             is_linear_env_node(val) or is_generator_node(val) or is_compact_env(val)

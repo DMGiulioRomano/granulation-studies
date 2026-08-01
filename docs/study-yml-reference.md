@@ -267,6 +267,78 @@ indica la forma giusta. Le forme **statiche** di `Env` (`[a, b]`,
 `[[t, v], ...]`, `{type, points, curve}`, la forma compatta a cicli) non sono
 generatori e non vogliono nessun wrapper: restano nude.
 
+## Il corredo — `list:`, una lista letta per indice
+
+Il terzo ruolo, accanto ai due di sopra. `values:` si legge per indice ma è
+consumato dalla posizione che lo ospita; `linear_env:` si legge per tempo; un
+**corredo** è una lista **nominata**, dichiarata in un `let:` e letta solo per
+indice, dalle espressioni che la referenziano.
+
+```yaml
+let:
+  d: 1                              # fondamentale: periodo 1 s = 60 bpm
+  ratio: {list: [2, 3, 4, 7]}       # il corredo: quattro rapporti scelti
+
+axes:
+  grain.duration:
+    base: {expr: "d * ratio[0] / 40"}   # riferito alla fondamentale del corredo
+```
+
+Colma il caso che le altre forme non coprivano: un valore **scelto a mano**.
+Un valore *pescato* si condivide (banda in `spread.let`), uno *calcolato* pure
+(`{expr}` con `i`/`n`), ma una serie **irregolare e decisa dall'autore** — dei
+rapporti scelti a orecchio, non una formula — non poteva essere letta da due
+assi diversi, perché `values` in `spread.over` scrive su un path solo. Il
+corredo vive un livello sopra, nel `let:`, dove non esiste nessun indice e
+quindi nessuna pretesa sul conteggio.
+
+**Perché non `values:`.** In un `let:` quella chiave produce un envelope: a
+`t = 0.5` il valore sarebbe `3.5`, che per un corredo di rapporti non è un
+rapporto sbagliato — è una domanda senza senso, perché fra il terzo e il
+quarto rapporto non c'è nessuna voce. **Un corredo è discreto per natura.**
+
+**Perché non la lista nuda.** `ratio: [2, 3]` è già una forma statica di `Env`
+(la rampa `[a, b]`): sarebbe una collisione silenziosa, valida in entrambe le
+letture, senza errore e con il suono sbagliato — e due voci in rapporto 3:2 è
+materiale che si scrive davvero.
+
+### Dove vive
+
+| Blocco | Corredo ammesso |
+|---|---|
+| `let:` di documento | sì — condiviso da più gruppi |
+| `let:` di gruppo | sì — il caso tipico |
+| `spread.let` | no |
+| il `let` interno di un nodo-expr | no (invariato: un nodo-generatore in `let` è errore) |
+
+Più corredi nello stesso `let:` sono ammessi.
+
+### L'indicizzazione
+
+`nome[expr]` è una produzione della grammatica di `expr`. L'indice è
+un'espressione qualsiasi purché valuti a un **intero**: un indice frazionario è
+errore, e la quantizzazione si scrive con `//` o `floor()`, che sono già in
+grammatica. Un indice **costante** funziona in ogni scope in cui il corredo è
+visibile — `ratio[0]` in un `axes:` è legittimo e verificabile al load.
+
+**La linea di confine, dichiarata:** *una lista non è mai un valore*. Può
+comparire **solo** come `nome[expr]`. Non si passa a una funzione, non ci si fa
+aritmetica, non si restituisce — `ratio * 2` e `min(ratio, 2)` sono errore. Così
+il tipo di ogni espressione resta `scalare | Env` come prima, e i corredi sono
+un namespace di dichiarazione separato.
+
+### Le guardie
+
+- **corredo vuoto** (`{list: []}`) → errore alla dichiarazione, con il nome nel
+  messaggio: non c'è niente da indicizzare;
+- **elementi non scalari** → errore (i corredi di sagome sono rimandati);
+- **indice fuori range** → errore che nomina il corredo e la sua lunghezza;
+- **indicizzare un nome che non è un corredo** → errore che dice cos'è;
+- **corredo non referenziato** → errore, per estensione della guardia
+  anti-refuso esistente: `ratio[0]` registra `ratio` fra i nomi referenziati,
+  quindi la guardia non ha richiesto modifiche;
+- **ombreggiatura fra livelli** → errore, come per ogni manopola.
+
 ## Generatori di valori d'asse
 
 I valori di test di un asse si danno con **esattamente una** chiave-generatore
@@ -522,8 +594,9 @@ axes:
 ```
 
 - **Grammatica**: numeri, nomi, `+ - * / // % **`, meno unario, parentesi,
-  le chiamate alle **funzioni primitive** e le costanti `pi` / `e`. Niente
-  indici, confronti o argomenti keyword — ogni altro costrutto è errore.
+  l'indicizzazione di un corredo `nome[expr]` (vedi «Il corredo»), le chiamate
+  alle **funzioni primitive** e le costanti `pi` / `e`. Niente confronti o
+  argomenti keyword — ogni altro costrutto è errore.
 - **Funzioni primitive** (whitelist — il set generatore da cui derivare le
   altre): `abs`, `floor`, `ceil`, `sqrt`, `exp`, `log` (naturale, o
   `log(x, b)` per la base), `sin`, `cos`, `tan`, `atan`, `min`, `max`
@@ -552,8 +625,8 @@ axes:
   (discontinuità pesata, fuori dal v1). Il morphing a scatti si scrive con
   forme step (o scalari) e `w` step.
 - **`let`** dichiara i nomi in scope: scalari, forme **statiche** di Env
-  (`[a, b]`, `[[t, v], ...]`, `{type, points, curve}`), oppure altri
-  **nodi-expr** (issue #28) — così una sagoma calcolata si fattorizza senza
+  (`[a, b]`, `[[t, v], ...]`, `{type, points, curve}`), corredi (iniettati per
+  nome dal `let:` che li dichiara), oppure altri **nodi-expr** (issue #28) — così una sagoma calcolata si fattorizza senza
   pre-calcolare i breakpoint a mano. Un nodo-generatore dentro `let` resta
   errore: i due meccanismi non si annidano — con una sola eccezione, la
   **banda-let** della strategy `expr` dello spread (un pescaggio random per
@@ -635,8 +708,11 @@ streams:
   non nomina la manopola resta intatto.
 - **`let:` di documento** (top-level). Valori: scalare, envelope disegnato
   (`[[t, v], ...]`), envelope **generato** `{linear_env: ...}` (pescato o
-  costruito **una volta**, con seed `stable_seed("<study>:let:<nome>")`), o
-  nodo-expr derivato che referenzia altre manopole (risolto al load). Un
+  costruito **una volta**, con seed `stable_seed("<study>:let:<nome>")`),
+  **corredo** `{list: [...]}` (una lista nominata, letta per indice — vedi «Il
+  corredo»), o nodo-expr derivato che referenzia altre manopole (risolto al
+  load; i corredi si risolvono **prima**, così `{expr: "ratio[0] * 2"}` è una
+  manopola derivata legittima qualunque sia l'ordine di dichiarazione). Un
   generatore *nudo* qui è errore: il `let:` è il contesto in cui la posizione
   non dice il ruolo, e il ruolo lo marca `linear_env:`. Iniettato **prima** di ogni
   processo: è il **riposo**, che `versions:`/`percorso:` poi **ombreggiano**
