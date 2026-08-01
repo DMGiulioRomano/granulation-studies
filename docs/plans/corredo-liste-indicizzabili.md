@@ -474,7 +474,7 @@ talea** — l'isoritmo cade fuori da due `cycle: true`, senza sintassi dedicata.
   porta dichiarata).
 - **#46 — language server.** I dieci diagnostici del corredo, e il confine fra
   ciò che è decidibile staticamente e ciò che dipende dal prodotto cartesiano
-  delle versioni. Da spostare su `gs-ls`.
+  delle versioni. Da spostare su `gl-ls`.
 - **#47 — `values:` / `linear_env:`.** Separazione dei due ruoli di `values`.
   Indipendente, ma conviene farla **prima**: introduce `linear_env:` come
   wrapper di ruolo, simmetrico a `list:`, e fatta dopo costringerebbe a
@@ -482,6 +482,30 @@ talea** — l'isoritmo cade fuori da due `cycle: true`, senza sintassi dedicata.
 - **#39 — pad stabile dei nomi.** Già risolto lì il caso di `spread.n` variabile
   per versione, che è il meccanismo su cui poggia `n: {expr: "len(ratio)"}`
   quando `versions` muove il corredo.
+
+---
+
+## Implementazione
+
+Il design è scomposto in sette fette verticali: ognuna attraversa tutti gli
+strati — dichiarazione, risoluzione delle manopole, valutazione
+dell'espressione, iniezione, espansione, documento engine generato — ed è
+verificabile da sola con uno `study.yml` che la esercita. I criteri di
+accettazione stanno nelle issue.
+
+| Issue | Fetta | Bloccata da |
+|---|---|---|
+| #48 | `list:` letterale e indice costante | #47 |
+| #49 | indicizzazione per voce: `i`, negativi, fuori range | #48 |
+| #50 | `cycle: true` — accordo vs pattern | #49 |
+| #51 | la primitiva `len()` | #48, #45 |
+| #52 | generatori dentro `list:` — corredo generato e pescato | #48 |
+| #53 | warning `n < len` come diagnostico strutturato | #49 |
+| #54 | corredi sotto `versions:` e `percorso:` | #49, #50 |
+
+L'ordine non è una catena: dopo #48 partono in parallelo #49, #51 e #52; dopo
+#49 si sbloccano #50 e #53; #54 chiude. I due prerequisiti fuori dalla serie
+sono #45 (bug, blocca #51) e #47 (`linear_env:`, blocca #48).
 
 ---
 
