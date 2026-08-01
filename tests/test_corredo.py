@@ -341,3 +341,184 @@ def test_end_to_end_il_documento_engine_porta_i_valori_del_corredo():
     # corredo ha prodotto (range 0 -> banda collassata, quattro plateau uguali)
     assert {y for _, y in stream["density"]["points"]} == {20.0}
     assert {y for _, y in stream["grain"]["duration"]["points"]} == {0.007}
+
+
+# =============================================================================
+# Fetta 2/7 (issue #49): l'indicizzazione per voce
+# =============================================================================
+
+def _spread(streams):
+    from granstudies.spread import expand_spreads
+
+    return expand_spreads(apply_group_let(streams))
+
+
+def _accordo(let, spread_let, n=4, **extra):
+    over = extra.pop("over", {"base.pan": {"expr": "i"}})
+    return {
+        "accordo": {
+            "let": let,
+            "spread": {"n": n, "let": spread_let, "over": over},
+            "axes": {"density": {"base": {"expr": "r"}}},
+            **extra,
+        }
+    }
+
+
+def _r(out):
+    """Il valore di ``r`` in ogni voce generata, in ordine."""
+    return [v["axes"]["density"]["base"]["let"]["r"] for v in out.values()]
+
+
+# --- ratio[i] ----------------------------------------------------------------
+
+def test_indice_per_voce_in_spread_let():
+    out = _spread(
+        _accordo({"ratio": {"list": [2, 3, 4, 7]}}, {"r": {"expr": "ratio[i]"}})
+    )
+    assert _r(out) == [2, 3, 4, 7]
+
+
+def test_indice_per_voce_in_una_strategy_expr_di_over():
+    out = _spread(
+        _accordo(
+            {"ratio": {"list": [2, 3, 4, 7]}},
+            {"r": {"expr": "i"}},
+            over={"base.pointer.start": {"expr": "ratio[i] / 10"}},
+        )
+    )
+    starts = [v["base"]["pointer"]["start"] for v in out.values()]
+    assert starts == pytest.approx([0.2, 0.3, 0.4, 0.7])
+
+
+def test_corredo_di_documento_letto_da_due_gruppi_ognuno_col_proprio_i():
+    from granstudies.spread import expand_spreads
+
+    doc = apply_document_let(
+        _doc(
+            {"ratio": {"list": [2, 3, 4, 7]}},
+            streams={
+                "a": {
+                    "spread": {"n": 2, "let": {"r": {"expr": "ratio[i]"}},
+                               "over": {"base.pan": {"expr": "i"}}},
+                    "axes": {"density": {"base": {"expr": "r"}}},
+                },
+                "b": {
+                    "spread": {"n": 3, "let": {"r": {"expr": "ratio[i + 1]"}},
+                               "over": {"base.pan": {"expr": "i"}}},
+                    "axes": {"density": {"base": {"expr": "r"}}},
+                },
+            },
+        )
+    )
+    out = expand_spreads(doc["streams"])
+    assert _r({k: v for k, v in out.items() if k.startswith("a_")}) == [2, 3]
+    assert _r({k: v for k, v in out.items() if k.startswith("b_")}) == [3, 4, 7]
+
+
+# --- indici negativi ---------------------------------------------------------
+
+@pytest.mark.parametrize("k, atteso", [(-1, 7), (-2, 4), (-3, 3), (-4, 2)])
+def test_indice_negativo(k, atteso):
+    assert eval_expr(f"ratio[{k}]", {"ratio": {"list": [2, 3, 4, 7]}}) == atteso
+
+
+def test_indice_negativo_inverte_il_senso_di_lettura():
+    out = _spread(
+        _accordo({"ratio": {"list": [2, 3, 4, 7]}}, {"r": {"expr": "ratio[-1 - i]"}})
+    )
+    assert _r(out) == [7, 4, 3, 2]
+
+
+def test_negativo_oltre_la_lunghezza_e_errore():
+    with pytest.raises(ValueError, match="fuori dal corredo"):
+        eval_expr("ratio[-5]", {"ratio": {"list": [2, 3, 4, 7]}})
+
+
+def test_il_messaggio_di_fuori_range_elenca_entrambi_i_versi():
+    with pytest.raises(ValueError) as exc:
+        eval_expr("ratio[-5]", {"ratio": {"list": [2, 3, 4, 7]}})
+    msg = str(exc.value)
+    assert "0..3" in msg and "-1..-4" in msg
+
+
+# --- fuori range dentro lo spread --------------------------------------------
+
+def test_n_maggiore_di_len_su_corredo_finito_e_errore():
+    with pytest.raises(SpecError) as exc:
+        _spread(_accordo({"ratio": {"list": [2, 3]}}, {"r": {"expr": "ratio[i]"}}, n=4))
+    msg = str(exc.value)
+    assert "voce 3 di 4" in msg      # la voce
+    assert "ratio" in msg            # il nome del corredo
+    assert "2 elementi" in msg       # la lunghezza
+
+
+def test_n_minore_di_len_non_e_errore():
+    """Un corredo sotto-consumato e' legittimo: si sta ascoltando un
+    sottoinsieme dell'accordo. Il warning arriva nella fetta 6/7."""
+    out = _spread(
+        _accordo({"ratio": {"list": [2, 3, 4, 7]}}, {"r": {"expr": "ratio[i]"}}, n=2)
+    )
+    assert _r(out) == [2, 3]
+
+
+def test_n_uguale_a_len_e_il_caso_pieno():
+    out = _spread(
+        _accordo({"ratio": {"list": [2, 3, 4, 7]}}, {"r": {"expr": "ratio[i]"}}, n=4)
+    )
+    assert _r(out) == [2, 3, 4, 7]
+
+
+# --- il corredo non si dichiara nello spread ---------------------------------
+
+def test_corredo_in_spread_let_e_errore_con_hint_al_let_di_gruppo():
+    with pytest.raises(SpecError) as exc:
+        _spread(
+            {
+                "a": {
+                    "spread": {"n": 2, "let": {"ratio": {"list": [2, 3]}},
+                               "over": {"base.pan": {"expr": "i"}}},
+                    "axes": {"density": {"base": {"expr": "ratio[0]"}}},
+                }
+            }
+        )
+    msg = str(exc.value)
+    assert "let:" in msg and "gruppo" in msg
+
+
+def test_corredo_come_strategy_di_over_e_errore():
+    with pytest.raises(SpecError, match="non e' una strategy"):
+        _spread(
+            {
+                "a": {
+                    "spread": {"n": 2, "over": {"base.pan": {"list": [2, 3]}}},
+                    "axes": {"density": {"base": 5}},
+                }
+            }
+        )
+
+
+def test_i_e_n_restano_non_ridichiarabili():
+    with pytest.raises(SpecError, match="riservati"):
+        _spread(
+            _accordo(
+                {"ratio": {"list": [2, 3, 4, 7]}},
+                {"r": {"expr": "ratio[i]", "let": {"i": 2}}},
+            )
+        )
+
+
+def test_end_to_end_accordo_quattro_voci_coi_periodi_attesi():
+    """Quattro voci, periodi 2s / 3s / 4s / 7s: la polimetria in rapporti
+    scelti, con la fondamentale letta da un secondo asse."""
+    _, specs = _fixture("corredo_accordo.yml")
+    assert len(specs) == 4
+    assert [s.axis("density").values[0] for s in specs] == pytest.approx(
+        [2.0, 3.0, 4.0, 7.0]
+    )
+    # grain.duration legge ratio[0] in tutte le voci: la fondamentale e' una
+    # sola, dichiarata una volta
+    for s in specs:
+        assert s.axis("grain_duration").values[0] == pytest.approx(0.05)
+    # ogni voce legge un punto diverso del sample
+    assert [s.stream_id for s in specs] == [f"accordo_{k}" for k in range(1, 5)]

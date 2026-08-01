@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Tuple
 
 from . import bounds as bounds_mod
 from .errors import ErrCtx, SpecError
-from .expr import eval_expr, is_expr_node, parse_expr_node
+from .expr import eval_expr, is_corredo, is_expr_node, parse_expr_node
 from .group_let import apply_group_let
 from .inject import inject
 from .value_generators import (
@@ -195,6 +195,15 @@ def _strategy(name: str, path: str, cfg: Any, ctx: ErrCtx) -> tuple:
             key=key,
             hint="dichiara 'values', 'ramp', una banda ('base'/'range'/'seed') "
             "o un'espressione ('expr').",
+        )
+    if is_corredo(cfg):
+        raise ctx.err(
+            f"spread: il path '{path}' dichiara un corredo — un corredo non e' "
+            "una strategy: si dichiara in un 'let:' e si legge per indice.",
+            key=key,
+            hint="per un valore per voce scritto a mano usa 'values'; per "
+            "leggere un corredo, dichiaralo nel 'let:' di gruppo e usa "
+            "\"{expr: 'ratio[i]'}\".",
         )
     if "expr" in cfg:
         # Quarta strategy, locale allo spread (fuori dal vocabolario Y: e'
@@ -485,19 +494,26 @@ def _strategy_values(
                 draws[var] = band(
                     n=n, **expand_params(band_params, seed=band_params["seed"])
                 )
-        with ctx.wrapping(key=key):
-            return [
-                eval_expr(
-                    text,
-                    {
-                        **let,
-                        **{var: values[i] for var, values in draws.items()},
-                        "i": i,
-                        "n": n,
-                    },
-                )
-                for i in range(n)
-            ]
+        out: List[Any] = []
+        for i in range(n):
+            scope = {
+                **let,
+                **{var: values[i] for var, values in draws.items()},
+                "i": i,
+                "n": n,
+            }
+            try:
+                out.append(eval_expr(text, scope))
+            except SpecError:
+                raise
+            except ValueError as exc:
+                # Il contesto che manca al valutatore: *quale voce* ha rotto.
+                # Serve soprattutto all'indicizzazione di un corredo, dove il
+                # fuori range dipende da ``i`` e non dal testo (issue #49).
+                raise ctx.err(
+                    f"spread: {path}, voce {i + 1} di {n}: {exc}", key=key
+                ) from exc
+        return out
     if marker == "ramp":
         form = _ramp_form(path, params, ctx)
         if form == "full":
@@ -632,6 +648,16 @@ def _let_values(
         )
     out: Dict[str, List[Any]] = {}
     for var, cfg in block.items():
+        if is_corredo(cfg):
+            raise ctx.err(
+                f"spread: 'let.{var}' dichiara un corredo — a livello di voce "
+                "'i' e' gia' fissato, quindi una lista qui non avrebbe nessun "
+                "indice da cui essere letta.",
+                key=("spread", "let", var),
+                hint="dichiara il corredo nel 'let:' di gruppo (o di "
+                "documento) e leggilo da qui con "
+                f"\"{var}: {{expr: 'ratio[i]'}}\".",
+            )
         label = f"let:{var}"
         marker, params = _strategy(name, label, cfg, ctx)
         if marker in ("values", "ramp"):
