@@ -522,3 +522,140 @@ def test_end_to_end_accordo_quattro_voci_coi_periodi_attesi():
         assert s.axis("grain_duration").values[0] == pytest.approx(0.05)
     # ogni voce legge un punto diverso del sample
     assert [s.stream_id for s in specs] == [f"accordo_{k}" for k in range(1, 5)]
+
+
+# =============================================================================
+# Fetta 4/7 (issue #51): la primitiva len()
+# =============================================================================
+
+def test_len_di_un_corredo():
+    assert eval_expr("len(ratio)", {"ratio": {"list": [2, 3, 4, 7]}}) == 4
+
+
+def test_len_in_uno_scope_di_asse():
+    out = apply_document_let(
+        _doc(
+            {"ratio": {"list": [2, 3, 4, 7]}},
+            axes={"density": {"base": {"expr": "len(ratio) * 10"}}},
+        )
+    )
+    from granstudies.expr import eval_expr as _e
+
+    nodo = out["axes"]["density"]["base"]
+    assert _e(nodo["expr"], nodo["let"]) == 40
+
+
+def test_len_dentro_una_manopola_derivata_di_let():
+    """Richiede il fix di #45: senza, il nome della primitiva restava nel
+    cancello del fixpoint di ``resolve_knobs`` e la manopola non risolveva
+    mai, con un errore di «dipendenze cicliche» inesistenti."""
+    out = apply_document_let(
+        _doc(
+            {"ratio": {"list": [2, 3, 4, 7]}, "quante": {"expr": "len(ratio)"}},
+            axes={"density": {"base": {"expr": "quante"}}},
+        )
+    )
+    assert out["axes"]["density"]["base"]["let"]["quante"] == 4
+
+
+def test_len_di_un_envelope_e_errore():
+    with pytest.raises(ValueError, match="vuole un corredo"):
+        eval_expr("len(s)", {"s": [[0, 1], [1, 2]]})
+
+
+def test_il_messaggio_spiega_perche_len_di_un_envelope_non_esiste():
+    with pytest.raises(ValueError) as exc:
+        eval_expr("len(s)", {"s": [[0, 1], [1, 2]]})
+    assert "rappresentazione" in str(exc.value)
+
+
+def test_len_di_uno_scalare_e_errore():
+    with pytest.raises(ValueError, match="vuole un corredo"):
+        eval_expr("len(d)", {"d": 25})
+
+
+def test_len_di_un_nome_inesistente_e_errore():
+    with pytest.raises(ValueError, match="nome ignoto"):
+        eval_expr("len(boh)", {"d": 1})
+
+
+def test_len_di_una_espressione_e_errore():
+    with pytest.raises(ValueError, match="per nome"):
+        eval_expr("len(2 + 2)", {"ratio": {"list": [2, 3]}})
+
+
+@pytest.mark.parametrize("text", ["len()", "len(ratio, 2)"])
+def test_len_vuole_esattamente_un_argomento(text):
+    with pytest.raises(ValueError, match="1 argomento"):
+        eval_expr(text, {"ratio": {"list": [2, 3]}})
+
+
+# --- spread.n legato al corredo ----------------------------------------------
+
+def test_spread_n_da_len_produce_la_popolazione_del_corredo():
+    """La direzione ammessa: il corredo puo' *dare* n, non prenderlo. Non e'
+    circolare, perche' il corredo si risolve al load, prima dell'espansione."""
+    out = _spread(
+        _accordo(
+            {"ratio": {"list": [2, 3, 4, 7]}},
+            {"r": {"expr": "ratio[i]"}},
+            n={"expr": "len(ratio)"},
+            over={"base.pointer.start": {"ramp": {"start": 0.1, "step": 0.2}}},
+        )
+    )
+    assert len(out) == 4
+    assert _r(out) == [2, 3, 4, 7]
+
+
+def test_spread_n_da_len_segue_un_corredo_piu_corto():
+    out = _spread(
+        _accordo(
+            {"ratio": {"list": [2, 3, 4]}},
+            {"r": {"expr": "ratio[i]"}},
+            n={"expr": "len(ratio)"},
+            over={"base.pointer.start": {"ramp": {"start": 0.1, "step": 0.2}}},
+        )
+    )
+    assert _r(out) == [2, 3, 4]
+
+
+# --- l'accordo replicato per ottave ------------------------------------------
+
+def test_accordo_replicato_per_ottave():
+    """L'idioma del design doc: `%` e `//` erano entrati per trasformare `i` in
+    coordinate di griglia; qui danno tre ottave dello stesso accordo."""
+    streams = {
+        "accordo": {
+            "let": {"d": 1, "ratio": {"list": [2, 3, 4, 7]}},
+            "spread": {
+                "n": 12,
+                "let": {
+                    "r": {"expr": "ratio[i % len(ratio)]"},
+                    "ott": {"expr": "2 ** (i // len(ratio))"},
+                },
+                "over": {"base.pointer.start": {"ramp": {"start": 0.05,
+                                                         "step": 0.075}}},
+            },
+            "axes": {"density": {"base": {"expr": "d * r / ott"}}},
+        }
+    }
+    out = _spread(streams)
+    periodi = [
+        v["axes"]["density"]["base"]["let"]["r"]
+        / v["axes"]["density"]["base"]["let"]["ott"]
+        for v in out.values()
+    ]
+    assert periodi == pytest.approx(
+        [2, 3, 4, 7, 1, 1.5, 2, 3.5, 0.5, 0.75, 1, 1.75]
+    )
+
+
+# --- la lista resta non passabile a ogni altra funzione ----------------------
+
+@pytest.mark.parametrize(
+    "text", ["min(ratio, 2)", "max(ratio, 2)", "abs(ratio)", "floor(ratio)",
+             "mix(ratio, 1, 0.5)"]
+)
+def test_nessuna_altra_funzione_accetta_un_corredo(text):
+    with pytest.raises(ValueError, match="solo per indice"):
+        eval_expr(text, {"ratio": {"list": [2, 3]}})

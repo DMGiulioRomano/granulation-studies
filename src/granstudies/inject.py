@@ -21,15 +21,31 @@ from .expr import is_expr_node
 
 def expr_names(text: Any) -> frozenset:
     """I nomi referenziati da un'espressione (vuoto se non parsabile: gli
-    errori di sintassi emergono alla valutazione, con il loro contesto)."""
+    errori di sintassi emergono alla valutazione, con il loro contesto).
+
+    Il bersaglio di una chiamata non conta: ``min`` in ``min(a, 10)`` e' un
+    termine della grammatica (la whitelist di ``expr._FUNCTIONS``), non una
+    manopola da iniettare. Contarlo rompeva il fixpoint di ``resolve_knobs``,
+    che usa questo insieme come cancello e restava in attesa di una manopola
+    che non poteva esistere (issue #45). Un nome *usato come argomento* resta
+    registrato anche se coincide con una primitiva: e' escluso il solo
+    ``Call.func``.
+    """
     if not isinstance(text, str):
         return frozenset()
     try:
         tree = ast.parse(text, mode="eval")
     except SyntaxError:
         return frozenset()
+    called = {
+        id(node.func)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
     return frozenset(
-        node.id for node in ast.walk(tree) if isinstance(node, ast.Name)
+        node.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name) and id(node) not in called
     )
 
 

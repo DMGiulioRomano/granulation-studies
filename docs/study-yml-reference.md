@@ -359,9 +359,35 @@ della popolazione, nemmeno quando è l'unico indicizzato: `n` resta di
 - `spread.n < len` **non** è errore: un corredo sotto-consumato è legittimo —
   si sta ascoltando un sottoinsieme dell'accordo.
 
+### `len(nome)`
+
+Una primitiva a parte, che accetta **solo un corredo**, per nome. Serve a due
+cose:
+
+```yaml
+spread:
+  n: {expr: "len(ratio)"}                    # legare la popolazione al corredo
+  let:
+    r:   {expr: "ratio[i % len(ratio)]"}     # il ciclo scritto a mano
+    ott: {expr: "2 ** (i // len(ratio))"}    # ...e i giri contati
+```
+
+La prima è l'unico modo di garantire che `n` e la lunghezza non si
+disallineino, e va nella direzione ammessa — **il corredo può dare `n`, non
+prenderlo**: non è circolare, perché il corredo si risolve al load, prima
+dell'espansione dello spread. La seconda dà tre ottave dello stesso accordo in
+due righe, con `%` e `//` che erano già in grammatica.
+
+`len` di un envelope è **errore**, non «quanti breakpoint ha»: quello è un
+dettaglio di rappresentazione — a parità di intenzione `expand_env` può
+produrne un numero diverso — e farlo trapelare renderebbe le espressioni
+dipendenti dall'implementazione. Errore anche su uno scalare, su un nome
+inesistente e su un'espressione (`len(2 + 2)`): l'argomento è un nome.
+
 **La linea di confine, dichiarata:** *una lista non è mai un valore*. Può
-comparire **solo** come `nome[expr]`. Non si passa a una funzione, non ci si fa
-aritmetica, non si restituisce — `ratio * 2` e `min(ratio, 2)` sono errore. Così
+comparire **solo** come `nome[expr]` o `len(nome)`. Non si passa a una funzione, non ci si fa
+aritmetica, non si restituisce — `ratio * 2` e `min(ratio, 2)` sono errore.
+Due produzioni, non una famiglia aperta. Così
 il tipo di ogni espressione resta `scalare | Env` come prima, e i corredi sono
 un namespace di dichiarazione separato.
 
@@ -638,7 +664,8 @@ axes:
 - **Funzioni primitive** (whitelist — il set generatore da cui derivare le
   altre): `abs`, `floor`, `ceil`, `sqrt`, `exp`, `log` (naturale, o
   `log(x, b)` per la base), `sin`, `cos`, `tan`, `atan`, `min`, `max`
-  (variadiche, almeno 2 argomenti), `mix` (vedi sotto). Una chiamata con un
+  (variadiche, almeno 2 argomenti), `mix` (vedi sotto) e `len` (vedi «Il
+  corredo»: accetta **solo** un corredo, per nome). Una chiamata con un
   argomento-Env agisce
   **sulle y** come gli operatori — `min(env, 10)` è un clamp del livello,
   `floor(env)` quantizza — e due Env nella stessa chiamata sono errore
@@ -772,6 +799,11 @@ streams:
   fissato, quindi una lista qui non avrebbe nessun indice da cui essere letta:
   si dichiara nel `let:` di gruppo e si legge da qui con `{expr: "ratio[i]"}`.
   Vedi «Il blocco `spread:`».
+- **Manopola derivata.** Un nodo-expr in un `let:` (documento o gruppo) che
+  referenzia altre manopole; l'ordine di dichiarazione non conta, la
+  risoluzione è per dipendenze. Vale l'intera grammatica di `expr`, **funzioni
+  primitive comprese** (`{expr: "min(centro, 30)"}`): il nome di una funzione è
+  un termine della grammatica, non una manopola da dichiarare.
 - **Aritmetica inviluppo⊕scalare.** Una manopola-envelope combinata con uno
   scalare nell'espressione (`comune + divarico`, `comune * k`) agisce sulle y,
   i tempi restano — è l'aritmetica su Env del nodo-expr. Così la forma comune

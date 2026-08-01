@@ -94,6 +94,43 @@ def test_manopola_derivata_referenziata_solo_da_altra_manopola():
     assert out["axes"]["grain.duration"]["base"]["let"]["dur0"] == pytest.approx(0.004)
 
 
+def test_manopola_derivata_che_chiama_una_primitiva():
+    """Issue #45: il nome della funzione non e' una manopola mancante."""
+    out = apply_document_let(
+        _doc(
+            {"a": 5, "b": {"expr": "min(a, 10)"}},
+            axes={"density": {"base": {"expr": "b"}}},
+        )
+    )
+    assert out["axes"]["density"]["base"]["let"]["b"] == 5
+
+
+@pytest.mark.parametrize(
+    "text, atteso",
+    [
+        ("abs(-a)", 5),
+        ("floor(a / 2)", 2),
+        ("ceil(a / 2)", 3),
+        ("sqrt(a * 5)", 5),
+        ("exp(a * 0)", 1),
+        ("log(a / a)", 0),
+        ("sin(a * 0)", 0),
+        ("cos(a * 0)", 1),
+        ("tan(a * 0)", 0),
+        ("atan(a * 0)", 0),
+        ("min(a, 10)", 5),
+        ("max(a, 10)", 10),
+        ("mix(a, a, 0.5)", 5),
+    ],
+)
+def test_ogni_primitiva_dentro_una_manopola_derivata(text, atteso):
+    """Regressione per ciascuna primitiva (issue #45)."""
+    out = apply_document_let(
+        _doc({"a": 5, "b": {"expr": text}}, axes={"density": {"base": {"expr": "b"}}})
+    )
+    assert out["axes"]["density"]["base"]["let"]["b"] == pytest.approx(atteso)
+
+
 def test_dipendenza_ciclica_e_errore():
     with pytest.raises(SpecError, match="cicl|irrisolvibil"):
         apply_document_let(
