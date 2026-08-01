@@ -13,7 +13,7 @@ Grammatica (whitelist AST, ``mode="eval"``): numeri, nomi, ``+ - * / // % **``,
 unario ``-``, parentesi, l'indicizzazione di un corredo ``nome[expr]``, le
 chiamate alle funzioni primitive di ``_FUNCTIONS``
 (``abs``/``floor``/``ceil``/``sqrt``/``exp``/``log``/``sin``/``cos``/``tan``/
-``atan``/``min``/``max``/``mix``) e le costanti ``pi``/``e`` (ombreggiabili
+``atan``/``min``/``max``/``mix``/``len``) e le costanti ``pi``/``e`` (ombreggiabili
 dallo scope). Una chiamata con un argomento-Env agisce elementwise sulle y
 (es. ``min(env, 10)`` e' un clamp); due Env nella stessa chiamata sono un
 errore, come per gli operatori — tranne ``mix``, che di due (o tre) Env vive.
@@ -22,8 +22,8 @@ frammento incriminato.
 
 Il **corredo** (``{list: [...]}`` in un ``let:``) e' un tipo a parte: una lista
 nominata, letta solo per indice. La linea di confine e' dichiarata e stretta —
-*una lista non e' mai un valore*: puo' comparire solo come ``nome[expr]``, non
-si passa a una funzione, non ci si fa aritmetica, non si restituisce. Cosi' il
+*una lista non e' mai un valore*: puo' comparire solo come ``nome[expr]`` o
+``len(nome)``, non si passa ad altre funzioni, non ci si fa aritmetica, non si restituisce. Cosi' il
 tipo di ogni **espressione** resta ``scalare | Env`` e i corredi sono un
 namespace di dichiarazione separato.
 
@@ -83,6 +83,9 @@ _FUNCTIONS = {
     # ``mix`` ha un ramo dedicato in ``_call`` (accetta Env multipli: e'
     # l'unica porta Env⊙Env); qui vive per la whitelist e il check di arieta'.
     "mix": (None, 3, 3),
+    # ``len`` ha un ramo dedicato in ``_call``, e per la ragione opposta:
+    # accetta **solo** un corredo, che nessun'altra primitiva puo' toccare.
+    "len": (None, 1, 1),
 }
 
 # Chiavi ammesse nel nodo-expr.
@@ -396,6 +399,43 @@ def _eval(node: ast.AST, scope: Mapping[str, Any]) -> Any:
     )
 
 
+def _len(node: ast.Call, scope: Mapping[str, Any]) -> int:
+    """``len(nome)``: la lunghezza di un corredo. Solo di un corredo.
+
+    ``len`` di un envelope dev'essere errore, non «quanti breakpoint ha»:
+    quello e' un dettaglio di rappresentazione — ``expand_env`` puo' produrne
+    un numero diverso a parita' di intenzione — e farlo trapelare renderebbe
+    le espressioni dipendenti dall'implementazione.
+    """
+    if node.keywords:
+        raise ValueError(
+            "expr: 'len' non accetta argomenti keyword (solo posizionali)."
+        )
+    if len(node.args) != 1:
+        raise ValueError(
+            f"expr: 'len' vuole 1 argomento (ricevuti {len(node.args)})."
+        )
+    arg = node.args[0]
+    if not isinstance(arg, ast.Name):
+        raise ValueError(
+            f"expr: 'len' accetta solo un corredo per nome, non "
+            f"{ast.unparse(arg)!r}."
+        )
+    name = arg.id
+    if name not in scope:
+        names = ", ".join(sorted(set(scope) | set(_CONSTANTS))) or "nessuno"
+        raise ValueError(f"expr: nome ignoto '{name}' (disponibili: {names}).")
+    v = _checked(name, scope[name])
+    if not is_corredo(v):
+        raise ValueError(
+            f"expr: 'len' vuole un corredo, ma '{name}' e' "
+            f"{'un envelope' if not _is_scalar(v) else 'uno scalare'} "
+            f"({v!r}) — la lunghezza di un envelope e' un dettaglio di "
+            "rappresentazione, non un fatto del linguaggio."
+        )
+    return len(corredo_values(v))
+
+
 def _subscript(node: ast.Subscript, scope: Mapping[str, Any]) -> Any:
     """``nome[expr]``: l'elemento di un corredo.
 
@@ -464,6 +504,11 @@ def _call(node: ast.Call, scope: Mapping[str, Any]) -> Any:
             f"expr: '{name}' non accetta argomenti keyword (solo posizionali)."
         )
     fn, lo, hi = _FUNCTIONS[name]
+    if name == "len":
+        # Prima della valutazione degli argomenti: ``_eval`` su un nome-corredo
+        # e' errore (una lista non e' un valore), e ``len`` e' l'unica funzione
+        # che di un corredo vive.
+        return _len(node, scope)
     args = [_eval(a, scope) for a in node.args]
     count = len(args)
     if count < lo or (hi is not None and count > hi):
