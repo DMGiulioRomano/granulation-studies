@@ -412,9 +412,17 @@ spread:
     duration: {expr: "durate[i] * 8"}
 ```
 
-> Nota: `spread.let` e `spread.over` corrono **in parallelo** — le manopole di
-> voce sono iniettate negli stream generati, non nelle strategy di `over`.
-> Un corredo serve quindi indicizzato in entrambi i posti, come qui.
+> Nota sullo scope: `spread.let` e `spread.over` sono **fratelli**, calcolati
+> indipendentemente; le manopole di voce sono iniettate negli stream generati
+> solo *dopo* che `over` è stato scritto sui path, quindi quando `over` viene
+> valutato `spread.let` non esiste ancora. Il corredo di **gruppo** è invece
+> già in scope lì — le manopole di gruppo si iniettano nelle espressioni
+> dell'entry prima dell'espansione — quindi `over` lo legge direttamente.
+
+Le singole coppie si ripetono prima della voce 12 (`(2, 1)` torna già alla voce
+4), perché `durate` contiene due volte il valore `1`: è la **sequenza** ad avere
+periodo `lcm`, cioè la relazione di fase fra color e talea. Nella talea i valori
+si ripetono eccome — è la descrizione musicalmente corretta.
 
 ### Il warning `n < len`
 
@@ -502,9 +510,16 @@ corredo dichiarato in `let:`, cioè l'istanza di partenza.
 | `let:` di documento | sì — condiviso da più gruppi |
 | `let:` di gruppo | sì — il caso tipico |
 | `spread.let` | no |
-| il `let` interno di un nodo-expr | no (invariato: un nodo-generatore in `let` è errore) |
+| il `let` interno di un nodo-expr | corredo **letterale** sì, **generato** no |
 
 Più corredi nello stesso `let:` sono ammessi.
+
+Nel `let` **locale** di un nodo-expr la riga si divide in due. Un corredo
+*letterale* è ammesso: è un valore statico come `[[0, 1], [1, 2]]`, che quel
+`let` accetta già. Un corredo *generato* è errore, perché il `let` locale entra
+nello scope com'è scritto — nessuna seam lo espande — quindi il generatore non
+verrebbe mai eseguito e non avrebbe un seed da cui pescare. Va dichiarato in un
+`let:` di documento o di gruppo, che lo risolve al load e lo inietta già fatto.
 
 ### L'indicizzazione
 
