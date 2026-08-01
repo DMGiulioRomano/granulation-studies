@@ -89,6 +89,18 @@ def test_due_gruppi_indipendenti_stesso_nome():
 
 # --- guardie -----------------------------------------------------------------
 
+def test_manopola_di_gruppo_derivata_che_chiama_una_primitiva():
+    """Issue #45: ``resolve_knobs`` e' condiviso, il bug si vede anche qui."""
+    streams = {
+        "cugini": _stream(
+            {"centro": 40, "clamp": {"expr": "min(centro, 30)"}},
+            axes={"density": {"base": {"expr": "clamp"}}},
+        )
+    }
+    out = apply_group_let(streams)
+    assert out["cugini"]["axes"]["density"]["base"]["let"]["clamp"] == 30
+
+
 def test_manopola_di_gruppo_non_referenziata_e_errore():
     streams = {
         "cugini": _stream(

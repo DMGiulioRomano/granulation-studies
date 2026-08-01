@@ -597,6 +597,11 @@ streams:
   pescaggio per voce). `values`/`ramp` sono rifiutati (possiederebbero un
   conteggio ridondante con `over`: `n` resta di `over`/`spread.n`). Vedi «Il
   blocco `spread:`».
+- **Manopola derivata.** Un nodo-expr in un `let:` (documento o gruppo) che
+  referenzia altre manopole; l'ordine di dichiarazione non conta, la
+  risoluzione è per dipendenze. Vale l'intera grammatica di `expr`, **funzioni
+  primitive comprese** (`{expr: "min(centro, 30)"}`): il nome di una funzione è
+  un termine della grammatica, non una manopola da dichiarare.
 - **Aritmetica inviluppo⊕scalare.** Una manopola-envelope combinata con uno
   scalare nell'espressione (`comune + divarico`, `comune * k`) agisce sulle y,
   i tempi restano — è l'aritmetica su Env del nodo-expr. Così la forma comune
