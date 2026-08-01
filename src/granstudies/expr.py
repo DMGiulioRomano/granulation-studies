@@ -438,12 +438,18 @@ def _element(name: str, corredo: Dict[str, Any], idx: Any) -> Any:
             )
         idx = int(idx)
     elems = corredo_values(corredo)
-    if not 0 <= idx < len(elems):
+    size = len(elems)
+    # Indici negativi: ``ratio[-1]`` e' l'ultimo. Servono a invertire il senso
+    # di lettura del corredo; su un corredo ciclico cadono fuori gratis dal
+    # modulo (``-1 % 4 == 3``).
+    pos = idx + size if idx < 0 else idx
+    if not 0 <= pos < size:
         raise ValueError(
-            f"expr: indice {idx} fuori dal corredo '{name}', che ha "
-            f"{len(elems)} elementi (indici 0..{len(elems) - 1})."
+            f"expr: indice {idx} fuori dal corredo '{name}', che ha {size} "
+            f"elementi (indici 0..{size - 1} dall'inizio, -1..-{size} dalla "
+            "fine)."
         )
-    return elems[idx]
+    return elems[pos]
 
 
 def _call(node: ast.Call, scope: Mapping[str, Any]) -> Any:

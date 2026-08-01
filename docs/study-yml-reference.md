@@ -321,6 +321,44 @@ errore, e la quantizzazione si scrive con `//` o `floor()`, che sono già in
 grammatica. Un indice **costante** funziona in ogni scope in cui il corredo è
 visibile — `ratio[0]` in un `axes:` è legittimo e verificabile al load.
 
+### L'indice della voce
+
+Dentro uno `spread:` l'indice naturale è `i`, che lo spread già fornisce agli
+`expr` di `spread.let` e delle strategy `expr` di `over`. È lì che il corredo
+dà il suo risultato: **una voce, un elemento**.
+
+```yaml
+streams:
+  accordo:
+    let:
+      ratio: {list: [2, 3, 4, 7]}
+    spread:
+      n: 4
+      let:
+        r: {expr: "ratio[i]"}          # il rapporto di QUESTA voce
+      over:
+        base.pointer.start: {values: [0.1, 0.3, 0.5, 0.7]}
+    axes:
+      density:
+        base: {expr: "d * r"}          # periodi 2s, 3s, 4s, 7s
+```
+
+Un corredo di **documento** è leggibile da due gruppi diversi, ognuno con il
+proprio `i`.
+
+**Indici negativi**: `ratio[-1]` è l'ultimo, `ratio[-len]` il primo — servono a
+invertire il senso di lettura (`ratio[-1 - i]`). Oltre la lunghezza, in
+entrambi i versi, è errore.
+
+**Il possesso di `n` non cambia.** Il corredo non possiede mai il conteggio
+della popolazione, nemmeno quando è l'unico indicizzato: `n` resta di
+`over`/`spread.n`. Ne segue che
+
+- `spread.n > len` su corredo finito è **errore** alla voce che esce dal
+  corredo, con la voce, il nome del corredo e la lunghezza nel messaggio;
+- `spread.n < len` **non** è errore: un corredo sotto-consumato è legittimo —
+  si sta ascoltando un sottoinsieme dell'accordo.
+
 **La linea di confine, dichiarata:** *una lista non è mai un valore*. Può
 comparire **solo** come `nome[expr]`. Non si passa a una funzione, non ci si fa
 aritmetica, non si restituisce — `ratio * 2` e `min(ratio, 2)` sono errore. Così
@@ -729,8 +767,11 @@ streams:
   **voce**: un valore per stream generato, iniettato per nome. Due forme, come
   le strategy: `expr` con `i`/`n` (deterministico per voce) o **banda** (un
   pescaggio per voce). `values`/`ramp` sono rifiutati (possiederebbero un
-  conteggio ridondante con `over`: `n` resta di `over`/`spread.n`). Vedi «Il
-  blocco `spread:`».
+  conteggio ridondante con `over`: `n` resta di `over`/`spread.n`); un
+  **corredo** è rifiutato per un'altra ragione — a livello di voce `i` è già
+  fissato, quindi una lista qui non avrebbe nessun indice da cui essere letta:
+  si dichiara nel `let:` di gruppo e si legge da qui con `{expr: "ratio[i]"}`.
+  Vedi «Il blocco `spread:`».
 - **Aritmetica inviluppo⊕scalare.** Una manopola-envelope combinata con uno
   scalare nell'espressione (`comune + divarico`, `comune * k`) agisce sulle y,
   i tempi restano — è l'aritmetica su Env del nodo-expr. Così la forma comune
