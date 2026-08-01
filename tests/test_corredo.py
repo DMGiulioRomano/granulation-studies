@@ -1175,3 +1175,93 @@ def expand_spreads_from(doc):
     from granstudies.spread import expand_spreads
 
     return expand_spreads(apply_group_let(doc["streams"]))
+
+
+# =============================================================================
+# Il `let` locale di un nodo-expr: letterale sì, generato no
+# =============================================================================
+
+def _nodo(ratio):
+    return {"expr": "ratio[1] * 10", "let": {"ratio": ratio}}
+
+
+def test_corredo_letterale_nel_let_locale_e_ammesso():
+    """E' un valore statico come `[[0, 1], [1, 2]]`, che quel `let` accetta
+    gia': vietarlo sarebbe arbitrario."""
+    assert eval_expr("ratio[1] * 10", {"ratio": {"list": [2, 3, 4]}}) == 30
+
+
+def test_corredo_letterale_nel_let_locale_attraversa_il_load():
+    doc = apply_document_let(
+        {"study_id": "t", "axes": {"density": {"base": _nodo({"list": [2, 3, 4]})}}}
+    )
+    assert doc["axes"]["density"]["base"]["let"]["ratio"] == {"list": [2, 3, 4]}
+
+
+def test_corredo_generato_nel_let_locale_e_errore_al_load():
+    """Il `let` locale entra nello scope com'e' scritto — `resolve_knobs` lo
+    fonde grezzo — quindi il generatore non verrebbe mai eseguito e non
+    avrebbe un seed da cui pescare."""
+    gen = {"list": {"ramp": {"start": 1, "stop": 8, "step": 1}}}
+    with pytest.raises(SpecError, match="senza espansione e senza seed"):
+        apply_document_let(
+            {"study_id": "t", "axes": {"density": {"base": _nodo(gen)}}}
+        )
+
+
+def test_il_messaggio_distingue_il_letterale_dal_generato():
+    gen = {"list": {"n": 3, "base": 2, "range": 6}}
+    with pytest.raises(SpecError) as exc:
+        apply_document_let(
+            {"study_id": "t", "axes": {"density": {"base": _nodo(gen)}}}
+        )
+    msg = str(exc.value)
+    assert "letterale" in msg and "let:' di documento o di gruppo" in msg
+
+
+def test_la_guardia_trova_il_nodo_ovunque_sia_nel_documento():
+    gen = {"list": {"ramp": {"start": 1, "stop": 8, "step": 1}}}
+    with pytest.raises(SpecError, match="senza seed"):
+        apply_document_let(
+            {
+                "study_id": "t",
+                "streams": {
+                    "cugini": {
+                        "spread": {
+                            "n": 2,
+                            "let": {"r": _nodo(gen)},
+                            "over": {"base.pan": {"expr": "i"}},
+                        },
+                        "axes": {"density": {"base": {"expr": "r"}}},
+                    }
+                },
+            }
+        )
+
+
+def test_un_corredo_di_documento_generato_resta_ammesso():
+    """La guardia colpisce il `let` *locale* di un nodo-expr, non il blocco
+    `let:` che lo risolve al load."""
+    doc = apply_document_let(
+        {
+            "study_id": "t",
+            "let": {"ratio": {"list": {"ramp": {"start": 1, "stop": 8, "step": 1}}}},
+            "axes": {"density": {"base": {"expr": "ratio[0]"}}},
+        }
+    )
+    assert doc["axes"]["density"]["base"]["let"]["ratio"]["list"] == [
+        1, 2, 3, 4, 5, 6, 7, 8
+    ]
+
+
+def test_la_guardia_e_idempotente_dopo_l_iniezione():
+    """`_write_expanded_streams` richiama `apply_document_let`: l'iniezione
+    mette in scope corredi gia' *risolti*, cioe' letterali, quindi la seconda
+    passata non produce falsi positivi."""
+    d = {
+        "study_id": "t",
+        "let": {"ratio": {"list": {"ramp": {"start": 1, "stop": 8, "step": 1}}}},
+        "axes": {"density": {"base": {"expr": "ratio[0]"}}},
+    }
+    uno = apply_document_let(d)
+    assert apply_document_let(uno) == uno

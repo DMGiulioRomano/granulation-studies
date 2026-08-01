@@ -27,7 +27,14 @@ import copy
 from typing import Any, Dict
 
 from .errors import ErrCtx
-from .expr import CYCLE_KEY, eval_expr, is_corredo, is_cyclic, is_expr_node
+from .expr import (
+    CORREDO_KEY,
+    CYCLE_KEY,
+    eval_expr,
+    is_corredo,
+    is_cyclic,
+    is_expr_node,
+)
 from .inject import expr_names as _expr_names
 from .inject import inject as _inject
 from .inject import referenced_names as _referenced_names
@@ -56,6 +63,7 @@ def apply_document_let(
     # Guardie che girano al load, prima che l'iniezione consumi i nomi
     # (documento e gruppo spariscono dopo).
     _check_shadowing(data, ctx)
+    _check_local_corredi(data, ctx)
     _check_moved_corredi(data, ctx)
     block = data.get("let")
     if block is None:
@@ -201,6 +209,55 @@ def _check_shadowing(data: Dict[str, Any], ctx: ErrCtx) -> None:
                 key=("streams", name, "spread", "let", var),
                 hint="dai un nome diverso alla manopola di voce.",
             )
+
+
+def _check_local_corredi(data: Dict[str, Any], ctx: ErrCtx) -> None:
+    """Un corredo **generato** nel ``let`` locale di un nodo-expr e' errore.
+
+    Un corredo *letterale* li' e' invece ammesso, e non per concessione: e' un
+    valore statico come ``[[0, 1], [1, 2]]``, che quel ``let`` accetta gia'.
+    Vietarlo sarebbe arbitrario.
+
+    Un corredo *generato* no, e la ragione e' precisa: il ``let`` locale entra
+    nello scope **cosi' com'e'** — ``resolve_knobs`` lo fonde grezzo
+    (``scope.update(node.get("let") or {})``), e nessuna seam lo espande —
+    quindi il generatore non verrebbe mai eseguito e non avrebbe un seed da
+    cui pescare. E' lo stesso motivo per cui un nodo-generatore in un ``let``
+    e' errore, non un'analogia con esso.
+
+    Gira **al load, sul documento grezzo**, come ``_check_shadowing``: dopo
+    l'iniezione un corredo scritto a mano e uno iniettato sono
+    indistinguibili, ma l'iniezione mette in scope corredi gia' *risolti*,
+    cioe' letterali — quindi rieseguire questa guardia non produce falsi
+    positivi.
+    """
+    _walk_expr_lets(data, ctx, ())
+
+
+def _walk_expr_lets(node: Any, ctx: ErrCtx, key: tuple) -> None:
+    """Cerca i ``let`` locali dei nodi-expr, ovunque siano nel documento."""
+    if is_expr_node(node):
+        local = node.get("let")
+        if isinstance(local, dict):
+            for name, val in local.items():
+                if is_corredo(val) and isinstance(val.get(CORREDO_KEY), dict):
+                    raise ctx.err(
+                        f"expr: il corredo '{name}' nel 'let' locale di un "
+                        "nodo-expr e' generato — il 'let' locale entra nello "
+                        "scope com'e' scritto, senza espansione e senza seed, "
+                        "quindi il generatore non verrebbe mai eseguito.",
+                        key=key + ("let", name),
+                        hint="dichiaralo in un 'let:' di documento o di gruppo, "
+                        "che lo risolve al load e lo inietta gia' fatto; un "
+                        "corredo *letterale* qui e' invece ammesso, come ogni "
+                        "altro valore statico.",
+                    )
+    if isinstance(node, dict):
+        for k, v in node.items():
+            _walk_expr_lets(v, ctx, key + (k,))
+    elif isinstance(node, list):
+        for k, v in enumerate(node):
+            _walk_expr_lets(v, ctx, key + (k,))
 
 
 # Chiavi di ``percorso:`` che non sono traiettorie (vedi ``percorso.py``).

@@ -231,12 +231,32 @@ spread:
 | `let:` di documento | sì — condiviso da più gruppi, ognuno con il proprio `i` |
 | `let:` di gruppo | sì — il caso tipico |
 | `spread.let` | **no** |
-| il `let` interno di un nodo-expr | no (invariato: nodo-generatore in `let` è errore) |
+| il `let` interno di un nodo-expr | corredo **letterale** sì; corredo **generato** no |
 
 Il divieto in `spread.let` non è una restrizione prudenziale: a livello di voce
 `i` è già fissato, quindi una lista lì non avrebbe nessun indice da cui essere
 letta, se non costanti. Il significato di `spread.let` — *un valore per voce* —
 resta intatto.
+
+Nel `let` interno di un nodo-expr la riga si divide in due, e non per analogia
+con il divieto dei nodi-generatore — un corredo *non è* un nodo-generatore, ed è
+esattamente perché `list` non sta in `Y_GENERATOR_KEYS` che si è scelto quella
+chiave. Le due metà hanno ragioni diverse:
+
+- un corredo **letterale** è ammesso. È un valore statico come `[[0, 1], [1, 2]]`,
+  che quel `let` accetta già: vietarlo sarebbe arbitrario;
+- un corredo **generato** è errore, e la ragione è precisa: `resolve_knobs` fonde
+  il `let` locale nello scope **grezzo** (`scope.update(node.get("let") or {})`),
+  e nessuna seam lo espande — il generatore non verrebbe mai eseguito e non
+  avrebbe un seed da cui pescare. È lo stesso motivo per cui un nodo-generatore
+  lì è errore, non un'analogia con esso.
+
+Il controllo va dove va quello dell'ombreggiatura, che ha lo stesso problema e lo
+risolve così: **al load, sul documento grezzo**, prima che l'iniezione consumi i
+nomi (`_check_shadowing`). Che dopo l'iniezione un corredo scritto a mano e uno
+iniettato siano indistinguibili non impedisce il controllo — lo colloca. E non
+produce falsi positivi rieseguito: l'iniezione mette in scope corredi già
+*risolti*, cioè letterali.
 
 **Più corredi nello stesso `let:` sono ammessi**, ed è lì che il meccanismo dà
 il suo risultato più interessante (vedi «Isoritmo» sotto).
@@ -434,17 +454,28 @@ altezze. È il caso che il nome `cugini` descrive.
     spread:
       n: 12
       let:
-        r:   {expr: "ratio[i]"}
-        dur: {expr: "durate[i]"}
+        r: {expr: "ratio[i]"}
       over:
-        duration: {expr: "dur * 8"}
+        duration: {expr: "durate[i] * 8"}   # il corredo di gruppo, non spread.let
     stack:
       density: {unit: s, base: {expr: "d * r"}}
 ```
 
-Due corredi ciclici di lunghezze coprime scorrono uno contro l'altro: la coppia
-(rapporto, durata) non si ripete prima della voce `lcm(4, 3) = 12`. È **color e
-talea** — l'isoritmo cade fuori da due `cycle: true`, senza sintassi dedicata.
+Due corredi ciclici di lunghezze coprime scorrono uno contro l'altro: la
+**sequenza** delle coppie (rapporto, durata) ha periodo `lcm(4, 3) = 12`. Le
+singole coppie invece si ripetono prima — `(2, 1)` torna già alla voce 4 —
+perché `durate` contiene due volte il valore `1`; ed è anche la descrizione
+musicalmente corretta, perché nella talea i valori si ripetono eccome: quello
+che cicla con periodo `lcm` è la **relazione di fase** fra color e talea. È
+**color e talea**, e cade fuori da due `cycle: true` senza sintassi dedicata.
+
+Nota sullo scope: `over` legge `durate[i]` direttamente invece di passare da una
+manopola di `spread.let`. In `_plan_entry` i valori di `over` e quelli di
+`spread.let` sono calcolati come **fratelli**, indipendenti; `expand_spreads`
+scrive i primi sui path e solo dopo inietta i secondi nei nodi-expr del
+generato, quindi quando `over` viene valutato `spread.let` non esiste ancora. Il
+corredo di gruppo è invece già in scope lì — le manopole di gruppo sono iniettate
+nelle espressioni dell'entry prima dell'espansione.
 
 ---
 
