@@ -9,11 +9,16 @@ point comune a tutti i comandi *prima* dei rispettivi processi: agganciarlo
 dentro ``resolve_streams`` sarebbe sbagliato perche' versions risolve gli
 stream dopo la propria iniezione, e il riposo sovrascriverebbe il movimento.
 
-Valori ammessi (increment 1): scalare, envelope disegnato (lista ``[[t, v],
-...]`` o ``[a, b]``, forma statica di Env che ``eval_expr`` consuma tale e
-quale), o nodo-expr derivato (``{expr: "..."}``) che referenzia altre manopole.
-Le manopole pescate/generate (banda) sono un incremento successivo (servono
-seed + ``expand_env``).
+Valori ammessi: scalare, envelope disegnato (lista ``[[t, v], ...]`` o
+``[a, b]``, forma statica di Env che ``eval_expr`` consuma tale e quale),
+envelope **generato** (``{linear_env: ...}``, con dentro il vocabolario dei
+generatori: lista, ``values``, ``ramp``, banda), la forma compatta a cicli, o
+nodo-expr derivato (``{expr: "..."}``) che referenzia altre manopole.
+
+Un ``let:`` e' il punto in cui la posizione **non** disambigua i due ruoli di
+``values`` (issue #47): ``{values: [2, 3, 4, 7]}`` si legge come una lista e
+produceva un envelope. Per questo qui il generatore nudo e' errore e il ruolo
+va marcato: ``{linear_env: [2, 3, 4, 7]}``.
 """
 from __future__ import annotations
 
@@ -29,6 +34,7 @@ from .value_generators import (
     expand_env,
     is_compact_env,
     is_generator_node,
+    is_linear_env_node,
     stable_seed,
 )
 from .yaml_loc import Locations
@@ -91,7 +97,13 @@ def resolve_knobs(
     for name, val in block.items():
         if is_expr_node(val):
             pending[name] = val
-        elif is_generator_node(val) or is_compact_env(val):
+        elif (
+            is_linear_env_node(val) or is_generator_node(val) or is_compact_env(val)
+        ):
+            # ``is_generator_node`` entra qui apposta: un generatore nudo in un
+            # ``let:`` e' Famiglia 1 in posizione di Famiglia 2, e ``expand_env``
+            # alza l'errore di migrazione verso ``linear_env:`` (issue #47) —
+            # qui, dove c'e' il contesto per dire *quale* manopola.
             with ctx.wrapping(key=key_prefix + (name,)):
                 resolved[name] = expand_env(
                     val, seed=stable_seed(f"{seed_prefix}:{name}"), path=name

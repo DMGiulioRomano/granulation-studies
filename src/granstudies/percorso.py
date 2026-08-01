@@ -128,8 +128,11 @@ def _trajectory(name: str, cfg: Any, ctx: ErrCtx) -> Trajectory:
             "scrivono con generatori di sequenze.",
             key=key,
             hint="'values'/'ramp' appartengono ai contesti indicizzati "
-            "('onset' enumerato, 'spread', 'versions'); una traiettoria e' "
-            "una legge sul tempo: banda ('base') o nodo-expr.",
+            "('onset' enumerato, 'spread', 'versions', gli assi), dove la "
+            "posizione k e' l'elemento k; una traiettoria e' una legge sul "
+            "tempo: banda ('base') o nodo-expr. Per una forma disegnata "
+            "scrivila come Env dentro 'base' (es. 'base: {linear_env: "
+            "[0, 1, 0]}').",
         )
     if "expr" in cfg:
         markers = sorted(Y_GENERATOR_KEYS & set(cfg))

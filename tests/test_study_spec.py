@@ -698,7 +698,7 @@ def test_nested_base_resolved_at_parse():
         "base": {"sample": "x.wav"},
         "axes": {
             "a": {"path": "density", "baseline": 20, "n": 4,
-                  "base": {"values": [1, 10]}, "range": 0},
+                  "base": {"linear_env": [1, 10]}, "range": 0},
         },
     }
     spec = parse_study_spec(d)
@@ -715,7 +715,8 @@ def test_nested_double_resolution_parse_equals_assembly():
         "base": {"sample": "x.wav"},
         "axes": {
             "a": {"path": "density", "baseline": 20, "n": 4,
-                  "base": {"n": 3, "base": 0, "range": 9}, "range": 1},
+                  "base": {"linear_env": {"n": 3, "base": 0, "range": 9}},
+                  "range": 1},
         },
         "stack": {},
     }
@@ -749,10 +750,10 @@ def test_stream_override_merges_nested_env_dict():
         "base": {"sample": "x.wav"},
         "axes": {
             "a": {"path": "density", "baseline": 20, "n": 4,
-                  "base": {"type": "step", "values": [0, 9]}, "range": 0},
+                  "base": {"type": "step", "linear_env": [0, 9]}, "range": 0},
         },
         "sweep": {"mode": "envelope", "orders": [1]},
-        "streams": {"prova": {"axes": {"a": {"base": {"values": [1, 8]}}}}},
+        "streams": {"prova": {"axes": {"a": {"base": {"linear_env": [1, 8]}}}}},
     }
     spec = [s for s in resolve_streams(data) if s.stream_id == "prova"][0]
     # type: step ereditato dal merge -> plateau: [1, 1, 1, 8]
