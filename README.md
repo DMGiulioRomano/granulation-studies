@@ -49,10 +49,19 @@ make render-final STUDY=1-10ms
 - `generated/<id>/` — output rigenerabile (git-ignorato).
 - `samples/` — corpus audio (file git-ignorati, solo manifest versionato).
 - `engine/` — submodule del motore (pin su commit).
-- `tests/` — suite pytest (mirror di `src/`).
+- `tests/` — suite pytest (mirror di `src/`); `tests/e2e/` — end-to-end.
 
 ## Test
 
 ```bash
-make tests        # gate obbligatorio prima di ogni commit
+make tests        # suite veloce: gate obbligatorio prima di ogni commit
+make e2e-tests    # end-to-end: study.yml -> CLI -> YAML -> audio
 ```
+
+Le due suite sono separate. `make tests` gira su unit e golden e non tocca
+disco fuori da `tmp_path`. `make e2e-tests` (marker `e2e`, cartella
+`tests/e2e/`) parte da uno `study.yml` **su disco** in un repo temporaneo,
+passa dalla CLI vera — `sweep`, `stack`, `versions`, `percorso`, `render` — e
+dove il submodule `engine/` è inizializzato arriva al file audio, che verifica
+non vuoto e non silenzioso. Senza il submodule i test che renderizzano si
+skippano da soli, quelli sulla generazione restano.
