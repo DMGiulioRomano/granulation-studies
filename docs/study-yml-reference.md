@@ -772,6 +772,11 @@ streams:
   fissato, quindi una lista qui non avrebbe nessun indice da cui essere letta:
   si dichiara nel `let:` di gruppo e si legge da qui con `{expr: "ratio[i]"}`.
   Vedi «Il blocco `spread:`».
+- **Manopola derivata.** Un nodo-expr in un `let:` (documento o gruppo) che
+  referenzia altre manopole; l'ordine di dichiarazione non conta, la
+  risoluzione è per dipendenze. Vale l'intera grammatica di `expr`, **funzioni
+  primitive comprese** (`{expr: "min(centro, 30)"}`): il nome di una funzione è
+  un termine della grammatica, non una manopola da dichiarare.
 - **Aritmetica inviluppo⊕scalare.** Una manopola-envelope combinata con uno
   scalare nell'espressione (`comune + divarico`, `comune * k`) agisce sulle y,
   i tempi restano — è l'aritmetica su Env del nodo-expr. Così la forma comune
