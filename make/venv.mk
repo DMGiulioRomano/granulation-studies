@@ -22,5 +22,13 @@ submodule:
 tests: $(MARKER)
 	$(PY) -m pytest
 
+# End-to-end (issue #4): study.yml su disco -> CLI -> YAML -> audio. Piu' lenti
+# della suite veloce perche' renderizzano davvero, e servono il submodule
+# engine (senza, i test che passano dall'engine si skippano da soli).
+# MPLBACKEND=Agg: nessun display in CI ne' sotto make.
+.PHONY: e2e-tests
+e2e-tests: $(MARKER)
+	MPLBACKEND=Agg $(PY) -m pytest -m e2e
+
 .PHONY: venv
 venv: $(MARKER)

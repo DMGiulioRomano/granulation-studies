@@ -32,7 +32,8 @@ include make/clean.mk
 help:
 	@echo "granulation-studies — target disponibili:"
 	@echo "  make setup                 venv + submodule engine + dipendenze"
-	@echo "  make tests                 esegue pytest (gate pre-commit)"
+	@echo "  make tests                 esegue pytest, suite veloce (gate pre-commit)"
+	@echo "  make e2e-tests             end-to-end: CLI + render reale (lento, serve engine)"
 	@echo "  make sweep STUDY=...        genera le varianti YAML  (STUDY = nome cartella in studies/, es. 1-10ms)"
 	@echo "  make stack STUDY=...        genera il documento multi-stream (stack, puro)"
 	@echo "  make versions STUDY=...     genera il documento delle versioni (prodotto cartesiano)"

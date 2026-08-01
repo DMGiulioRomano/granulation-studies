@@ -64,5 +64,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      - name: Esegui i test
+      - name: Esegui i test (suite veloce)
         run: python -m pytest
+
+      # Gli e2e (issue #4) partono da uno study.yml su disco, passano per la
+      # CLI e renderizzano audio vero. Girano qui perche' la CI ha accesso al
+      # submodule privato engine via ENGINE_PAT; senza, si skipperebbero.
+      - name: Esegui i test end-to-end
+        run: python -m pytest -m e2e
