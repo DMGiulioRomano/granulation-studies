@@ -401,3 +401,25 @@ def test_volume_envelope_riceve_offset_su_tutti_i_breakpoint(buffer_dir):
     ys = [y for _, y in forte["volume"]["points"]]
     assert ys[0] - ys[1] == pytest.approx(6.0)      # la forma resta
     assert ys[0] == pytest.approx(-20.0, abs=0.5)   # traslata in blocco
+
+
+def test_loop_unit_fuori_vocabolario_non_si_stima(buffer_dir_2s):
+    """Un refuso nell'unita' non va letto come se fosse 'secondi': l'engine
+    quel documento lo rifiuta al parse, quindi qui non c'e' un livello da
+    compensare. Senza il controllo, 'normalised' stimerebbe in secondi e la
+    compensazione uscirebbe da un punto del sample che nessuno leggera'."""
+    refuso = stream(0.6, pointer={"start": 0.6, "loop_unit": "normalised"})
+    buono = stream(0.6, pointer={"start": 0.6, "loop_unit": "normalized"})
+    applicati = gainmap.compensate(
+        [refuso, buono], samples_dir=buffer_dir_2s, alpha=1.0
+    )
+    assert applicati[0] is None
+    assert refuso["volume"] == 0.0
+
+
+def test_loop_unit_assente_resta_stimabile(buffer_dir_2s):
+    """L'assenza non e' un refuso: e' il default 'seconds' dell'engine."""
+    a = stream(0.1, pointer={"start": 0.1})
+    b = stream(0.6, pointer={"start": 1.6})
+    gainmap.compensate([a, b], samples_dir=buffer_dir_2s, alpha=1.0)
+    assert b["volume"] - a["volume"] == pytest.approx(20.0, abs=0.5)

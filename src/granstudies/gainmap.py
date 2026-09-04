@@ -152,6 +152,11 @@ def _start_sample(stream: Mapping[str, Any], sr: int, n_frames: int) -> Optional
     ``pointer.loop_unit`` non eredita da ``time_mode``: assente vale
     ``seconds``, come nell'engine da v9 (issue #222). Solo ``normalized``
     legge lo start come frazione della durata del sample.
+
+    Un'unita' fuori da ``LOOP_UNITS`` non si stima: l'engine la rifiuta al
+    parse, quindi qui non c'e' un livello da compensare — solo un numero
+    letto con una regola che nessuno applichera'. ``None`` e' la via che il
+    modulo usa gia' per "non stimabile".
     """
     pointer = stream.get("pointer")
     if not isinstance(pointer, Mapping):
@@ -160,6 +165,8 @@ def _start_sample(stream: Mapping[str, Any], sr: int, n_frames: int) -> Optional
     if start is None:
         return None
     unit = pointer.get("loop_unit")
+    if unit is not None and unit not in bounds_mod.LOOP_UNITS:
+        return None
     pos = start * n_frames if unit == "normalized" else start * sr
     if not 0 <= pos < n_frames:
         return None
