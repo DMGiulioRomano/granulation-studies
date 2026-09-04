@@ -47,9 +47,9 @@ axes:
     values: [0,.25,0,1,0,.75]
 
 # Spread condiviso dalle zone d'ombra: 7 punti di lettura del sample su
-# base.pointer.start (secondi assoluti: pointer.loop_unit scavalca il
-# time_mode:normalized dello stream solo per pointer.start/loop, vedi PGE
-# src/pge/controllers/pointer_controller.py:174-186). Ogni stream che lo
+# base.pointer.start (secondi assoluti: pointer.loop_unit vale 'absolute',
+# e da PGE v9 non erediterebbe comunque da time_mode, vedi PGE
+# src/pge/controllers/pointer_controller.py). Ogni stream che lo
 # riattiva con `spread:` genera 7 cugini identici salvo il punto di lettura
 # nel sample; nomi generati a indice (non configurabile), indice -> secondi:
 #   1=0.1  2=0.25  3=0.4  4=0.55  5=0.8  6=0.915  7=1.1
