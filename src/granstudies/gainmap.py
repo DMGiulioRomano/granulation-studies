@@ -149,9 +149,9 @@ def _window_samples(stream: Mapping[str, Any], sr: int) -> Optional[int]:
 def _start_sample(stream: Mapping[str, Any], sr: int, n_frames: int) -> Optional[int]:
     """Punto di lettura in campioni.
 
-    ``pointer.loop_unit`` assente ricade su ``time_mode`` dello stream, come fa
-    l'engine (pointer_controller.py:185): con ``normalized`` lo start e' una
-    frazione della durata del sample, altrimenti secondi assoluti.
+    ``pointer.loop_unit`` non eredita da ``time_mode``: assente vale
+    ``seconds``, come nell'engine da v9 (issue #222). Solo ``normalized``
+    legge lo start come frazione della durata del sample.
     """
     pointer = stream.get("pointer")
     if not isinstance(pointer, Mapping):
@@ -159,7 +159,7 @@ def _start_sample(stream: Mapping[str, Any], sr: int, n_frames: int) -> Optional
     start = _median_value(pointer.get("start"))
     if start is None:
         return None
-    unit = pointer.get("loop_unit") or stream.get("time_mode")
+    unit = pointer.get("loop_unit")
     pos = start * n_frames if unit == "normalized" else start * sr
     if not 0 <= pos < n_frames:
         return None

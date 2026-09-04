@@ -20,6 +20,14 @@ def buffer_dir(tmp_path):
     return str(tmp_path)
 
 
+@pytest.fixture
+def buffer_dir_2s(tmp_path):
+    """Come ``buffer_dir`` ma lungo 2 s: distingue i secondi dalla frazione."""
+    x = np.concatenate([np.full(SR, 0.8), np.full(SR, 0.08)])
+    sf.write(tmp_path / "t.wav", x, SR)
+    return str(tmp_path)
+
+
 def stream(start, *, onset=0.0, duration=10.0, volume=0.0, **kw):
     s = {
         "sample": "t.wav",
@@ -353,12 +361,23 @@ def test_grain_duration_in_millisecondi(buffer_dir):
 
 
 def test_pointer_start_normalized(buffer_dir):
-    """Senza ``loop_unit`` lo start ricade su ``time_mode``, come nell'engine:
-    normalized = frazione della durata del sample."""
-    forte = stream(0.1, pointer={"start": 0.1})       # 0.1 * 1 s
-    debole = stream(0.6, pointer={"start": 0.6})
+    """``loop_unit: normalized`` = frazione della durata del sample."""
+    forte = stream(0.1, pointer={"start": 0.1, "loop_unit": "normalized"})
+    debole = stream(0.6, pointer={"start": 0.6, "loop_unit": "normalized"})
     gainmap.compensate([forte, debole], samples_dir=buffer_dir, alpha=1.0)
     assert debole["volume"] - forte["volume"] == pytest.approx(20.0, abs=0.5)
+
+
+def test_loop_unit_non_eredita_da_time_mode(buffer_dir_2s):
+    """Senza ``loop_unit`` lo start e' in secondi anche sotto
+    ``time_mode: normalized`` (engine #222, da v9). Su un buffer di 2 s
+    start 0.6 cade nella prima meta' (forte) se letto in secondi, nella
+    seconda (debole) se letto come frazione: sotto la vecchia ereditarieta'
+    i due stream leggerebbero lo stesso punto e la differenza sarebbe zero."""
+    secondi = stream(0.6, pointer={"start": 0.6})                        # 0.6 s
+    frazione = stream(0.6, pointer={"start": 0.6, "loop_unit": "normalized"})
+    gainmap.compensate([secondi, frazione], samples_dir=buffer_dir_2s, alpha=1.0)
+    assert frazione["volume"] - secondi["volume"] == pytest.approx(20.0, abs=0.5)
 
 
 def test_grain_duration_envelope_usa_la_mediana(buffer_dir):
