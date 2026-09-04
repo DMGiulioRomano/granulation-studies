@@ -13,10 +13,12 @@ import pytest
 
 from granstudies.diagnostics import (
     CORREDO_SOTTO_CONSUMATO,
+    LOOP_UNIT_IMPLICITO,
     Diagnostic,
     WarnCtx,
     check_corredi,
     check_corredi_combos,
+    check_loop_unit,
     dedup,
 )
 
@@ -294,3 +296,116 @@ def test_il_rimedio_len_solo_quando_consumerebbe_davvero():
     assert "len(ratio)" in (ds[0].hint or "")
     ds = check_corredi(_doc(streams=_gruppo(CORREDO, 2, expr="ratio[i + 2]")))
     assert "len(ratio)" not in (ds[0].hint or "")
+
+
+# --- loop_unit implicito sotto time_mode: normalized (PGE #222) ---------------
+
+def _ptr(base_pointer=None, time_mode="normalized", streams=None, **rest):
+    """Documento minimo con un ``base.pointer`` e, opzionalmente, stream."""
+    base = {"sample": "x.wav", "duration": 6}
+    if time_mode is not None:
+        base["time_mode"] = time_mode
+    if base_pointer is not None:
+        base["pointer"] = base_pointer
+    return _doc(streams=streams, base=base, **rest)
+
+
+def test_normalized_senza_loop_unit_produce_un_rilievo():
+    """Il caso della migrazione v9: 0.3 non e' piu' il 30% del sample."""
+    items = check_loop_unit(_ptr({"speed_ratio": 0, "start": 0.3}))
+    assert len(items) == 1
+    assert items[0].code == LOOP_UNIT_IMPLICITO
+    assert "start" in items[0].msg
+
+
+@pytest.mark.parametrize("unit", ["absolute", "seconds", "normalized"])
+def test_loop_unit_dichiarato_non_produce_rilievi(unit):
+    """Dichiarata l'unita', il numero non e' piu' ambiguo — qualunque sia."""
+    assert check_loop_unit(_ptr({"start": 0.3, "loop_unit": unit})) == []
+
+
+@pytest.mark.parametrize("time_mode", ["absolute", None])
+def test_fuori_da_normalized_nessun_rilievo(time_mode):
+    """``loop_unit`` assente vale 'seconds' e ``time_mode`` non c'entra piu':
+    il rilievo ha senso solo dove la vecchia ereditarieta' cambiava i numeri."""
+    assert check_loop_unit(_ptr({"start": 0.3}, time_mode=time_mode)) == []
+
+
+def test_lo_zero_non_produce_rilievi():
+    """Uno zero e' zero sotto qualunque fattore di scala: senza questo filtro
+    sarebbero undici avvisi su stream in cui non si muove un campione (e' lo
+    stesso filtro del ``_warn_loop_unit_migration`` dell'engine)."""
+    assert check_loop_unit(_ptr({"speed_ratio": 0, "start": 0})) == []
+
+
+@pytest.mark.parametrize("key", ["start", "loop_start", "loop_end", "loop_dur"])
+def test_tutte_le_chiavi_dello_scope(key):
+    """Lo scope e' quello del PointerController, non il solo ``start``."""
+    items = check_loop_unit(_ptr({key: 0.3}))
+    assert len(items) == 1 and key in items[0].msg
+
+
+def test_un_generatore_al_posto_dello_scalare_e_comunque_ambiguo():
+    """Un envelope o un generatore non si valuta qui: si avvisa lo stesso,
+    che e' la direzione sicura (un falso positivo si zittisce con una riga)."""
+    assert len(check_loop_unit(_ptr({"start": [[0, 0.1], [1, 0.9]]}))) == 1
+
+
+def test_il_loop_unit_del_base_copre_lo_stream_che_ridichiara_solo_start():
+    """Il caso di ``studies/stack``: ``loop_unit`` sta nel base di documento,
+    lo stream sovrascrive solo ``start``. Il deep-merge glielo porta."""
+    doc = _ptr(
+        {"speed_ratio": 0, "loop_unit": "normalized", "start": 0.3},
+        streams={"cugini": {"base": {"pointer": {"start": 0.1}}}},
+    )
+    assert check_loop_unit(doc) == []
+
+
+def test_lo_stream_che_aggiunge_la_posizione_si_prende_il_rilievo():
+    doc = _ptr({"speed_ratio": 0}, streams={"cugini": {"base": {"pointer": {"start": 0.1}}}})
+    items = check_loop_unit(doc)
+    assert len(items) == 1 and items[0].stream == "cugini"
+
+
+def test_un_difetto_del_base_non_si_moltiplica_per_gli_stream():
+    """Il rilievo e' del documento: tre stream non fanno tre avvisi."""
+    doc = _ptr(
+        {"start": 0.3},
+        streams={"a": {}, "b": {}, "c": {}},
+    )
+    items = check_loop_unit(doc)
+    assert len(items) == 1 and items[0].stream is None
+
+
+def test_uno_spread_sulla_posizione_e_ambiguo_quanto_uno_scalare():
+    """La posizione puo' arrivare da ``spread.over``, non solo scritta a mano."""
+    doc = _ptr(
+        {"speed_ratio": 0},
+        streams={
+            "cugini": {
+                "spread": {"n": 3, "over": {"base.pointer.start": {"ramp": {"start": 0.1, "step": 0.1}}}}
+            }
+        },
+    )
+    items = check_loop_unit(doc)
+    assert len(items) == 1 and items[0].stream == "cugini"
+
+
+def test_il_rilievo_riporta_la_riga():
+    from granstudies.yaml_loc import loads
+
+    data, locs = loads(
+        "base:\n"
+        "  sample: x.wav\n"
+        "  time_mode: normalized\n"
+        "  pointer:\n"
+        "    start: 0.3\n"
+    )
+    items = check_loop_unit(data, locs)
+    assert len(items) == 1 and items[0].line == 4
+
+
+def test_un_documento_senza_pointer_non_fa_esplodere_il_controllo():
+    assert check_loop_unit(_doc(base={"sample": "x.wav"})) == []
+    assert check_loop_unit({}) == []
+    assert check_loop_unit(_ptr("non-un-dict")) == []
