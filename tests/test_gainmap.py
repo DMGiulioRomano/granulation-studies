@@ -20,6 +20,14 @@ def buffer_dir(tmp_path):
     return str(tmp_path)
 
 
+@pytest.fixture
+def buffer_dir_2s(tmp_path):
+    """Come ``buffer_dir`` ma lungo 2 s: distingue i secondi dalla frazione."""
+    x = np.concatenate([np.full(SR, 0.8), np.full(SR, 0.08)])
+    sf.write(tmp_path / "t.wav", x, SR)
+    return str(tmp_path)
+
+
 def stream(start, *, onset=0.0, duration=10.0, volume=0.0, **kw):
     s = {
         "sample": "t.wav",
@@ -353,12 +361,23 @@ def test_grain_duration_in_millisecondi(buffer_dir):
 
 
 def test_pointer_start_normalized(buffer_dir):
-    """Senza ``loop_unit`` lo start ricade su ``time_mode``, come nell'engine:
-    normalized = frazione della durata del sample."""
-    forte = stream(0.1, pointer={"start": 0.1})       # 0.1 * 1 s
-    debole = stream(0.6, pointer={"start": 0.6})
+    """``loop_unit: normalized`` = frazione della durata del sample."""
+    forte = stream(0.1, pointer={"start": 0.1, "loop_unit": "normalized"})
+    debole = stream(0.6, pointer={"start": 0.6, "loop_unit": "normalized"})
     gainmap.compensate([forte, debole], samples_dir=buffer_dir, alpha=1.0)
     assert debole["volume"] - forte["volume"] == pytest.approx(20.0, abs=0.5)
+
+
+def test_loop_unit_non_eredita_da_time_mode(buffer_dir_2s):
+    """Senza ``loop_unit`` lo start e' in secondi anche sotto
+    ``time_mode: normalized`` (engine #222, da v9). Su un buffer di 2 s
+    start 0.6 cade nella prima meta' (forte) se letto in secondi, nella
+    seconda (debole) se letto come frazione: sotto la vecchia ereditarieta'
+    i due stream leggerebbero lo stesso punto e la differenza sarebbe zero."""
+    secondi = stream(0.6, pointer={"start": 0.6})                        # 0.6 s
+    frazione = stream(0.6, pointer={"start": 0.6, "loop_unit": "normalized"})
+    gainmap.compensate([secondi, frazione], samples_dir=buffer_dir_2s, alpha=1.0)
+    assert frazione["volume"] - secondi["volume"] == pytest.approx(20.0, abs=0.5)
 
 
 def test_grain_duration_envelope_usa_la_mediana(buffer_dir):
@@ -382,3 +401,25 @@ def test_volume_envelope_riceve_offset_su_tutti_i_breakpoint(buffer_dir):
     ys = [y for _, y in forte["volume"]["points"]]
     assert ys[0] - ys[1] == pytest.approx(6.0)      # la forma resta
     assert ys[0] == pytest.approx(-20.0, abs=0.5)   # traslata in blocco
+
+
+def test_loop_unit_fuori_vocabolario_non_si_stima(buffer_dir_2s):
+    """Un refuso nell'unita' non va letto come se fosse 'secondi': l'engine
+    quel documento lo rifiuta al parse, quindi qui non c'e' un livello da
+    compensare. Senza il controllo, 'normalised' stimerebbe in secondi e la
+    compensazione uscirebbe da un punto del sample che nessuno leggera'."""
+    refuso = stream(0.6, pointer={"start": 0.6, "loop_unit": "normalised"})
+    buono = stream(0.6, pointer={"start": 0.6, "loop_unit": "normalized"})
+    applicati = gainmap.compensate(
+        [refuso, buono], samples_dir=buffer_dir_2s, alpha=1.0
+    )
+    assert applicati[0] is None
+    assert refuso["volume"] == 0.0
+
+
+def test_loop_unit_assente_resta_stimabile(buffer_dir_2s):
+    """L'assenza non e' un refuso: e' il default 'seconds' dell'engine."""
+    a = stream(0.1, pointer={"start": 0.1})
+    b = stream(0.6, pointer={"start": 1.6})
+    gainmap.compensate([a, b], samples_dir=buffer_dir_2s, alpha=1.0)
+    assert b["volume"] - a["volume"] == pytest.approx(20.0, abs=0.5)

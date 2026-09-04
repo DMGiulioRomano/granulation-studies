@@ -76,7 +76,7 @@ def _emit(items) -> None:
 
 
 def _load_specs(study: str, stream: str | None = None) -> list:
-    from .diagnostics import check_corredi
+    from .diagnostics import check_corredi, check_loop_unit
     from .study_spec import resolve_streams
     from .yaml_loc import load as load_with_locations
 
@@ -85,6 +85,9 @@ def _load_specs(study: str, stream: str | None = None) -> list:
     # Diagnostica non fatale sul documento **grezzo**: apply_document_let
     # consuma e rimuove il blocco ``let:``, dove i corredi sono dichiarati.
     _emit(check_corredi(data, locs))
+    # Passa da qui ogni comando che risolve gli stream, quindi il rilievo su
+    # 'loop_unit' si vede allo sweep come allo stack, non solo al render.
+    _emit(check_loop_unit(data, locs))
     # Manopole di documento (`let:` top-level): risolte e iniettate al load,
     # prima del parse degli stream — il riposo che versions/percorso poi muovono.
     data = apply_document_let(data, locs)

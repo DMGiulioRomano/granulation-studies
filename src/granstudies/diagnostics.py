@@ -30,6 +30,13 @@ from .yaml_loc import Locations
 # Codici dei controlli: stabili, pensati per essere filtrati da un consumatore
 # (un editor che spegne una regola, un test che ne cerca una).
 CORREDO_SOTTO_CONSUMATO = "corredo-sotto-consumato"
+LOOP_UNIT_IMPLICITO = "loop-unit-implicito"
+
+# Le chiavi del blocco pointer che 'loop_unit' interpreta: lo stesso
+# ``_LOOP_UNIT_SCOPE`` del PointerController dell'engine. ``start`` e' fra
+# queste benche' loop non sia — e' una posizione nel sample come loop_start,
+# stesso dominio e stessa unita'.
+LOOP_UNIT_SCOPE = ("start", "loop_start", "loop_end", "loop_dur")
 
 
 @dataclass(frozen=True)
@@ -393,3 +400,127 @@ def check_corredi_combos(
         moved = {**(data.get("let") or {}), **combo}
         out.extend(check_corredi({**data, "let": moved}, locs))
     return dedup(out)
+
+
+# --- loop_unit implicito sotto time_mode: normalized -------------------------
+
+
+def _si_muove(value: Any) -> bool:
+    """True se leggere il valore come frazione invece che in secondi lo sposta.
+
+    E' lo specchio di ``_rescaling_would_change`` nel ``PointerController``
+    dell'engine, e per restare utile deve avere le sue stesse due esclusioni:
+    uno zero e' zero sotto qualunque fattore di scala, e cio' che la
+    conversione lascia passare invariato non si muoveva nemmeno prima.
+    """
+    if value is None or isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return value != 0
+    # Envelope, breakpoint, blocco compatto, generatore di spread: qui non si
+    # valuta niente, si avvisa. E' la direzione sicura — un falso positivo si
+    # zittisce con la riga che il rilievo chiede comunque di scrivere.
+    return isinstance(value, (list, dict))
+
+
+def _posizioni_puntate(node: Any) -> set:
+    """Le chiavi dello scope raggiunte da un path puntato ``base.pointer.<k>``.
+
+    La posizione non e' sempre scritta dentro un blocco ``pointer:``: puo'
+    arrivare da ``spread.over``, da ``versions:`` o da ``percorso:``, che la
+    nominano col path puntato. Cercarla ovunque costa una visita e copre le
+    tre forme senza conoscerle una per una.
+    """
+    found: set = set()
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if isinstance(key, str) and key.startswith(_PUNTATO):
+                coda = key[len(_PUNTATO):]
+                if coda in LOOP_UNIT_SCOPE:
+                    found.add(coda)
+            found |= _posizioni_puntate(value)
+    elif isinstance(node, (list, tuple)):
+        for value in node:
+            found |= _posizioni_puntate(value)
+    return found
+
+
+_PUNTATO = "base.pointer."
+
+
+def check_loop_unit(
+    data: Dict[str, Any], locs: Locations | None = None
+) -> List[Diagnostic]:
+    """Le posizioni nel sample lasciate senza unita' sotto ``normalized``.
+
+    Da PGE v9 (engine #222) ``pointer.loop_unit`` **non eredita** piu' da
+    ``time_mode``: assente vale ``seconds``. Uno stream ``normalized`` che
+    dichiara una posizione senza ``loop_unit`` non e' un errore — l'engine
+    non ferma niente — ma con ogni probabilita' dice un numero diverso da
+    quello che chi l'ha scritto intendeva: `0.3` era il 30% del sample, ora
+    sono 0.3 secondi. Il sintomo classico da warning: il documento ha un
+    significato, ma non quello voluto.
+
+    L'engine lo segnala a render time; il rilievo serve prima, e serve qui,
+    perche' quell'avviso arriva in mezzo al log di uno sweep da trenta
+    varianti mentre questo si legge quando lo study si scrive.
+
+    Il controllo guarda il ``pointer`` **efficace** di ogni stream (base di
+    documento deep-mergiato con l'override), che e' anche l'unico modo di
+    vedere il caso di ``studies/stack``: ``loop_unit`` nel base, la sola
+    ``start`` nello stream.
+
+    Limite accettato: un ``loop_unit`` scritto per path puntato non viene
+    visto e produce un falso positivo. E' la direzione sicura, e la forma non
+    esiste nel corpus — ``loop_unit`` e' un meta-parametro, non un asse.
+    """
+    if not isinstance(data, dict):
+        return []
+    base = data.get("base") if isinstance(data.get("base"), dict) else {}
+    base_ptr = base.get("pointer") if isinstance(base.get("pointer"), dict) else {}
+    streams = data.get("streams") if isinstance(data.get("streams"), dict) else {}
+    # Le posizioni che il documento dichiara fuori dagli stream (spread
+    # globale, versions, percorso) valgono per tutti, come il base.
+    puntate_doc = _posizioni_puntate(
+        {k: v for k, v in data.items() if k != "streams"}
+    )
+    ctx = WarnCtx(locs=locs)
+    # ``streams:`` assente = un solo stream, quello del base (resolve_streams).
+    voci = list(streams.items()) or [(None, {})]
+    for name, entry in voci:
+        entry = entry if isinstance(entry, dict) else {}
+        override = entry.get("base") if isinstance(entry.get("base"), dict) else {}
+        ov_ptr = (
+            override.get("pointer")
+            if isinstance(override.get("pointer"), dict)
+            else {}
+        )
+        if override.get("time_mode", base.get("time_mode")) != "normalized":
+            continue
+        pointer = {**base_ptr, **ov_ptr}
+        if "loop_unit" in pointer:
+            continue
+        # Rilevare sul pointer mergiato, attribuire sull'override: uno stream
+        # che riporta a zero una posizione del base non ha niente da migrare.
+        puntate = puntate_doc | _posizioni_puntate(entry)
+        chiavi = {k for k in LOOP_UNIT_SCOPE if _si_muove(pointer.get(k))} | puntate
+        if not chiavi:
+            continue
+        proprie = {k for k in chiavi if k in ov_ptr} | _posizioni_puntate(entry)
+        # Un difetto del base non si moltiplica per gli stream che lo ereditano:
+        # senza stream il rilievo e' identico e ``dedup`` lo riduce a uno.
+        ctx.stream = name if proprie else None
+        quali = ", ".join(sorted(chiavi))
+        ctx.warn(
+            f"'pointer' dichiara {quali} sotto 'time_mode: normalized' senza "
+            "'loop_unit': da PGE v9 quei valori sono letti in secondi "
+            "assoluti, non come frazione della durata del sample.",
+            code=LOOP_UNIT_IMPLICITO,
+            key=("base", "pointer"),
+            hint=(
+                "aggiungi 'loop_unit: normalized' al blocco pointer per la "
+                "frazione della durata del sample, 'loop_unit: seconds' per i "
+                "secondi. Prima di PGE v9 l'unita' ereditava da 'time_mode'."
+            ),
+        )
+    return dedup(ctx.items)

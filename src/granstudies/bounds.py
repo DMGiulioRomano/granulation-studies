@@ -42,6 +42,21 @@ MIN_GRAIN_SAMPLES = 4
 # sono in secondi: qui vive la conversione verso quel dominio.
 GRAIN_DURATION_UNITS = ("seconds", "samples", "milliseconds")
 
+# Unita' ammesse per ``pointer.loop_unit``, come l'engine
+# (``pge.controllers.pointer_controller.LOOP_UNITS``). ``seconds`` e'
+# la grafia canonica, ``absolute`` l'alias storico — stessa lettura, valori
+# gia' in secondi assoluti. Fuori di qui l'engine alza
+# ``InvalidFieldValueError``: la chiave e' scritta, quindi il refuso va
+# nominato invece di ricadere in silenzio su "assoluto".
+LOOP_UNITS = ("seconds", "absolute", "normalized")
+
+# L'unita' che vale quando ``loop_unit`` e' assente. Da PGE v9 (engine #222)
+# NON eredita piu' da ``time_mode``: le due chiavi governano assi diversi con
+# riferimenti diversi — ``time_mode`` scala l'asse X (tempo) degli envelope
+# sulla duration dello stream, ``loop_unit`` l'asse Y (valore) sulla durata
+# del file audio.
+LOOP_UNIT_DEFAULT = "seconds"
+
 _MS_PER_SECOND = 1000.0
 
 
