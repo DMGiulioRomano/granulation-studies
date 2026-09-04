@@ -28,13 +28,22 @@ base:                             # *
                                  #   dichiara una propria (override in `streams:`) eredita
                                  #   questa. Con `stack:` ogni stream deve risolverne una.
   sample: corpus.wav             # *
-  time_mode: normalized
+  time_mode: normalized          # asse X: scala i *tempi* degli envelope sulla duration
+                                 #   dello stream. Non tocca le posizioni nel sample —
+                                 #   quelle sono `pointer.loop_unit`, asse Y.
   volume: -6
   grain:
     envelope: hanning
   pointer:
+    loop_unit: normalized        # unita' di start/loop_*: `normalized` = frazione della
+                                 #   durata del sample, `seconds` (alias `absolute`) =
+                                 #   secondi. Assente vale `seconds`: da PGE v9 NON eredita
+                                 #   piu' da `time_mode` (engine #222), quindi sotto
+                                 #   `time_mode: normalized` va dichiarata o gli stessi
+                                 #   numeri cambiano significato in silenzio — `0.3` era
+                                 #   il 30% del sample, senza unita' sono 0.3 secondi.
     speed_ratio: 0
-    start: 0.3
+    start: 0.3                   # posizione di lettura, nell'unita' qui sopra
 
 # Assi (parametri sotto osservazione). axes conosce solo Y: quali parametri si
 # muovono, con che valori e con che curva. Il timing (plateau/transition) è del
@@ -1045,6 +1054,11 @@ chi sta sotto viene mascherato. Con `pointer.speed_ratio: 0` quel livello è
 prevedibile prima del render: l'RMS del buffer sulla finestra che il grano
 legge davvero, `[pointer.start, pointer.start + grain.duration)`. Il blocco
 attiva la stima e scrive un offset di `volume` per stream.
+
+La finestra si colloca nell'unita' dichiarata da `pointer.loop_unit` (assente =
+secondi, **non** ereditata da `time_mode`: engine #222). Un'unita' fuori
+vocabolario non viene stimata — l'engine rifiuta quel documento al parse, quindi
+non c'e' un livello da compensare.
 
 Vale solo sui documenti **multi-stream** (`stack`, `versions`, `percorso`): la
 compensazione è relativa, uno stream da solo non maschera nessuno. Blocco
