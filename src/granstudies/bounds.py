@@ -17,10 +17,16 @@ from typing import Dict, Optional, Tuple
 # Path noti al registry dell'engine ma assenti da ``ALL_SCHEMAS`` (non hanno
 # una voce di schema YAML): unica tabella rimasta a mano. Tutto il resto viene
 # da ``engine_bridge.parameter_schema_paths``.
+#
+# La chiave e' il path dove l'engine *legge* il valore, non il nome del
+# registry: ``num_voices``/``scatter`` stanno nel blocco ``voices:``
+# (``Stream._init_voice_manager``). ``pointer_deviation`` resta fuori: il suo
+# valore non ha una chiave YAML (``_dummy_fixed_zero_``) e la sola manopola,
+# la banda ``pointer.offset_range``, ha i bounds ``min_range``/``max_range``,
+# non quelli del valore che ``bounds_for`` legge.
 _EXTRA_PATHS: Dict[str, str] = {
-    "pointer.deviation": "pointer_deviation",
-    "num_voices": "num_voices",
-    "scatter": "scatter",
+    "voices.num_voices": "num_voices",
+    "voices.scatter": "scatter",
 }
 
 _PITCH_PREFIX = "pitch."

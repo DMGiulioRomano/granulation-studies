@@ -999,7 +999,7 @@ def _grain_dict(values):
 
 
 def test_grain_duration_seconds_sotto_il_millisecondo_ammessa():
-    # Il floor e' quello dinamico dell'engine (4 campioni a 48k ~ 8.3e-5 s),
+    # Il floor e' quello dinamico dell'engine (1 campione a 48k ~ 2.1e-5 s),
     # non il fallback statico di 1 ms: valori che l'engine renderizza non
     # devono essere rifiutati al parse solo perche' espressi in secondi.
     spec = parse_study_spec(_grain_dict([0.0001, 0.001]))
