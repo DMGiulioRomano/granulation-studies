@@ -1,6 +1,9 @@
 # Output rigenerabile della pipeline
 /generated/
 
+# Log dell'engine lanciato senza --log-dir (default: logs/ nel cwd)
+/logs/
+
 # Audio del corpus: versioniamo solo il manifest, non i file
 /samples/**
 !/samples/README.md
