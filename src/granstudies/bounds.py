@@ -108,6 +108,31 @@ def known_paths() -> frozenset:
     )
 
 
+# Path il cui dominio non e' un intervallo ma un elenco di nomi: i bounds non
+# li descrivono (il registry da' a ``grain.envelope`` un (0, 0) che non dice
+# niente di una finestra), il catalogo dell'engine si'. Stessa regola dei
+# bounds: nessuna tabella copiata qui, solo il ponte verso
+# ``engine_bridge``.
+_CATEGORICAL: Dict[str, str] = {
+    "grain.envelope": "window_names",
+}
+
+
+def categorical_domain(path: str) -> Optional[frozenset]:
+    """I nomi ammessi per un path categoriale, o ``None`` se il path non lo e'.
+
+    Un asse su un path categoriale enumera stringhe (``[hanning, expodec, ...]``)
+    invece di numeri: e' il dominio che lo dice, non il tipo dei valori scritti.
+    Su un path categoriale ``violation``/``clamp`` non confrontano nulla.
+    """
+    fn = _CATEGORICAL.get(path)
+    if fn is None:
+        return None
+    from . import engine_bridge
+
+    return getattr(engine_bridge, fn)()
+
+
 def bounds_for(
     path: str,
     output_sr: Optional[int] = None,
@@ -189,7 +214,12 @@ def _bounds_in_unit(
     confronto — il minimo di ``loop_dur`` (0.005 s) rifiuterebbe una frazione
     che l'engine accetta. Lo stesso per un'unita' fuori vocabolario, che
     l'engine rifiuta per conto suo (come ``gainmap``, che non la stima).
+
+    Un path categoriale (``categorical_domain``) non ha un intervallo: ``None``,
+    il valore e' un nome e la sua ammissione la decide il catalogo, al parse.
     """
+    if path in _CATEGORICAL:
+        return None
     sr = output_sr or default_output_sr()
     if path in _LOOP_SCALED_PATHS:
         if unit is not None and unit not in _LOOP_UNITS_IN_SECONDS:
