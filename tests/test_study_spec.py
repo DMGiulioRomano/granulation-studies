@@ -987,3 +987,38 @@ def test_top_level_duration_still_wins_over_base_as_entry_override():
     d = _base_duration_dict()
     d["duration"] = 999
     assert parse_study_spec(d).duration == 999
+
+
+def _grain_dict(values):
+    return {
+        "study_id": "s",
+        "base": {"density": 20},
+        "axes": {"grain.duration": {"baseline": 0.01, "values": values}},
+        "sweep": {"orders": [0]},
+    }
+
+
+def test_grain_duration_seconds_sotto_il_millisecondo_ammessa():
+    # Il floor e' quello dinamico dell'engine (4 campioni a 48k ~ 8.3e-5 s),
+    # non il fallback statico di 1 ms: valori che l'engine renderizza non
+    # devono essere rifiutati al parse solo perche' espressi in secondi.
+    spec = parse_study_spec(_grain_dict([0.0001, 0.001]))
+    assert spec.axes[0].values[0] == 0.0001
+
+
+def test_grain_duration_sotto_il_floor_dinamico_rifiutata():
+    with pytest.raises(ValueError, match="fuori bounds"):
+        parse_study_spec(_grain_dict([1e-6]))
+
+
+def test_pitch_ratio_fuori_bounds_rifiutato():
+    # pitch.ratio non era mappato: qualunque valore passava. I bounds sono
+    # quelli di RatioUnit nell'engine (0.001, 8.0).
+    d = {
+        "study_id": "s",
+        "base": {"density": 20},
+        "axes": {"pitch.ratio": {"baseline": 1.0, "values": [20]}},
+        "sweep": {"orders": [0]},
+    }
+    with pytest.raises(ValueError, match="fuori bounds"):
+        parse_study_spec(d)

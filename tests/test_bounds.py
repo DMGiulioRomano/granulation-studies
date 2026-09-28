@@ -10,12 +10,25 @@ def test_bounds_from_engine_registry():
 
 
 def test_bounds_nested_path():
+    # Senza output_sr esplicito vale comunque il floor dinamico dell'engine
+    # (1 campione), non il fallback statico di 1 ms.
     lo, hi = bounds.bounds_for("grain.duration")
-    assert lo == 0.001 and hi == 10.0
+    assert lo == 1 / bounds.default_output_sr()
+    assert hi == 10.0
 
 
-def test_bounds_manual_pitch():
+def test_bounds_pitch_dall_engine():
     assert bounds.bounds_for("pitch.semitones") == (-36.0, 36.0)
+    assert bounds.bounds_for("pitch.cents") == (-3600.0, 3600.0)
+    # pitch.ratio prima non era mappato: nessun bound, nessuna validazione.
+    assert bounds.bounds_for("pitch.ratio") == (0.001, 8.0)
+    assert bounds.bounds_for("pitch.inesistente") is None
+
+
+def test_bounds_path_dagli_schema_engine():
+    # Path che la vecchia tabella a mano non copriva.
+    assert bounds.bounds_for("pointer.loop_dur") == (0.005, None)
+    assert "grain.reverse" in bounds.known_paths()
 
 
 def test_bounds_unknown_path():
@@ -31,9 +44,9 @@ def test_clamp_within_and_outside():
 
 
 def test_bounds_grain_duration_dynamic_output_sr():
-    # con output_sr il minimo e' il floor dello studio: 4 campioni (bounds.py)
+    # con output_sr il minimo e' il floor dinamico dell'engine: 1 campione
     lo, hi = bounds.bounds_for("grain.duration", output_sr=48000)
-    assert lo == bounds.MIN_GRAIN_SAMPLES / 48000
+    assert lo == 1 / 48000
     assert hi == 10.0
 
 
@@ -63,8 +76,8 @@ def test_grain_duration_factor_unita_sconosciuta():
 
 
 def test_clamp_grain_duration_in_millisecondi():
-    # bounds in secondi [4/48000, 10] -> in ms [1/12, 10000]
-    lo_ms = bounds.MIN_GRAIN_SAMPLES / 48000 * 1000
+    # bounds in secondi [1/48000, 10] -> in ms
+    lo_ms = 1 / 48000 * 1000
     assert bounds.clamp(
         "grain.duration", 50, output_sr=48000, unit="milliseconds"
     ) == 50
@@ -82,7 +95,7 @@ def test_clamp_grain_duration_in_campioni():
     ) == 50
     assert bounds.clamp(
         "grain.duration", 1, output_sr=48000, unit="samples"
-    ) == pytest.approx(bounds.MIN_GRAIN_SAMPLES)
+    ) == pytest.approx(1)
 
 
 def test_span():
@@ -100,3 +113,70 @@ def test_volume_ceiling_patched():
     # il patch vale anche per il parser dell'engine, non solo per bounds.py
     assert get_parameter_definition("volume").max_val == VOLUME_MAX_DB
     assert bounds.clamp("volume", 999) == VOLUME_MAX_DB
+
+
+def test_bounds_pitch_coincidono_con_value_bounds_per_ogni_unita():
+    # Parita' sull'intero vocabolario dell'engine, non solo sulle tre unita'
+    # che il test sopra nomina: un preset nuovo entra da solo.
+    from granstudies.engine_bridge import pitch_bounds, pitch_units
+
+    assert {"semitones", "cents", "ratio"} <= pitch_units()
+    for u in pitch_units():
+        vb = pitch_bounds(u)
+        assert bounds.bounds_for(f"pitch.{u}") == (vb.min_val, vb.max_val), u
+        assert f"pitch.{u}" in bounds.known_paths()
+
+
+def test_path_della_vecchia_tabella_restano_noti():
+    # Derivare la mappa dagli schema non deve far perdere la validazione a
+    # nessun path che la tabella a mano copriva.
+    vecchi = {
+        "density", "distribution", "fill_factor", "grain.duration", "pan",
+        "volume", "pointer.speed_ratio", "pointer.deviation", "scatter",
+        "num_voices", "pitch.semitones", "pitch.cents",
+    }
+    assert vecchi <= bounds.known_paths()
+    assert all(bounds.bounds_for(p) is not None for p in vecchi)
+
+
+def test_bounds_read_direction_dagli_schema_engine():
+    # Issue #68: la tabella a mano non conosceva grain.read_direction.
+    assert bounds.bounds_for("grain.read_direction") == (-1, 1)
+
+
+def test_violation_none_dentro_i_bounds_o_su_path_sconosciuto():
+    assert bounds.violation("density", 50) is None
+    assert bounds.violation("pitch.ratio", 1.0) is None
+    assert bounds.violation("non.esiste", 1e9) is None
+
+
+def test_violation_confronta_nell_unita_e_ritorna_secondi():
+    b = bounds.bounds_for("grain.duration")
+    assert bounds.violation("grain.duration", 20.0) == b
+    assert bounds.violation("grain.duration", 50, unit="milliseconds") is None
+    assert bounds.violation("grain.duration", 20_000, unit="milliseconds") == b
+    assert bounds.violation("grain.duration", 1, unit="samples") is None
+    assert bounds.violation("grain.duration", 0.5, unit="samples") == b
+    # l'unita' vale solo per grain.duration: altrove e' ignorata
+    assert bounds.violation("density", 50, unit="milliseconds") is None
+
+
+@pytest.mark.parametrize(
+    "path, value, unit",
+    [
+        ("density", 50, None),
+        ("density", -5, None),
+        ("grain.duration", 1e-6, None),
+        ("grain.duration", 0.01, None),
+        ("grain.duration", 0.5, "samples"),
+        ("grain.duration", 20_000, "milliseconds"),
+        ("pitch.ratio", 20, None),
+        ("pitch.ratio", 0.5, None),
+        ("pointer.loop_dur", 0.001, None),
+    ],
+)
+def test_violation_e_clamp_concordano(path, value, unit):
+    # Un solo punto di confronto: clamp sposta un valore se e solo se
+    # violation lo dichiara fuori.
+    fuori = bounds.violation(path, value, unit=unit) is not None
+    assert fuori == (bounds.clamp(path, value, unit=unit) != value)
