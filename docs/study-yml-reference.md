@@ -1717,7 +1717,7 @@ make versions STUDY=<id>                  # genera il documento delle versioni (
 make percorso STUDY=<id>                  # genera il documento del percorso (orchestrazione temporale)
 make render STUDY=<id>                    # renderizza gli YAML cambiati (incrementale, in parallelo)
 make render STUDY=<id> FORCE=1            # rirenderizza tutto (es. dopo update engine o sample)
-make render STUDY=<id> JOBS=4             # limita i worker paralleli (default: min(8, cpu))
+make render STUDY=<id> JOBS=4             # budget di processi tra varianti ed engine (default: tutti i core)
 make sv     STUDY=<id>                    # genera .sv per tutte le stream
 make sv     STUDY=<id> STREAM=nome        # genera .sv per una stream
 ```

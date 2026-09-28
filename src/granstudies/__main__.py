@@ -600,7 +600,8 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--cache-dir", default=None,
                     help="directory manifest cache (default: <study>/generated/cache)")
     rp.add_argument("--jobs", type=int, default=None,
-                    help="numero di render in parallelo (default: min(8, cpu))")
+                    help="budget totale di processi, ripartito tra varianti in "
+                         "parallelo e core per singolo render (default: tutti i core)")
 
     dp = sub.add_parser("describe", help="descrittori + results.yml")
     dp.add_argument("study")
