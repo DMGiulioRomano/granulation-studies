@@ -148,7 +148,6 @@ def build_stack_stream(
     # ereditato; non dichiarato (None) lo lascia intatto.
     if spec.onset is not None:
         base["onset"] = spec.onset
-    grain_unit = base.get("grain", {}).get("duration_unit")
     overrides: Dict[str, Any] = {}
     types: Dict[str, str] = {}
     for ax in spec.axes:
@@ -160,7 +159,7 @@ def build_stack_stream(
             x_seed=spec.resolved_x_seed(),
             x_unit=spec.resolved_x_unit(),
         )
-        unit = grain_unit if ax.path == "grain.duration" else None
+        unit = bounds_mod.declared_unit(ax.path, base)
         env = [
             [t, bounds_mod.clamp(
                 ax.path, v, output_sr=output_sr, unit=unit

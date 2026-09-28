@@ -519,3 +519,24 @@ def test_document_duration_unchanged_with_base_duration():
     data["streams"]["voce_b"]["onset"] = 10
     doc = generate_stack_document(_specs(data))
     assert doc["duration"] == 40              # max(onset + duration), invariato
+
+
+def test_document_clamp_loop_normalized_non_tocca_le_frazioni():
+    """Sotto ``loop_unit: normalized`` una frazione piccola di ``loop_dur`` non
+    va portata al minimo in secondi (0.005): la scala e' la durata del sample."""
+    from granstudies.stack import generate_stack_document
+
+    data = _study_data()
+    data["base"]["pointer"] = {"loop_unit": "normalized", "loop_start": 0.1}
+    data["axes"]["loop_dur"] = {
+        "path": "pointer.loop_dur",
+        "baseline": 0.1,
+        "base": 0.002,
+        "range": 0,
+    }
+    data["stack"]["loop_dur"] = {"base": 2, "range": 0}
+
+    doc = generate_stack_document(_specs(data))
+    ld = doc["streams"][0]["pointer"]["loop_dur"]
+    pts = ld["points"] if isinstance(ld, dict) else [[0, ld]]
+    assert all(v == pytest.approx(0.002) for _, v in pts)

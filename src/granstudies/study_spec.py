@@ -252,18 +252,13 @@ def _validate(spec: StudySpec, ctx: ErrCtx, *, orders_explicit: bool = False) ->
         # clampato in render. Il confronto lo fa ``bounds.violation`` (unico
         # punto): qui si passa solo l'unita' dichiarata dallo stream, perche' i
         # bounds sono in secondi ma i valori dell'asse ``grain.duration``
-        # possono essere in campioni o millisecondi (stream.py:415).
-        grain_unit = (
-            spec.base.get("grain", {}).get("duration_unit")
-            if ax.path == "grain.duration"
-            else None
-        )
-        if grain_unit == "seconds":
-            grain_unit = None
+        # possono essere in campioni o millisecondi (stream.py:415) e le
+        # posizioni nel sample frazioni del file (``loop_unit: normalized``).
+        declared = bounds_mod.declared_unit(ax.path, spec.base)
         for v in list(ax.values) + [ax.baseline]:
-            b = bounds_mod.violation(ax.path, v, unit=grain_unit)
+            b = bounds_mod.violation(ax.path, v, unit=declared)
             if b is not None:
-                unit = _UNIT_LABELS.get(grain_unit, "s")
+                unit = _UNIT_LABELS.get(declared, "s")
                 raise ctx.err(
                     f"Asse '{ax.name}' valore {v} {unit} fuori bounds {b} "
                     f"(s) per il path '{ax.path}'.",

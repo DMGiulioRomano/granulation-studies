@@ -1022,3 +1022,28 @@ def test_pitch_ratio_fuori_bounds_rifiutato():
     }
     with pytest.raises(ValueError, match="fuori bounds"):
         parse_study_spec(d)
+
+
+def _loop_dict(loop_unit=None):
+    base = {"density": 20, "pointer": {"loop_start": 0.1}}
+    if loop_unit is not None:
+        base["pointer"]["loop_unit"] = loop_unit
+    return {
+        "study_id": "s",
+        "base": base,
+        "axes": {"pointer.loop_dur": {"baseline": 0.1, "values": [0.003, 0.2]}},
+        "sweep": {"orders": [0]},
+    }
+
+
+def test_loop_dur_normalized_sotto_il_minimo_in_secondi_ammesso():
+    # 0.003 e' una frazione del sample, non 3 ms: il minimo di 0.005 s del
+    # registry non si confronta senza la durata del file.
+    spec = parse_study_spec(_loop_dict("normalized"))
+    assert spec.axes[0].values[0] == 0.003
+
+
+@pytest.mark.parametrize("loop_unit", [None, "seconds", "absolute"])
+def test_loop_dur_in_secondi_sotto_il_minimo_rifiutato(loop_unit):
+    with pytest.raises(ValueError, match="fuori bounds"):
+        parse_study_spec(_loop_dict(loop_unit))

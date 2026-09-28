@@ -173,6 +173,7 @@ def test_violation_confronta_nell_unita_e_ritorna_secondi():
         ("pitch.ratio", 20, None),
         ("pitch.ratio", 0.5, None),
         ("pointer.loop_dur", 0.001, None),
+        ("pointer.loop_dur", 0.001, "normalized"),
     ],
 )
 def test_violation_e_clamp_concordano(path, value, unit):
@@ -180,3 +181,28 @@ def test_violation_e_clamp_concordano(path, value, unit):
     # violation lo dichiara fuori.
     fuori = bounds.violation(path, value, unit=unit) is not None
     assert fuori == (bounds.clamp(path, value, unit=unit) != value)
+
+
+def test_loop_normalized_non_si_confronta_coi_bounds_in_secondi():
+    # loop_dur ha un minimo di 0.005 s, ma sotto 'loop_unit: normalized' il
+    # valore e' una frazione della durata del sample, che qui non si conosce:
+    # 0.003 di un file di 10 s sono 0.03 s, ammessi dall'engine.
+    assert bounds.violation("pointer.loop_dur", 0.003, unit="normalized") is None
+    assert bounds.clamp("pointer.loop_dur", 0.003, unit="normalized") == 0.003
+    # in secondi (esplicito, alias storico o assente = default) il minimo vale
+    for u in (None, "seconds", "absolute"):
+        assert bounds.violation("pointer.loop_dur", 0.003, unit=u) == (0.005, None)
+        assert bounds.clamp("pointer.loop_dur", 0.003, unit=u) == 0.005
+
+
+def test_declared_unit_legge_la_chiave_giusta_per_path():
+    doc = {
+        "grain": {"duration_unit": "milliseconds"},
+        "pointer": {"loop_unit": "normalized"},
+    }
+    assert bounds.declared_unit("grain.duration", doc) == "milliseconds"
+    for k in ("start", "loop_start", "loop_end", "loop_dur"):
+        assert bounds.declared_unit(f"pointer.{k}", doc) == "normalized"
+    assert bounds.declared_unit("density", doc) is None
+    assert bounds.declared_unit("pointer.speed_ratio", doc) is None
+    assert bounds.declared_unit("grain.duration", {}) is None

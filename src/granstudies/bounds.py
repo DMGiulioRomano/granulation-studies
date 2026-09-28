@@ -60,6 +60,18 @@ LOOP_UNITS = ("seconds", "absolute", "normalized")
 # del file audio.
 LOOP_UNIT_DEFAULT = "seconds"
 
+# Le chiavi del blocco pointer che ``loop_unit`` interpreta: lo stesso
+# ``_LOOP_UNIT_SCOPE`` del PointerController dell'engine. ``start`` e' fra
+# queste benche' loop non sia — e' una posizione nel sample come loop_start,
+# stesso dominio e stessa unita'.
+LOOP_UNIT_SCOPE = ("start", "loop_start", "loop_end", "loop_dur")
+
+_LOOP_SCALED_PATHS = frozenset(f"pointer.{k}" for k in LOOP_UNIT_SCOPE)
+
+# Le letture di ``loop_unit`` in cui il valore e' gia' in secondi, cioe'
+# confrontabile coi bounds del registry cosi' com'e'.
+_LOOP_UNITS_IN_SECONDS = tuple(u for u in LOOP_UNITS if u != "normalized")
+
 _MS_PER_SECOND = 1000.0
 
 
@@ -109,7 +121,7 @@ def bounds_for(
 
     ``max`` puo' essere ``None`` (bound dinamico nell'engine): i ``loop_*``
     dipendono dalla durata del sample, che qui non si conosce, quindi di quelli
-    si valida solo il minimo.
+    si valida solo il minimo — e solo in secondi (vedi ``_bounds_in_unit``).
 
     ``output_sr`` di default e' quello di render dell'engine, cosi' il minimo di
     ``grain.duration`` e' sempre il pavimento dinamico (1 campione) e mai il
@@ -140,6 +152,25 @@ def default_output_sr() -> int:
     return _sr()
 
 
+def declared_unit(path: str, doc: Dict) -> Optional[str]:
+    """L'unita' in cui ``doc`` esprime il valore di ``path``, se la dichiara.
+
+    ``grain.duration`` la legge da ``grain.duration_unit`` (``stream.py:415``),
+    le posizioni di ``LOOP_UNIT_SCOPE`` da ``pointer.loop_unit``; sugli altri
+    path nessuna chiave dichiara un'unita' e il ritorno e' ``None``. E'
+    l'argomento ``unit`` di ``violation``/``clamp``: chi chiama non deve
+    sapere quale chiave governa quale path.
+    """
+    if path == "grain.duration":
+        block, key = "grain", "duration_unit"
+    elif path in _LOOP_SCALED_PATHS:
+        block, key = "pointer", "loop_unit"
+    else:
+        return None
+    sub = doc.get(block)
+    return sub.get(key) if isinstance(sub, dict) else None
+
+
 def _bounds_in_unit(
     path: str,
     *,
@@ -148,11 +179,22 @@ def _bounds_in_unit(
 ) -> Optional[Tuple[Optional[float], Optional[float]]]:
     """Bounds del path riportati nell'unita' del valore da confrontare.
 
-    ``unit`` ha senso solo per ``grain.duration`` (l'unico parametro con
-    un'unita' dichiarabile nello YAML, ``stream.py:415``): sugli altri path
-    viene ignorato.
+    ``unit`` e' quella che ``declared_unit`` legge per il path: la
+    ``grain.duration_unit`` per ``grain.duration``, la ``loop_unit`` per le
+    posizioni nel sample; sugli altri path viene ignorato.
+
+    Le posizioni nel sample hanno bounds in secondi che l'engine applica dopo
+    aver riscalato il valore secondo ``loop_unit``. Sotto ``normalized`` la
+    scala e' la durata del sample, che qui non si conosce: ``None``, nessun
+    confronto — il minimo di ``loop_dur`` (0.005 s) rifiuterebbe una frazione
+    che l'engine accetta. Lo stesso per un'unita' fuori vocabolario, che
+    l'engine rifiuta per conto suo (come ``gainmap``, che non la stima).
     """
     sr = output_sr or default_output_sr()
+    if path in _LOOP_SCALED_PATHS:
+        if unit is not None and unit not in _LOOP_UNITS_IN_SECONDS:
+            return None
+        return bounds_for(path, output_sr=sr)
     b = bounds_for(path, output_sr=sr)
     if b is None:
         return None
@@ -198,9 +240,9 @@ def clamp(
 ) -> float:
     """Riporta ``value`` entro i bounds del path (no-op se path sconosciuto).
 
-    ``unit``: unita' in cui e' espresso ``value``, quando il path e'
-    ``grain.duration`` e lo stream dichiara un ``grain.duration_unit``
-    (stream.py:415). Il ritorno resta nell'unita' di partenza.
+    ``unit``: unita' in cui e' espresso ``value`` (vedi ``declared_unit``);
+    il ritorno resta nell'unita' di partenza. Stesso confronto di
+    ``violation``: ``clamp`` sposta un valore se e solo se quella lo rifiuta.
     """
     b = _bounds_in_unit(path, unit=unit, output_sr=output_sr)
     if b is None:

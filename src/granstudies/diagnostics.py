@@ -21,6 +21,7 @@ import ast
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
+from .bounds import LOOP_UNIT_SCOPE
 from .errors import KeyPath, SpecError
 from .expr import corredo_values, is_corredo, is_expr_node
 from .inject import expr_names
@@ -31,12 +32,6 @@ from .yaml_loc import Locations
 # (un editor che spegne una regola, un test che ne cerca una).
 CORREDO_SOTTO_CONSUMATO = "corredo-sotto-consumato"
 LOOP_UNIT_IMPLICITO = "loop-unit-implicito"
-
-# Le chiavi del blocco pointer che 'loop_unit' interpreta: lo stesso
-# ``_LOOP_UNIT_SCOPE`` del PointerController dell'engine. ``start`` e' fra
-# queste benche' loop non sia — e' una posizione nel sample come loop_start,
-# stesso dominio e stessa unita'.
-LOOP_UNIT_SCOPE = ("start", "loop_start", "loop_end", "loop_dur")
 
 
 @dataclass(frozen=True)
