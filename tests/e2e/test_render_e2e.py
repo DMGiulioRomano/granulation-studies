@@ -160,3 +160,47 @@ def test_generated_documents_name_the_corpus_of_the_study(small_sweep):
     doc = small_sweep.document("sweep", "envelope", "e1__density.yml")
     assert doc["streams"][0]["sample"] == small_sweep.sample
     assert os.path.exists(os.path.join(small_sweep.samples, small_sweep.sample))
+
+
+# --- asse categoriale: le finestre dell'engine come valori di test --------------
+
+def test_sweep_con_asse_grain_envelope_genera_e_rende(sweep_repo, tmp_path):
+    """Un asse ``grain.envelope`` enumera nomi: i documenti li portano verbatim
+    e l'engine li rende. La coppia grain.duration x envelope e' quella di
+    mare-nostrum (001-41, ``duration-envelope``), tagliata a due per due.
+    """
+    with open(sweep_repo.fixture("e2e_study.yml"), "r", encoding="utf-8") as fh:
+        data = yaml.safe_load(fh)
+    data["base"]["duration"] = 0.5
+    data["sweep"] = {"mode": "discrete", "orders": [2]}
+    data["axes"] = {
+        "interpolation": "step",
+        "grain.duration": {"values": [0.01, 0.05]},
+        "grain.envelope": {"values": ["expodec", "sinc"]},
+    }
+    sweep_repo.write_study(data)
+    sweep_repo.run("sweep", sweep_repo.study)
+
+    assert sweep_repo.names("sweep", "discrete") == [
+        "o2__grain.duration=0.01__grain.envelope=expodec",
+        "o2__grain.duration=0.01__grain.envelope=sinc",
+        "o2__grain.duration=0.05__grain.envelope=expodec",
+        "o2__grain.duration=0.05__grain.envelope=sinc",
+    ]
+    envs = [
+        sweep_repo.load(p)["streams"][0]["grain"]["envelope"]
+        for p in sweep_repo.written("sweep", "discrete")
+    ]
+    assert envs == ["expodec", "sinc", "expodec", "sinc"]
+
+    manifest = render_variants(
+        variant_dir=sweep_repo.yaml_dir("sweep"),
+        audio_dir=str(tmp_path / "audio"),
+        score_dir=None,
+        samples_dir=sweep_repo.samples,
+    )
+    assert len(manifest) == 4
+    for entry in manifest:
+        assert not entry["skipped"], entry["name"]
+        for path in _audio_paths(entry):
+            _assert_audible(path)
