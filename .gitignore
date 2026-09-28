@@ -1,6 +1,11 @@
 # Output rigenerabile della pipeline
 /generated/
 
+# Log dell'engine. Dalla #251 dell'engine --log-dir e' onorato da entrambi i
+# logger; './logs' resta il default di chi lancia la CLI dell'engine dalla
+# root senza passare il flag (granstudies scrive sotto generated/.logs/).
+/logs/
+
 # Audio del corpus: versioniamo solo il manifest, non i file
 /samples/**
 !/samples/README.md
