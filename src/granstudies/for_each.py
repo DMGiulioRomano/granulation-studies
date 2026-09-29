@@ -49,10 +49,15 @@ BLOCK = "for_each"
 # un marcatore, e' una chiave che il generatore non conosce.
 _GEN_VOCAB = _BAND_KEYS | Y_GENERATOR_KEYS | {"step", "curve"}
 
-# I parametri di ``ramp`` (``value_generators.ramp``): l'unico marcatore il cui
-# valore e' legittimamente un dict, quindi l'unico dove un dict non basta a
-# dire "questo e' uno stato".
-_RAMP_KEYS = frozenset({"start", "stop", "step"})
+# I marcatori il cui valore e' legittimamente un dict, con le chiavi che quel
+# dict ha: i parametri di ``ramp`` (``value_generators.ramp``) e l'Env di una
+# banda (``base: {points, type?, curve?}``, ``value_generators._threshold_at``).
+# Solo li' un dict non basta a dire "questo e' uno stato"; ``values`` non ne
+# prende mai uno.
+_DICT_MARKER_KEYS = {
+    "ramp": frozenset({"start", "stop", "step"}),
+    "base": frozenset({"points", "type", "curve"}),
+}
 
 
 @dataclass(frozen=True)
@@ -144,10 +149,12 @@ def _parse_axis(axis: str, cfg: Any, ctx: ErrCtx) -> List[Combo]:
         with ctx.wrapping(key=key, axis=axis):
             try:
                 values = resolve({"values": cfg} if isinstance(cfg, list) else cfg)
-            except TypeError as e:
+            except (TypeError, LookupError) as e:
                 # ``wrapping`` riavvolge i ValueError; un generatore scritto male
-                # (``ramp`` senza ``step`` o scalare, un ``range`` testuale)
-                # arriva come TypeError, e senza questo usciva come traceback.
+                # arriva come TypeError (``ramp`` senza ``step`` o scalare, un
+                # ``range`` testuale) o come KeyError/IndexError (un Env di banda
+                # senza ``points``, o con ``points`` vuoto), e senza questo
+                # usciva come traceback.
                 raise ValueError(
                     f"{BLOCK}: l'asse '{axis}' ha un generatore che non si "
                     f"risolve ({e}). Forme: 'values: [...]', "
@@ -213,18 +220,20 @@ def _reject_stato_generatore(axis: str, cfg: Any, ctx: ErrCtx, key: tuple) -> No
 
     Quando gli stati hanno *tutti* nomi del vocabolario (il caso tipico: uno
     stato solo, ``values``) di chiavi estranee non ce ne sono, e il segnale e'
-    il valore: uno stato e' un dict di override, e ``values``/``base`` un dict
-    non lo prendono mai. ``ramp`` si', ma con le sue chiavi: un dict che non ne
-    ha nessuna e' un bundle. Senza, ``values`` leggeva le chiavi del bundle
-    come valori — una combinazione sola, un path che crea una chiave alla
-    radice, exit 0 e nessuna patch applicata.
+    il valore: uno stato e' un dict di override, e ``values`` un dict non lo
+    prende mai. ``ramp`` e ``base`` si', ma con le loro chiavi (i parametri
+    della rampa, l'Env della banda): un dict che non ne ha nessuna e' un
+    bundle. Senza, ``values`` leggeva le chiavi del bundle come valori — una
+    combinazione sola, un path che crea una chiave alla radice, exit 0 e
+    nessuna patch applicata.
     """
     if not isinstance(cfg, dict) or not is_generator_node(cfg):
         return
     estranee = sorted(k for k in cfg if k not in _GEN_VOCAB)
     bundle = sorted(
         k for k in Y_GENERATOR_KEYS & cfg.keys()
-        if isinstance(cfg[k], dict) and (k != "ramp" or _RAMP_KEYS.isdisjoint(cfg[k]))
+        if isinstance(cfg[k], dict)
+        and _DICT_MARKER_KEYS.get(k, frozenset()).isdisjoint(cfg[k])
     )
     if not (estranee or bundle):
         return

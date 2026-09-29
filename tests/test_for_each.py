@@ -119,15 +119,39 @@ def test_uno_stato_solo_che_si_chiama_come_un_generatore_e_errore():
     # una combinazione sola, `griglia=axes.density.values`, che scriveva quella
     # stringa in una chiave `griglia` alla radice e usciva 0 con la griglia
     # intatta. `ramp` era un TypeError nudo, `base` la banda a cui manca `n`.
-    # Il segnale e' il valore: uno stato e' un dict di override, e nessun
-    # parametro di `values`/`base` lo e' (quello di `ramp` si', ma con le sue
-    # chiavi).
+    # Il segnale e' il valore: uno stato e' un dict di override, e il
+    # parametro di `values` non lo e' mai (quelli di `ramp` e `base` si', ma
+    # con le loro chiavi).
     for stato in ("values", "base", "ramp"):
         with pytest.raises(SpecError) as e:
             _combos({"griglia": {stato: {"axes.density.values": [5, 10]}}})
         assert "nessuno stato puo' chiamarsi" in str(e.value), stato
     # la rampa vera resta una rampa
     assert len(_combos({"base.volume": {"ramp": {"start": 0, "stop": 12, "step": 6}}})) == 3
+
+
+def test_una_banda_con_base_a_envelope_resta_una_banda():
+    # Il `base` di una banda puo' essere un Env, `{points, type?, curve?}`:
+    # un dict che non e' uno stato. La guardia qui sopra lo prendeva per un
+    # bundle e rifiutava un generatore che `resolve` risolve.
+    for env in ({"points": [[0, 0], [1, 6]]},
+                {"type": "linear", "points": [[0, 0], [1, 6]]}):
+        combos = _combos({"base.volume": {"base": env, "n": 3}})
+        assert [c.label for c in combos] == ["volume=0", "volume=3", "volume=6"], env
+
+
+def test_un_envelope_senza_punti_e_un_errore_con_la_posizione():
+    # Un Env di banda senza `points` (o con `points` vuoto) usciva da
+    # `resolve()` come KeyError/IndexError: fuori da `ctx.wrapping`, cioe'
+    # traceback, come il TypeError dei generatori malformati.
+    for cfg in (
+        {"base": 0, "range": {"type": "step"}, "n": 3},
+        {"base": {"type": "step"}, "n": 3},
+        {"base": {"points": []}, "n": 3},
+    ):
+        with pytest.raises(SpecError) as e:
+            _combos({"base.volume": cfg})
+        assert "base.volume" in str(e.value), cfg
 
 
 def test_values_senza_lista_e_errore():
