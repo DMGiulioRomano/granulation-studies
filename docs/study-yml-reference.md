@@ -1768,6 +1768,8 @@ degenere, non un ramo speciale.
   Dentro un asse, due valori o due stati con la stessa etichetta (un doppione,
   `1` e `1.0`, due nomi che nel nome della cartella si scrivono uguali:
   `voce 1.wav` e `voce_1.wav`) sono errore: finirebbero nella stessa cartella.
+  Anche a meno delle maiuscole (`Rada` e `rada`): sul filesystem di default di
+  macOS sono una cartella sola.
 - Ogni combinazione ha il **suo albero completo** (`yaml/`, `audio/`, `sv/`,
   `cache/`, `score/`) più uno snapshot `study.yml` — il documento **patchato**,
   riscritto a ogni render, che dice da sé i valori di quella combinazione.

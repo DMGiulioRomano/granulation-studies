@@ -237,24 +237,28 @@ def _reject_collisions(names: List[str], axes: List[List[Combo]], ctx: ErrCtx) -
     Dentro un asse, lo stesso vale per i valori: due che si scrivono uguali
     nel nome della cartella (il doppione vero, ``1`` e ``1.0``, due nomi che lo
     slug fonde) darebbero due combinazioni in una cartella sola, e la seconda
-    riscriverebbe la prima.
+    riscriverebbe la prima. "Uguali" a meno delle maiuscole: sul filesystem di
+    default di macOS ``griglia=Rada`` e ``griglia=rada`` sono una cartella.
     """
     seen_label: Dict[str, str] = {}
     seen_path: Dict[str, str] = {}
     for name, parts in zip(names, axes):
-        visti = set()
+        visti: Dict[str, str] = {}
         for part in parts:
-            if part.label in visti:
+            gemella = visti.get(part.label.casefold())
+            if gemella is not None:
+                anche = f" (e '{gemella}')" if gemella != part.label else ""
                 raise ctx.err(
                     f"{BLOCK}: l'asse '{name}' da' due volte l'etichetta "
-                    f"'{part.label}': due combinazioni finirebbero nella stessa "
-                    "cartella.",
+                    f"'{part.label}'{anche}: due combinazioni finirebbero nella "
+                    "stessa cartella.",
                     key=(BLOCK, name),
                     hint="togli il doppione o rinomina lo stato; se due valori "
-                         "diversi nel nome di una cartella si scrivono uguali, "
-                         "passa a un asse a stati nominati e dagli i nomi tu.",
+                         "diversi nel nome di una cartella si scrivono uguali "
+                         "(anche solo a meno delle maiuscole), passa a un asse a "
+                         "stati nominati e dagli i nomi tu.",
                 )
-            visti.add(part.label)
+            visti[part.label.casefold()] = part.label
         etichetta = parts[0].label.split("=", 1)[0]
         if etichetta in seen_label:
             raise ctx.err(

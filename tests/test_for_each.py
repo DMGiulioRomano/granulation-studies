@@ -163,6 +163,17 @@ def test_due_valori_con_la_stessa_etichetta_sono_errore():
         assert "stessa cartella" in str(e.value), block
 
 
+def test_etichette_che_differiscono_solo_per_maiuscole_sono_errore():
+    # Sul filesystem di default di macOS `griglia=Rada` e `griglia=rada` sono
+    # la stessa cartella: la seconda combinazione riscriverebbe la prima in
+    # silenzio, come per il doppione vero.
+    for block in ({"g": {"Rada": {"base.volume": 1}, "rada": {"base.volume": 2}}},
+                  {"base.sample": ["Voce.wav", "voce.wav"]}):
+        with pytest.raises(SpecError) as e:
+            _combos(block)
+        assert "stessa cartella" in str(e.value), block
+
+
 def test_due_assi_sullo_stesso_path_sono_errore():
     # Il valore finale dipenderebbe dall'ordine di dichiarazione, che qui non
     # e' una precedenza dichiarata.
