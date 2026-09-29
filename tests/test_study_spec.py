@@ -1178,3 +1178,15 @@ def test_categorical_axis_values_scalare_chiede_la_lista():
     assert "lista" in e.msg
     assert "[expodec]" in e.hint
 
+
+def test_categorical_axis_camminata_x_non_suggerisce_la_banda():
+    # La camminata-X possiede n e vorrebbe una banda sulla Y: su un asse
+    # categoriale la banda e' vietata, quindi il rimedio non puo' proporla.
+    d = _envelope_axis(["expodec"])
+    d["stack"] = {"grain.envelope": {"base": 2, "range": 1}}
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(d, "s")
+    e = exc.value
+    assert e.key == ("stack", "grain.envelope")
+    assert "banda" not in e.hint
+    assert "stack.grain.envelope" in e.hint

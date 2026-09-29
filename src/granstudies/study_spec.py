@@ -855,13 +855,24 @@ def parse_study_spec(
         else:
             # n-ownership, verso Y: con la camminata-X la Y non puo' contare i valori.
             if x_owns_n(x_cfg):
+                # Su un asse categoriale la banda e' vietata
+                # (``_check_categorical_generator``): il rimedio resta uno.
+                if bounds_mod.categorical_domain(path) is not None:
+                    hint = (
+                        f"togli la camminata-X (stack.{name}): un asse "
+                        "categoriale tiene un nome per stream, senza tempi."
+                    )
+                else:
+                    hint = (
+                        f"usa la banda senza 'n' su axes.{name}, oppure togli "
+                        f"la camminata-X (stack.{name})."
+                    )
                 raise ctx.err(
                     f"Asse '{name}': la camminata-X 'base' possiede n, ma il "
                     f"generatore Y '{gen_key}' enumera i valori.",
                     key=("stack", name),
                     axis=name,
-                    hint=f"usa la banda senza 'n' su axes.{name}, oppure togli "
-                    f"la camminata-X (stack.{name}).",
+                    hint=hint,
                 )
             # Seam sweep/Y dei generatori annidati: i nodi dentro gli Env
             # (base/range della banda, step del ramp) si compilano in
