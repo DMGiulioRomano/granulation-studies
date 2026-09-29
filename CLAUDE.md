@@ -54,6 +54,21 @@ prendono il prefisso `stack_` seguito dallo stesso range: `stack_1-50smp`.
 La cartella `stack` senza suffisso resta quella storica delle curve non
 cartesiane, non legata a un range.
 
+## Assi esterni (`for_each:`)
+
+Il blocco `for_each:` nello `study.yml` dichiara assi le cui combinazioni sono
+patch sul documento: ognuna produce un render intero in
+`generated/<scala>/<label>/`, con dentro anche lo snapshot dello `study.yml`
+patchato. Serve quando il confronto sta nel **riascolto** e non nella
+giustapposizione — `distribution` a 0 / 0.5 / 1 sullo stesso sweep, cinque
+`stack.seed` diversi — o quando la chiave definisce il file stesso. Senza il
+blocco l'albero resta piatto, `generated/<scala>/`.
+`COMBO=<vincoli>` restringe generazione e apertura a una fetta delle
+combinazioni (segmenti di label in and: `COMBO=distribution=1`);
+`make where STUDY=<scala>` stampa le cartelle, una per combinazione, ed e' cio'
+che la funzione zsh `study` legge per sapere cosa aprire. Portato da
+mare-nostrum: vedi `docs/plans/done/for-each.md`.
+
 ## Diario di ascolto
 
 Il diario è unico per lo studio e vive in `studies/ascolto/`:

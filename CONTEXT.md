@@ -83,6 +83,20 @@ La legge dell'intervallo tra un'istanza e la successiva nella strategy a cammina
 Costante = istanze equispaziate; in rampa = accelerando o rallentando; banda con `drift` =
 respiro irregolare ma correlato. È la camminata-X trasposta sull'asse delle istanze.
 
+**asse esterno**:
+Un asse di `for_each:`: i suoi valori non scorrono nel tempo dentro un file ma
+moltiplicano i file, uno per valore. Si sceglie esterno quando il confronto sta nel
+**riascolto** (risentire la stessa cosa da capo con un valore diverso) o quando la chiave
+definisce il file stesso — `seed`, `sample`, `arco`, la durata.
+_Evita_: chiamare asse esterno un asse di `axes:` → quello è interno, e il confronto sta
+nella giustapposizione (lo senti cambiare mentre suona)
+
+**combinazione**:
+Un punto del prodotto degli assi esterni: una patch sullo `study.yml` e un render intero,
+con la sua cartella `generated/<study>/<label>/`. La label dice i valori
+(`distribution=0.5__griglia=rada`). Senza `for_each:` c'è una sola combinazione, vuota.
+_Evita_: chiamarla *versione* → quella è l'esito di `versions`, che vive dentro un file
+
 ## Lo sweep nel tempo
 
 Termini che vivono sull'asse **tempo**: sono le leve dell'envelope nello sweep, non
