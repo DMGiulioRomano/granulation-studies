@@ -233,19 +233,11 @@ def _validate(spec: StudySpec, ctx: ErrCtx, *, orders_explicit: bool = False) ->
         # non un intervallo. I valori sono stringhe, si validano contro il
         # catalogo dell'engine e saltano il confronto bounds, che qui non ha
         # senso. L'interpolazione dev'essere ``step``: fra due finestre non c'e'
-        # rampa da percorrere — ne' un generatore che la percorra (``ramp`` e
-        # banda producono numeri), quindi i nomi si enumerano con ``values``.
+        # rampa da percorrere. Che i nomi arrivino da ``values`` lo garantisce
+        # gia' il parse (``_check_categorical_generator``), prima di espandere
+        # il generatore.
         domain = bounds_mod.categorical_domain(ax.path)
         if domain is not None:
-            if "values" not in ax.generator:
-                raise ctx.err(
-                    f"Asse '{ax.name}': un asse categoriale ('{ax.path}') "
-                    "enumera nomi, non li genera.",
-                    key=("axes", ax.name),
-                    axis=ax.name,
-                    hint="dichiara i nomi con 'values: [...]': 'ramp' e la "
-                    "banda producono numeri.",
-                )
             if ax.interpolation != "step":
                 raise ctx.err(
                     f"Asse '{ax.name}': un asse categoriale vuole "
@@ -309,6 +301,29 @@ def _validate(spec: StudySpec, ctx: ErrCtx, *, orders_explicit: bool = False) ->
                     hint=f"i valori (e il baseline), convertiti in secondi, "
                     f"devono stare in {b}.",
                 )
+
+
+def _check_categorical_generator(
+    name: str, path: str, gen_key: str, ctx: ErrCtx
+) -> None:
+    """Un asse categoriale enumera i nomi con ``values``: non li genera.
+
+    ``ramp`` e la banda producono numeri. Il controllo sta qui e non in
+    ``_validate`` perche' il parse espande il generatore prima di costruire
+    l'asse: su un path categoriale chi sbaglia generatore ci scrive dei nomi
+    (``ramp: {start: hanning, ...}``), e l'aritmetica di ``ramp``/``band`` su
+    una stringa alzerebbe un ``TypeError`` grezzo, senza path ne' rimedio.
+    """
+    if gen_key == "values" or bounds_mod.categorical_domain(path) is None:
+        return
+    raise ctx.err(
+        f"Asse '{name}': un asse categoriale ('{path}') enumera nomi, non li "
+        "genera.",
+        key=("axes", name),
+        axis=name,
+        hint="dichiara i nomi con 'values: [...]': 'ramp' e la banda "
+        "producono numeri.",
+    )
 
 
 def _resolve_baseline(
@@ -800,6 +815,7 @@ def parse_study_spec(
         # canonica values|ramp|band, con i parametri della banda raccolti piatti.
         with ctx.wrapping(key=("axes", name), axis=name):
             gen_key, gen_params = y_generator(cfg)
+        _check_categorical_generator(name, path, gen_key, ctx)
         _check_generator_complete(name, gen_key, gen_params, ctx)
         x_cfg = (stack_axes or {}).get(name)
         defers = gen_key == "band" and "n" not in gen_params

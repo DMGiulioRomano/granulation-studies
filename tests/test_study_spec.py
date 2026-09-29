@@ -1132,3 +1132,25 @@ def test_categorical_axis_vuole_values():
         parse_study_spec(d, "s")
     assert exc.value.key == ("axes", "grain.envelope")
     assert "values" in exc.value.hint
+
+
+@pytest.mark.parametrize(
+    "gen",
+    [
+        {"ramp": {"start": "hanning", "stop": "sinc", "step": 1}},
+        {"base": "hanning", "range": 1, "n": 2},
+        {"base": "hanning", "range": 1},
+    ],
+    ids=["ramp", "banda", "banda-senza-n"],
+)
+def test_categorical_axis_generatore_con_nomi_e_spec_error(gen):
+    # Su un asse categoriale chi sbaglia generatore ci scrive dei nomi, non dei
+    # numeri: l'errore dev'essere lo SpecError col rimedio, non il TypeError
+    # dell'aritmetica di ramp/banda su una stringa (che il parse esegue prima
+    # di arrivare al controllo del dominio), ne' il rimando alla camminata-X.
+    d = _envelope_axis(["hanning"])
+    d["axes"]["grain.envelope"] = gen
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(d, "s")
+    assert exc.value.key == ("axes", "grain.envelope")
+    assert "values" in exc.value.hint
