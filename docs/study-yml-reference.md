@@ -1776,6 +1776,9 @@ degenere, non un ramo speciale.
 - Ogni combinazione ha il **suo albero completo** (`yaml/`, `audio/`, `sv/`,
   `cache/`, `score/`) più uno snapshot `study.yml` — il documento **patchato**,
   riscritto a ogni render, che dice da sé i valori di quella combinazione.
+  Anche una cache stem esplicita (`make render CACHE_DIR=...`) si divide in una
+  sotto-cartella per combinazione: i manifest si chiamano come lo YAML, e
+  condivisi una combinazione leggerebbe i fingerprint di un'altra.
   I `.sv` portano la label nel basename
   (`<study_id>_<stream_id>_e1__grain.duration__distribution=0.5.sv`): Sonic
   Visualiser identifica la sessione dal nome, e con due `.sv` omonimi la seconda

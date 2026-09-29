@@ -374,6 +374,13 @@ def cmd_render(
     if not os.path.isdir(variant_dir):
         print(f"[render] nessuno YAML: esegui prima 'sweep {study}', 'stack {study}', 'versions {study}' o 'percorso {study}'.", file=sys.stderr)
         return 1
+    # Una cache esplicita si divide per combinazione come quella di default: i
+    # manifest si chiamano come lo YAML (``stack.json``), che e' lo stesso in
+    # ogni combinazione, e condivisi darebbero per "clean" uno stream il cui
+    # fingerprint l'ha scritto un'altra combinazione, con lo stem vecchio
+    # ancora su disco in questa.
+    if cache_dir and _COMBO.label:
+        cache_dir = os.path.join(cache_dir, _COMBO.label)
     t0 = time.perf_counter()
     manifest = render_variants(
         variant_dir=variant_dir,
@@ -669,7 +676,8 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--no-cache", dest="cache", action="store_false",
                     help="disattiva il caching incrementale per gli stem")
     rp.add_argument("--cache-dir", default=None,
-                    help="directory manifest cache (default: <study>/generated/cache)")
+                    help="directory manifest cache (default: generated/<study>/cache; "
+                         "con for_each: una sotto-cartella per combinazione)")
     rp.add_argument("--jobs", type=int, default=None,
                     help="numero di render in parallelo (default: min(8, cpu))")
 

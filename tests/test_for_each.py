@@ -620,6 +620,58 @@ def test_l_albero_piatto_di_prima_e_orfano_sotto_for_each(tmp_path, monkeypatch,
     assert (tmp_path / "generated" / "s_fe" / "yaml").is_dir()
 
 
+def test_una_cache_dir_esplicita_si_separa_per_combinazione(tmp_path, monkeypatch):
+    # Il manifest della cache stem si chiama come lo YAML (`stack.json`,
+    # `<variante>.json`), e i basename sono gli stessi in ogni combinazione.
+    # Con `--cache-dir` (`make render CACHE_DIR=...`) condivisa, una
+    # combinazione trovava il fingerprint scritto da un'altra: dopo una
+    # modifica renderizzata con COMBO su una fetta, l'altra fetta vedeva lo
+    # stream "clean" e teneva lo stem vecchio che aveva su disco.
+    import granstudies.render as render_mod
+
+    _studio(tmp_path, monkeypatch)
+    _fake_engine(monkeypatch)
+    motore = render_mod.engine_bridge.render
+    viste = {}
+
+    def registra(yaml_path, output_path, samples_dir, output_sr=48000,
+                 per_stream=False, use_cache=False, cache_dir=None, jobs=1):
+        if per_stream:
+            label = os.path.relpath(output_path, tmp_path / "generated" / "s_fe")
+            viste[label.split(os.sep)[0]] = cache_dir
+        return motore(yaml_path, output_path, samples_dir, output_sr=output_sr,
+                      per_stream=per_stream, use_cache=use_cache, cache_dir=cache_dir)
+
+    monkeypatch.setattr(render_mod.engine_bridge, "render", registra)
+    assert cli.main(["sweep", "s_fe"]) == 0
+    cdir = str(tmp_path / "cache_condivisa")
+    assert cli.main(["render", "s_fe", "--no-score", "--jobs", "1",
+                     "--cache-dir", cdir]) == 0
+    assert viste == {"volume=0": os.path.join(cdir, "volume=0"),
+                     "volume=6": os.path.join(cdir, "volume=6")}
+
+
+def test_una_cache_dir_esplicita_resta_quella_senza_for_each(tmp_path, monkeypatch):
+    import granstudies.render as render_mod
+
+    _studio(tmp_path, monkeypatch, {k: v for k, v in _DOC.items() if k != "for_each"})
+    _fake_engine(monkeypatch)
+    motore = render_mod.engine_bridge.render
+    viste = []
+
+    def registra(*a, **kw):
+        if kw.get("per_stream"):
+            viste.append(kw.get("cache_dir"))
+        return motore(*a, **kw)
+
+    monkeypatch.setattr(render_mod.engine_bridge, "render", registra)
+    assert cli.main(["sweep", "s_fe"]) == 0
+    cdir = str(tmp_path / "cache_condivisa")
+    assert cli.main(["render", "s_fe", "--no-score", "--jobs", "1",
+                     "--cache-dir", cdir]) == 0
+    assert viste == [cdir]
+
+
 def test_senza_orfane_nessun_avviso(tmp_path, monkeypatch, capsys):
     _studio(tmp_path, monkeypatch)
     _fake_engine(monkeypatch)
