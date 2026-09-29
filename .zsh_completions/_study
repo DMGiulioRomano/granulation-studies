@@ -25,7 +25,9 @@ function study {
   setopt localoptions extendedglob
   # Con `for_each:` le root sono piu' d'una: senza filtro `study` le apre
   # tutte, ed e' proprio il confronto per cui gli assi esterni esistono. Per
-  # sentirne solo una fetta: `COMBO=distribution=1 study <scala>`.
+  # sentirne solo una fetta: `COMBO=distribution=1 study <scala>`. La label
+  # va in coda al basename anche per gli stem (`..._stems__<label>.sv`), da
+  # cui la seconda forma dell'esclusione.
   for root in $roots; do
     if [[ -n "$stream" ]]; then
       # $stream puo' essere un cugino pieno (zona_ombra_d05_3) o il nome dello
@@ -34,7 +36,7 @@ function study {
         sonic "$f"
       done
     else
-      for f in "$root"/sv/{stack,versions,percorso}/"$s"_*~*_stems.sv(N) \
+      for f in "$root"/sv/{stack,versions,percorso}/"$s"_*~*_stems(|__*).sv(N) \
                "$root"/sv/sweep/**/*.sv(N); do
         sonic "$f"
       done

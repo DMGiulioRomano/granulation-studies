@@ -1765,6 +1765,9 @@ degenere, non un ramo speciale.
   etichetta sono errore; così due assi che toccano lo stesso path, o due path
   uno dentro l'altro (`base.grain` e `base.grain.duration`): il valore si
   assegna, quindi quello finale dipenderebbe dall'ordine di dichiarazione.
+  Dentro un asse, due valori o due stati con la stessa etichetta (un doppione,
+  `1` e `1.0`, due nomi che nel nome della cartella si scrivono uguali:
+  `voce 1.wav` e `voce_1.wav`) sono errore: finirebbero nella stessa cartella.
 - Ogni combinazione ha il **suo albero completo** (`yaml/`, `audio/`, `sv/`,
   `cache/`, `score/`) più uno snapshot `study.yml` — il documento **patchato**,
   riscritto a ogni render, che dice da sé i valori di quella combinazione.

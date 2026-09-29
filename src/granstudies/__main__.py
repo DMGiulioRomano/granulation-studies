@@ -364,6 +364,9 @@ def cmd_render(
     from .render import render_variants
 
     spec = _load_spec(study)
+    # Lo snapshot si legge adesso e si scrive alla fine: un render dura minuti,
+    # e lo study.yml trovato a render finito puo' essere gia' un altro.
+    snapshot = _read_study(study)[0]
     g = gen_dir(study)
     # Il render e' generico: discende yaml/ ricorsivamente (sweep/, stack/,
     # versions/, percorso/) e rispecchia i sotto-path sotto audio/ e score/.
@@ -394,7 +397,7 @@ def cmd_render(
     # combinazione invece di rimandare al blocco ``for_each:``. Con la
     # combinazione vuota ha gli stessi valori dello study.yml.
     with open(os.path.join(g, "study.yml"), "w", encoding="utf-8") as fh:
-        yaml.safe_dump(_read_study(study)[0], fh, sort_keys=False, allow_unicode=True)
+        yaml.safe_dump(snapshot, fh, sort_keys=False, allow_unicode=True)
     return 0
 
 

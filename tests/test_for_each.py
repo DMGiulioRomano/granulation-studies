@@ -11,7 +11,10 @@ contano e la' no: i nomi d'asse dotted (``grain.duration``, l'asse di quasi
 ogni scala di questo studio), ``where`` su uno studio piatto, e l'avviso sulle
 combinazioni orfane che il piano promette.
 """
+import glob
 import os
+import shutil
+import subprocess
 
 import pytest
 import yaml
@@ -114,6 +117,21 @@ def test_etichette_gemelle_sono_errore():
     with pytest.raises(SpecError) as e:
         _combos({"base.distribution": [0], "axes.distribution.values": [1]})
     assert "stessa etichetta" in str(e.value)
+
+
+def test_due_valori_con_la_stessa_etichetta_sono_errore():
+    # Dentro un asse, due valori (o due stati) che si scrivono uguali nel nome
+    # della cartella darebbero due combinazioni in una cartella sola: la
+    # seconda riscriverebbe la prima in silenzio, e `where` la stamperebbe due
+    # volte. Il doppione vero, `1` e `1.0`, e lo slug che fonde due nomi
+    # diversi sono lo stesso difetto.
+    for block in ({"base.volume": [0, 0]},
+                  {"base.volume": [1, 1.0]},
+                  {"base.sample": ["voce 1.wav", "voce_1.wav"]},
+                  {"g": {"a b": {"base.volume": 1}, "a_b": {"base.volume": 2}}}):
+        with pytest.raises(SpecError) as e:
+            _combos(block)
+        assert "stessa cartella" in str(e.value), block
 
 
 def test_due_assi_sullo_stesso_path_sono_errore():
@@ -275,6 +293,30 @@ def test_il_giro_completo_produce_una_cartella_per_combinazione(tmp_path, monkey
     assert a0 != a6
 
 
+def test_lo_snapshot_e_il_documento_letto_all_inizio_del_render(tmp_path, monkeypatch):
+    # Un render dura minuti, e nel frattempo lo study.yml si tocca (e' il ciclo
+    # di lavoro: ascolto, modifica, rigenera). Lo snapshot deve dire il
+    # documento che ha prodotto l'audio, non quello trovato alla fine.
+    import granstudies.render as render_mod
+
+    sdir = _studio(tmp_path, monkeypatch)
+    _fake_engine(monkeypatch)
+    assert cli.main(["sweep", "s_fe"]) == 0
+    motore = render_mod.engine_bridge.render
+
+    def modifica_durante_il_render(*a, **kw):
+        doc = dict(_DOC, base=dict(_DOC["base"], duration=99))
+        (sdir / "study.yml").write_text(yaml.safe_dump(doc, sort_keys=False))
+        return motore(*a, **kw)
+
+    monkeypatch.setattr(render_mod.engine_bridge, "render", modifica_durante_il_render)
+    monkeypatch.setenv("COMBO", "volume=0")
+    assert cli.main(["render", "s_fe", "--no-score", "--jobs", "1"]) == 0
+    snap = yaml.safe_load(
+        (tmp_path / "generated" / "s_fe" / "volume=0" / "study.yml").read_text())
+    assert snap["base"]["duration"] == 10
+
+
 def test_una_patch_su_axes_cambia_le_varianti_generate(tmp_path, monkeypatch):
     doc = dict(_DOC, for_each={"griglia": {
         "corta": {"axes.density.values": [5, 50]},
@@ -367,6 +409,64 @@ def test_sv_di_combinazioni_diverse_hanno_nomi_diversi(tmp_path, monkeypatch):
     assert len(nomi) == 2, nomi          # una variante per combinazione
     assert len(nomi) == len(set(nomi)), nomi
     assert all("volume=0" in n or "volume=6" in n for n in nomi)
+
+
+_STUDY_FN = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         ".zsh_completions", "_study")
+
+
+@pytest.mark.skipif(shutil.which("zsh") is None, reason="zsh non installato")
+def test_study_zsh_non_apre_le_sessioni_degli_stem_di_una_combinazione(
+        tmp_path, monkeypatch, capsys):
+    """La funzione ``study`` apre il ``.sv`` di ogni documento contro il mix e
+    lascia fuori quello contro gli stem. La label di combinazione va in coda al
+    basename anche per gli stem, quindi il riconoscimento deve reggere anche
+    ``..._stems__<label>.sv``, non solo ``..._stems.sv``. I nomi non sono
+    scritti qui: li produce ``cmd_sv``, e il test chiede solo che quelli
+    aperti siano i suoi ``.sv`` senza stem."""
+    import granstudies.sv_export as sv_export
+
+    doc = {k: v for k, v in _DOC.items() if k != "sweep"}
+    doc["stack"] = {}
+    _studio(tmp_path, monkeypatch, doc)
+
+    def scrivi(out):
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        open(out, "w").close()
+        return True
+
+    monkeypatch.setattr(sv_export, "stack_to_sv",
+                        lambda variant, audio, out, layout, axis_paths=None: scrivi(out))
+    monkeypatch.setattr(sv_export, "stack_stems_to_sv",
+                        lambda variant, audio_dir, out, process="stack",
+                        axis_paths=None: scrivi(out))
+
+    assert cli.main(["where", "s_fe"]) == 0
+    roots = capsys.readouterr().out.split()
+    assert len(roots) == 2
+    for root in roots:          # il documento stack e il suo mix, per combinazione
+        for sub, nome in (("yaml", "stack.yml"), ("audio", "stack.aif")):
+            os.makedirs(os.path.join(root, sub, "stack"))
+            open(os.path.join(root, sub, "stack", nome), "w").close()
+    assert cli.main(["sv", "s_fe"]) == 0
+    prodotti = sorted(p for r in roots for p in glob.glob(os.path.join(r, "sv", "**", "*.sv"),
+                                                          recursive=True))
+    mix = [p for p in prodotti if "_stems" not in os.path.basename(p)]
+    assert len(prodotti) == 4 and len(mix) == 2, prodotti
+
+    # `make` finto: `where` risponde con le root della CLI vera, il resto
+    # (all-study, sv) e' gia' stato fatto qui sopra.
+    script = (
+        "compdef() { : }\n"
+        "make() { [[ $1 == where ]] && print -rl -- ${(f)ROOTS}; return 0 }\n"
+        "sonic() { print -r -- \"$1\" }\n"
+        f"source '{_STUDY_FN}'\n"
+        "study s_fe\n"
+    )
+    res = subprocess.run(["zsh", "-f", "-c", script], cwd=tmp_path, text=True,
+                         capture_output=True, env=dict(os.environ, ROOTS="\n".join(roots)))
+    assert res.returncode == 0, res.stderr
+    assert sorted(res.stdout.split("\n")[:-1]) == mix
 
 
 def test_senza_for_each_lo_stesso_albero_piatto(tmp_path, monkeypatch):
