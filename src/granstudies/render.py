@@ -364,6 +364,21 @@ def _is_up_to_date(target: str, source: str) -> bool:
     return os.path.exists(target) and os.path.getmtime(target) >= os.path.getmtime(source)
 
 
+def _available_cores() -> int:
+    """Core che il processo puo' usare: l'affinity dove esiste (Linux: rispetta
+    taskset, cpuset dei container, quote di CI), altrimenti il conteggio della
+    macchina. E' la regola dell'engine (``numpy_parallel._available_cores``):
+    ``os.cpu_count()`` da solo conta anche i core che il processo non ha.
+    """
+    getaffinity = getattr(os, "sched_getaffinity", None)
+    if getaffinity is not None:
+        try:
+            return max(1, len(getaffinity(0)))
+        except OSError:
+            pass
+    return os.cpu_count() or 1
+
+
 def _split_jobs(budget: int, n_pending: int) -> tuple[int, int]:
     """Ripartisce ``budget`` processi tra i due livelli di parallelismo.
 
@@ -401,12 +416,12 @@ def render_variants(
     Incrementale: una variante il cui audio (e PDF) e' piu' recente dello YAML
     viene saltata (``force=True`` per rirenderizzare tutto).
 
-    ``jobs`` e' il budget TOTALE di processi (default: tutti i core),
-    ripartito da ``_split_jobs`` tra le varianti in parallelo e il
-    parallelismo interno dell'engine: con molte varianti vince il primo, con
-    una variante lunga sola tutto il budget finisce all'engine invece di
-    lasciare la macchina ferma a un core. ``jobs=1`` resta sequenziale su
-    entrambi i livelli.
+    ``jobs`` e' il budget TOTALE di processi (default: tutti i core che il
+    processo puo' usare, ``_available_cores``), ripartito da ``_split_jobs``
+    tra le varianti in parallelo e il parallelismo interno dell'engine: con
+    molte varianti vince il primo, con una variante lunga sola tutto il budget
+    finisce all'engine invece di lasciare la macchina ferma a un core.
+    ``jobs=1`` resta sequenziale su entrambi i livelli.
 
     ``per_stream``: STEMS mode, un file per stream invece del MIX unico —
     ``entry["audio"]`` diventa una lista di path. In questo caso il file di
@@ -492,8 +507,9 @@ def render_variants(
         ))
 
     if pending:
-        # ponytail: tutti i core. Il vecchio cap a 8 proteggeva la RAM da
-        # molti buffer lunghi in memoria insieme: un minuto di buffer stereo
+        # ponytail: tutti i core che il processo puo' usare (l'affinity, non
+        # os.cpu_count()). Il vecchio cap a 8 proteggeva la RAM da molti
+        # buffer lunghi in memoria insieme: un minuto di buffer stereo
         # float64 a 48 kHz ~ 46 MB, e col dc_block il picco di un render e'
         # ~3.5 volte il buffer. Una variante sola non basta a evitarlo: nella
         # pass STEMS (il default) l'engine rende gli stream in parallelo, uno
@@ -502,17 +518,17 @@ def render_variants(
         # un picco di ~1.6 GB per stream, quindi fino a ~11 GB con 7 core o
         # piu', contro ~1.6 GB del render sequenziale. Se la memoria non
         # basta, abbassare con jobs= (JOBS=n) o saltare gli stem (STEM=false).
-        budget = jobs or os.cpu_count() or 1
+        budget = jobs or _available_cores()
         workers, engine_jobs = _split_jobs(budget, len(pending))
         if workers == 1:
             for entry, args in pending:
-                entry.update(_render_one(*args, engine_jobs))
+                entry.update(_render_one(*args, jobs=engine_jobs))
         else:
             from concurrent.futures import ProcessPoolExecutor, as_completed
 
             with ProcessPoolExecutor(max_workers=workers) as pool:
                 futures = {
-                    pool.submit(_render_one, *args, engine_jobs): entry
+                    pool.submit(_render_one, *args, jobs=engine_jobs): entry
                     for entry, args in pending
                 }
                 for fut in as_completed(futures):

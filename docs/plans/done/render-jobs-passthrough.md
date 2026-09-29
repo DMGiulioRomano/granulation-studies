@@ -52,9 +52,18 @@ engine_jobs = max(1, budget // workers)
 annidano non c'è oversubscription. `_render_one` passa `jobs` a entrambe le
 pass (mix e stem).
 
-Il default del budget è **tutti i core** (`os.cpu_count()`), non più
+Il default del budget è **tutti i core che il processo può usare**, non più
 `min(8, cpu)`. Il cap a 8 proteggeva la RAM da molti buffer lunghi in memoria
 insieme, e quel rischio non sparisce con una variante sola.
+
+"Che il processo può usare" vuol dire l'affinity dove esiste
+(`_available_cores`, la stessa regola di `numpy_parallel._available_cores`
+nell'engine), e `os.cpu_count()` solo dove manca, come su macOS.
+`os.cpu_count()` conta i core della macchina anche quando il processo ne ha
+meno (taskset, cpuset di un container, quote di CI): lì il budget supera i
+core disponibili, l'assenza di oversubscription promessa sopra non vale più, e
+la RAM della pass STEMS si moltiplica per core che il processo non può usare. Prima il cap a 8 limitava il danno; senza cap,
+il danno cresce con la macchina.
 
 Un minuto di buffer stereo float64 a 48 kHz pesa ~46 MB, ma il picco di un
 render è ~3.5 volte il buffer, perché il `dc_block` ne fa una copia e lavora
@@ -92,7 +101,7 @@ buffer di chunk dai worker al padre via pickle.
 - `src/granstudies/engine_bridge.py` — `render(..., jobs=1)` inoltrato a
   `api.render(jobs=...)`.
 - `src/granstudies/render.py` — `_split_jobs`, `_render_one` che passa `jobs`
-  a entrambe le pass, default del budget a tutti i core.
+  a entrambe le pass, default del budget a tutti i core (`_available_cores`).
 - `src/granstudies/__main__.py`, `Makefile`, `docs/study-yml-reference.md` —
   help di `--jobs`/`JOBS`.
 
@@ -106,13 +115,16 @@ Il submodule `engine/` **non è stato toccato**: l'API `jobs` esisteva già.
   diretta sul bug: il budget arriva davvero al bridge.
 - `tests/test_render.py::test_render_jobs_one_is_sequential_on_both_levels` —
   `JOBS=1` con più varianti: tutte in-process, tutte con `jobs=1`.
-- `tests/test_render.py::test_render_default_budget_is_all_cores` — senza
-  `jobs` il budget è `os.cpu_count()`.
+- `tests/test_render.py::test_render_default_budget_*` — senza `jobs` il
+  budget sono i core concessi al processo: l'affinity se c'è, altrimenti
+  `os.cpu_count()` (anche quando l'affinity c'è ma non risponde).
 - `tests/test_engine_bridge.py::test_render_jobs_activates_parallel_path_without_changing_audio`
   — integrazione reale sull'engine con un documento abbastanza denso da
-  superare la soglia dei 1024 grani (verificato: 1913 grani in 4 chunk, path
-  parallelo effettivamente preso), audio identico entro 1 LSB a 24 bit tra
-  `jobs=1` e `jobs=4`.
+  superare la soglia dei 1024 grani (1913 grani), audio identico entro 1 LSB a
+  24 bit tra `jobs=1` e `jobs=4`. Uno spy su `chunk_grains` verifica che il
+  path parallelo sia preso con `jobs=4`, e solo lì. Senza lo spy il test
+  passava anche con un bridge che non inoltrava `jobs`, cioè col bug di questa
+  issue: due render sequenziali coincidono comunque.
 
 ## Quel che resta sul tavolo
 

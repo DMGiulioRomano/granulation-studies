@@ -1,5 +1,6 @@
 import os
 
+import pytest
 import yaml
 
 from granstudies.study_spec import parse_study_spec
@@ -749,17 +750,56 @@ def test_render_jobs_one_is_sequential_on_both_levels(tmp_path, monkeypatch):
     assert seen == [1, 1, 1]
 
 
-def test_render_default_budget_is_all_cores(tmp_path, monkeypatch):
-    # Senza jobs il budget e' os.cpu_count(), non piu' min(8, cpu): con una
-    # variante sola arriva tutto all'engine.
+def _machine(monkeypatch, cpu, affinity):
+    # ``cpu`` core sulla macchina, ``affinity`` quelli concessi al processo.
+    # affinity=None: piattaforma senza sched_getaffinity (macOS);
+    # affinity=OSError: la chiamata esiste ma fallisce.
+    monkeypatch.setattr(render_mod.os, "cpu_count", lambda: cpu)
+    if affinity is None:
+        monkeypatch.delattr(render_mod.os, "sched_getaffinity", raising=False)
+        return
+
+    def getaffinity(pid):
+        if affinity is OSError:
+            raise OSError("sched_getaffinity non disponibile")
+        return set(range(affinity))
+
+    monkeypatch.setattr(render_mod.os, "sched_getaffinity", getaffinity, raising=False)
+
+
+def _default_budget_seen(tmp_path, monkeypatch):
+    # Una variante sola: il budget di default arriva tutto all'engine, quindi
+    # il `jobs` che il bridge riceve E' il budget.
     variant_dir = _variant_dir(tmp_path, ["solo"])
     seen = []
     monkeypatch.setattr(render_mod.engine_bridge, "render", _jobs_recorder(seen))
-    monkeypatch.setattr(render_mod.os, "cpu_count", lambda: 12)
     render_variants(
         variant_dir=variant_dir,
         audio_dir=str(tmp_path / "audio"),
         score_dir=None,
         samples_dir="unused",
     )
-    assert seen == [12]
+    return seen
+
+
+def test_render_default_budget_is_all_cores(tmp_path, monkeypatch):
+    # Senza jobs il budget sono tutti i core, non piu' min(8, cpu).
+    _machine(monkeypatch, cpu=12, affinity=12)
+    assert _default_budget_seen(tmp_path, monkeypatch) == [12]
+
+
+def test_render_default_budget_respects_cpu_affinity(tmp_path, monkeypatch):
+    # "Tutti i core" sono quelli concessi al processo (taskset, cpuset di un
+    # container, CI), non quelli della macchina: contare questi ultimi
+    # sfora l'invariante workers * engine_jobs <= core, e la RAM della pass
+    # STEMS si moltiplica per core che il processo non puo' usare.
+    _machine(monkeypatch, cpu=12, affinity=2)
+    assert _default_budget_seen(tmp_path, monkeypatch) == [2]
+
+
+@pytest.mark.parametrize("affinity", [None, OSError])
+def test_render_default_budget_falls_back_to_cpu_count(tmp_path, monkeypatch, affinity):
+    # Dove l'affinity non c'e' (macOS) o non risponde, resta il conteggio
+    # della macchina: la stessa regola dell'engine (_available_cores).
+    _machine(monkeypatch, cpu=12, affinity=affinity)
+    assert _default_budget_seen(tmp_path, monkeypatch) == [12]
