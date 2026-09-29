@@ -1164,3 +1164,17 @@ def test_categorical_axis_generatore_con_nomi_e_spec_error(gen):
         parse_study_spec(d, "s")
     assert exc.value.key == ("axes", "grain.envelope")
     assert "values" in exc.value.hint
+
+
+def test_categorical_axis_values_scalare_chiede_la_lista():
+    # ``values: expodec`` senza parentesi e' lo sbaglio naturale su un asse di
+    # nomi (in stack ne serve uno per stream): l'errore deve chiedere la lista,
+    # non accusare la lettera 'e' in cui la stringa verrebbe spezzata.
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(_envelope_axis("expodec"), "s")
+    e = exc.value
+    assert e.key == ("axes", "grain.envelope", "values")
+    assert "'e'" not in e.msg
+    assert "lista" in e.msg
+    assert "[expodec]" in e.hint
+

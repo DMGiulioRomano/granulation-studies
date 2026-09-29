@@ -309,7 +309,7 @@ def _validate(spec: StudySpec, ctx: ErrCtx, *, orders_explicit: bool = False) ->
 
 
 def _check_categorical_generator(
-    name: str, path: str, gen_key: str, ctx: ErrCtx
+    name: str, path: str, cfg: Dict[str, Any], gen_key: str, ctx: ErrCtx
 ) -> None:
     """Un asse categoriale enumera i nomi con ``values``: non li genera.
 
@@ -318,8 +318,24 @@ def _check_categorical_generator(
     l'asse: su un path categoriale chi sbaglia generatore ci scrive dei nomi
     (``ramp: {start: hanning, ...}``), e l'aritmetica di ``ramp``/``band`` su
     una stringa alzerebbe un ``TypeError`` grezzo, senza path ne' rimedio.
+
+    Lo stesso per ``values`` scritto senza lista (``values: expodec``): il
+    generatore la spezzerebbe in lettere e ``_validate`` accuserebbe la
+    ``'e'``. Su un asse di nomi e' lo sbaglio naturale, perche' in stack ne
+    serve uno per stream.
     """
-    if gen_key == "values" or bounds_mod.categorical_domain(path) is None:
+    if bounds_mod.categorical_domain(path) is None:
+        return
+    if gen_key == "values":
+        raw = cfg["values"]
+        if isinstance(raw, str):
+            raise ctx.err(
+                f"Asse '{name}': 'values' vuole una lista di nomi (trovato "
+                f"{raw!r}).",
+                key=("axes", name, "values"),
+                axis=name,
+                hint=f"anche per un nome solo: 'values: [{raw}]'.",
+            )
         return
     raise ctx.err(
         f"Asse '{name}': un asse categoriale ('{path}') enumera nomi, non li "
@@ -820,7 +836,7 @@ def parse_study_spec(
         # canonica values|ramp|band, con i parametri della banda raccolti piatti.
         with ctx.wrapping(key=("axes", name), axis=name):
             gen_key, gen_params = y_generator(cfg)
-        _check_categorical_generator(name, path, gen_key, ctx)
+        _check_categorical_generator(name, path, cfg, gen_key, ctx)
         _check_generator_complete(name, gen_key, gen_params, ctx)
         x_cfg = (stack_axes or {}).get(name)
         defers = gen_key == "band" and "n" not in gen_params
