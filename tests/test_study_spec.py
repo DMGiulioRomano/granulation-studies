@@ -1126,9 +1126,67 @@ def test_categorical_axis_rejects_unknown_window():
 
 
 def test_categorical_axis_requires_step_interpolation():
+    # Il ``linear`` qui e' quello di studio (``axes.interpolation``): l'errore
+    # nomina la chiave che lo dichiara, non quella assente sull'asse.
     with pytest.raises(SpecError) as exc:
         parse_study_spec(_envelope_axis(["hanning", "expodec"], "linear"), "s")
-    assert exc.value.key == ("axes", "grain.envelope", "interpolation")
+    assert exc.value.key == ("axes", "interpolation")
+
+
+_ENVELOPE_INTERP_YAML = {
+    "sull'asse": (
+        "axes:\n"
+        "  grain.envelope:\n"
+        "    values: [expodec, sinc]\n"
+        "    interpolation: cubic\n",
+        ("axes", "grain.envelope", "interpolation"),
+        4,
+        "dichiarata sull'asse: cubic",
+    ),
+    "ereditata": (
+        "axes:\n"
+        "  interpolation: linear\n"
+        "  grain.envelope:\n"
+        "    values: [expodec, sinc]\n",
+        ("axes", "interpolation"),
+        2,
+        "ereditata da 'axes.interpolation': linear",
+    ),
+    "default": (
+        "axes:\n"
+        "  grain.envelope:\n"
+        "    values: [expodec, sinc]\n",
+        ("axes", "grain.envelope"),
+        2,
+        "nessuna dichiarata, vale il default linear",
+    ),
+}
+
+
+@pytest.mark.parametrize("fonte", list(_ENVELOPE_INTERP_YAML))
+def test_categorical_axis_interpolation_errore_nomina_la_chiave_che_la_dichiara(fonte):
+    # L'interpolazione di un asse viene da tre posti: l'asse, 'axes.
+    # interpolation', o il default linear che nessuno scrive. L'errore deve
+    # puntare alla chiave che c'e' davvero (con la sua riga) e dire da dove
+    # viene il valore: "dichiarato: linear" su un file che non lo scrive da
+    # nessuna parte manda a cercare una chiave che non esiste.
+    from granstudies import yaml_loc
+
+    axes, key, line, fonte_msg = _ENVELOPE_INTERP_YAML[fonte]
+    text = (
+        "study_id: s\n"
+        + axes
+        + "base: {duration: 8, sample: x.wav}\n"
+        + "sweep: {mode: discrete}\n"
+    )
+    data, locs = yaml_loc.loads(text, source="study.yml")
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(data, "s", locs=locs)
+    e = exc.value
+    assert e.key == key
+    assert e.line == line + 1          # +1: la riga di study_id
+    assert fonte_msg in e.msg
+    assert "grain.envelope" in e.hint
 
 
 def test_categorical_axis_accetta_l_alias_dell_engine():

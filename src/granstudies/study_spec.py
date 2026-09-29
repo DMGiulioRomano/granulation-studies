@@ -237,22 +237,12 @@ def _validate(spec: StudySpec, ctx: ErrCtx, *, orders_explicit: bool = False) ->
         # Asse categoriale (``grain.envelope``): il dominio e' un elenco di nomi,
         # non un intervallo. I valori sono stringhe, si validano contro il
         # catalogo dell'engine e saltano il confronto bounds, che qui non ha
-        # senso. L'interpolazione dev'essere ``step``: fra due finestre non c'e'
-        # rampa da percorrere. Che i nomi arrivino da ``values`` lo garantisce
-        # gia' il parse (``_check_categorical_generator``), prima di espandere
-        # il generatore.
+        # senso. Che i nomi arrivino da ``values`` e che l'interpolazione sia
+        # ``step`` lo garantisce gia' il parse (``_check_categorical_generator``,
+        # ``_check_categorical_interpolation``): li' si sa da dove viene il
+        # generatore e da dove l'interpolazione, qui non piu'.
         domain = bounds_mod.categorical_domain(ax.path)
         if domain is not None:
-            if ax.interpolation != "step":
-                raise ctx.err(
-                    f"Asse '{ax.name}': un asse categoriale vuole "
-                    f"'interpolation: step' (dichiarato: {ax.interpolation}).",
-                    key=("axes", ax.name, "interpolation"),
-                    axis=ax.name,
-                    hint="fra due valori nominali non c'e' rampa da percorrere; "
-                    "senza 'interpolation' sull'asse vale quella di "
-                    "'axes.interpolation'.",
-                )
             for slot, v in (
                 [("baseline", ax.baseline)] + [("values", x) for x in ax.values]
             ):
@@ -350,6 +340,46 @@ def _check_categorical_generator(
         axis=name,
         hint="dichiara i nomi con 'values: [...]': 'ramp' e la banda "
         "producono numeri.",
+    )
+
+
+def _check_categorical_interpolation(
+    name: str,
+    path: str,
+    cfg: Dict[str, Any],
+    axes_raw: Dict[str, Any],
+    interpolation: str,
+    ctx: ErrCtx,
+) -> None:
+    """Un asse categoriale vuole ``interpolation: step``: fra due nomi non c'e'
+    rampa da percorrere.
+
+    L'interpolazione di un asse viene da tre posti: scritta sull'asse,
+    ereditata da ``axes.interpolation``, o il default ``linear`` che nessuno
+    scrive. L'errore nomina la chiave che la dichiara davvero, quella che ha una
+    riga nel file: puntare sempre a ``axes.<asse>.interpolation`` lasciava
+    l'errore senza riga nei due casi piu' comuni, e "dichiarato: linear" su un
+    file che non lo scrive manda a cercare una chiave che non c'e'. Per questo
+    il controllo sta qui e non in ``_validate``, dove la provenienza e' persa.
+    """
+    if bounds_mod.categorical_domain(path) is None or interpolation == "step":
+        return
+    if "interpolation" in cfg:
+        key = ("axes", name, "interpolation")
+        fonte = f"dichiarata sull'asse: {interpolation}"
+    elif "interpolation" in axes_raw:
+        key = ("axes", "interpolation")
+        fonte = f"ereditata da 'axes.interpolation': {interpolation}"
+    else:
+        key = ("axes", name)
+        fonte = f"nessuna dichiarata, vale il default {interpolation}"
+    raise ctx.err(
+        f"Asse '{name}': un asse categoriale vuole 'interpolation: step' "
+        f"({fonte}).",
+        key=key,
+        axis=name,
+        hint="fra due valori nominali non c'e' rampa da percorrere: scrivi "
+        f"'interpolation: step' sull'asse (axes.{name}.interpolation).",
     )
 
 
@@ -843,6 +873,10 @@ def parse_study_spec(
         with ctx.wrapping(key=("axes", name), axis=name):
             gen_key, gen_params = y_generator(cfg)
         _check_categorical_generator(name, path, cfg, gen_key, ctx)
+        interpolation = cfg.get("interpolation", study_interpolation)
+        _check_categorical_interpolation(
+            name, path, cfg, axes_raw, interpolation, ctx
+        )
         _check_generator_complete(name, gen_key, gen_params, ctx)
         x_cfg = (stack_axes or {}).get(name)
         defers = gen_key == "band" and "n" not in gen_params
@@ -901,7 +935,7 @@ def parse_study_spec(
                     name, cfg, _defaults_cache, ctx, _grain_unit
                 ),
                 values=values,
-                interpolation=cfg.get("interpolation", study_interpolation),
+                interpolation=interpolation,
                 generator={gen_key: gen_params},
             )
         )
