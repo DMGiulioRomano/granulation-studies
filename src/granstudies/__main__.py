@@ -772,8 +772,8 @@ def _combos(study: str) -> list:
         raise ErrCtx(locs=locs).err(
             f"COMBO='{voluta}' non seleziona nessuna combinazione di '{study}'.",
             key=(for_each.BLOCK,),
-            hint=f"i vincoli sono segmenti di label, in and fra loro. "
-                 f"Combinazioni dichiarate: {disponibili}. "
+            hint="i vincoli sono segmenti di label separati da '__', in and "
+                 f"fra loro. Combinazioni dichiarate: {disponibili}. "
                  "Togli COMBO dall'ambiente per girarle tutte.",
         )
     return scelte

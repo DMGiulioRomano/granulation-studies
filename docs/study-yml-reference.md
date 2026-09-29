@@ -1764,10 +1764,14 @@ degenere, non un ramo speciale.
   `axes.grain.duration: {values: [...]}`.
 - **Etichette.** `chiave=valore` per la Forma 1 (`base.` e `axes.`, e il nome
   del generatore in coda, vengono tolti: `axes.grain.duration.values` →
-  `grain.duration`), `asse=stato` per la Forma 2. Due assi che danno la stessa
-  etichetta sono errore; così due assi che toccano lo stesso path, o due path
-  uno dentro l'altro (`base.grain` e `base.grain.duration`): il valore si
-  assegna, quindi quello finale dipenderebbe dall'ordine di dichiarazione.
+  `grain.duration`), `asse=stato` per la Forma 2. Nel nome della cartella ogni
+  corsa di caratteri fuori da `[A-Za-z0-9.-]`, `_` compreso, diventa un `_`
+  solo, e i `_` in testa e in coda cadono: `__` separa gli assi, quindi nessun
+  segmento lo contiene (`brano__s1.wav` → `sample=brano_s1.wav`). Due assi che
+  danno la stessa etichetta sono errore; così due assi che toccano lo stesso
+  path, o due path uno dentro l'altro (`base.grain` e `base.grain.duration`):
+  il valore si assegna, quindi quello finale dipenderebbe dall'ordine di
+  dichiarazione.
   Dentro un asse, due valori o due stati con la stessa etichetta (un doppione,
   `1` e `1.0`, due nomi che nel nome della cartella si scrivono uguali:
   `voce 1.wav` e `voce_1.wav`) sono errore: finirebbero nella stessa cartella.

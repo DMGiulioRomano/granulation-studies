@@ -601,6 +601,33 @@ def test_il_match_e_per_segmento_intero(tmp_path, monkeypatch):
     assert [c.label for c in cli._combos("s_fe")] == ["volume=0"]
 
 
+def test_il_separatore_non_compare_dentro_un_segmento():
+    # `__` separa gli assi nella label, e COMBO la spezza li'. Un valore o uno
+    # stato che lo contiene da se' (`brano__s1.wav`, il nome di uno stem del
+    # motore; lo stato `a__b`), o che finisce con `_` e lo forma col
+    # separatore, spezzava un segmento in due: `COMBO=g=a` prendeva anche
+    # `g=a__b`, e `COMBO=s1.wav` selezionava un valore che non esiste.
+    combos = _combos({"base.sample": ["brano__s1.wav", "voce_"],
+                      "g": {"a": {}, "a__b": {}}})
+    assert [c.label for c in combos] == [
+        "sample=brano_s1.wav__g=a", "sample=brano_s1.wav__g=a_b",
+        "sample=voce__g=a", "sample=voce__g=a_b"]
+    for c in combos:
+        assert all(s.count("=") == 1 for s in c.label.split("__")), c.label
+
+
+def test_combo_non_prende_uno_stato_che_ne_contiene_il_nome(tmp_path, monkeypatch):
+    _studio(tmp_path, monkeypatch, dict(_DOC, for_each={
+        "g": {"a": {"base.volume": 1}, "a__b": {"base.volume": 2}}}))
+    monkeypatch.setenv("COMBO", "g=a")
+    assert [c.label for c in cli._combos("s_fe")] == ["g=a"]
+    # e il rimedio dice qual e' il separatore dei vincoli
+    monkeypatch.setenv("COMBO", "g=c")
+    with pytest.raises(SpecError) as e:
+        cli._combos("s_fe")
+    assert "'__'" in str(e.value.hint)
+
+
 # --- combinazioni orfane ---------------------------------------------------
 
 def test_una_combinazione_tolta_dal_blocco_e_segnalata_non_cancellata(

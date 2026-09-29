@@ -402,4 +402,14 @@ def _short(path: str) -> str:
 
 
 def _slug(s: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._-]+", "_", s)
+    """Il pezzo di un nome di cartella: ogni corsa di caratteri fuori da
+    ``[A-Za-z0-9.-]`` diventa un ``_`` solo, e i ``_`` in testa e in coda
+    cadono.
+
+    Il ``_`` e' nella corsa di proposito: ``__`` separa gli assi nella label
+    e ``COMBO`` la spezza li', quindi nessun segmento puo' contenerlo
+    (``brano__s1.wav``, il nome di uno stem del motore) ne' formarlo col
+    separatore (un valore che finisce con ``_``). Senza, ``COMBO=g=a``
+    prendeva anche lo stato ``a__b``.
+    """
+    return re.sub(r"[^A-Za-z0-9.-]+", "_", s).strip("_")
