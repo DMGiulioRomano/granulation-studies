@@ -272,3 +272,17 @@ def window_names() -> frozenset:
     from pge.controllers.window_registry import WindowRegistry
 
     return frozenset(WindowRegistry.all_names())
+
+
+def read_direction_values() -> frozenset:
+    """I due versi dichiarabili per ``grain.read_direction`` (engine #207).
+
+    E' ``READ_DIRECTION_VALUES``, lo stesso insieme che
+    ``normalize_read_direction`` fa rispettare al parse: ``-1`` indietro,
+    ``+1`` avanti, nient'altro — non i bounds ``(-1, 1)`` del registry, che ne
+    sono solo l'inviluppo.
+    """
+    _ensure_engine_on_path()
+    from pge.parameters.read_direction import READ_DIRECTION_VALUES
+
+    return frozenset(READ_DIRECTION_VALUES)
