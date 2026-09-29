@@ -16,6 +16,13 @@ versions: _require-study $(MARKER)
 percorso: _require-study $(MARKER)
 	$(PY) -m granstudies percorso $(STUDY)
 
+# Cartella (o cartelle) di output correnti: le risolve granstudies, non lo
+# shell, cosi' la regola di `for_each:` e del filtro COMBO vive in un posto
+# solo (la usa anche la funzione zsh `study`). Una riga per combinazione.
+.PHONY: where
+where: _require-study $(MARKER)
+	@$(PY) -m granstudies where $(STUDY)
+
 .PHONY: describe
 describe: _require-study $(MARKER)
 	$(PY) -m granstudies describe $(STUDY)
@@ -31,8 +38,12 @@ compose: _require-study $(MARKER)
 		$(if $(STEPS),--steps $(STEPS),) \
 		$(if $(START),--start $(START),)
 
+# Niente `render` fra i prerequisiti: `all-study` lo ha gia' fatto, e nel giro
+# di `study` la seconda passata era solo rumore nel log (con `for_each:`, un
+# giro in piu' su ogni combinazione). Se l'audio manca, cmd_sv lo dice
+# variante per variante ("esegui prima 'render'").
 .PHONY: sv
-sv: _require-study render
+sv: _require-study $(MARKER)
 	$(PY) -m granstudies sv $(STUDY) $(if $(LAYOUT),--layout $(LAYOUT),) $(if $(STREAM),--stream $(STREAM),)
 
 # Pipeline completa: sweep + stack + versions + percorso + render. versions e
