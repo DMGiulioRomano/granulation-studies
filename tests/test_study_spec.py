@@ -1057,3 +1057,36 @@ def test_loop_start_normalized_negativo_rifiutato():
     with pytest.raises(ValueError, match="fuori bounds") as exc:
         parse_study_spec(d)
     assert "-0.1 normalizzato" in str(exc.value)
+
+
+@pytest.mark.parametrize("k", ["loop_start", "loop_end", "loop_dur"])
+def test_loop_normalized_oltre_la_fine_del_file_rifiutato(k):
+    # Il tetto dei loop_* e' la durata del sample: in frazioni vale 1. Oltre,
+    # l'engine clamperebbe in silenzio alla fine del file.
+    d = _loop_dict("normalized")
+    d["axes"] = {f"pointer.{k}": {"baseline": 0.1, "values": [0.2, 1.3]}}
+    with pytest.raises(ValueError, match="fuori bounds") as exc:
+        parse_study_spec(d)
+    assert "1.3 normalizzato" in str(exc.value)
+
+
+def test_loop_normalized_errore_non_parla_di_secondi():
+    # Sotto normalized i bounds sono in frazioni della durata del sample: il
+    # messaggio non li etichetta "(s)" e non chiede di convertire in secondi,
+    # conversione impossibile senza il file.
+    d = _loop_dict("normalized")
+    d["axes"] = {"pointer.loop_end": {"baseline": 0.1, "values": [1.3]}}
+    with pytest.raises(ValueError) as exc:
+        parse_study_spec(d)
+    msg = str(exc.value)
+    assert "(0, 1.0)" in msg
+    assert "(s)" not in msg
+    assert "secondi" not in msg
+    assert "frazioni della durata del sample" in msg
+
+
+def test_loop_dur_normalized_negativo_rifiutato():
+    d = _loop_dict("normalized")
+    d["axes"] = {"pointer.loop_dur": {"baseline": 0.1, "values": [-0.1, 0.2]}}
+    with pytest.raises(ValueError, match="fuori bounds"):
+        parse_study_spec(d)

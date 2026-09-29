@@ -260,16 +260,22 @@ def _validate(spec: StudySpec, ctx: ErrCtx, *, orders_explicit: bool = False) ->
         # possono essere in campioni o millisecondi (stream.py:415) e le
         # posizioni nel sample frazioni del file (``loop_unit: normalized``).
         declared = bounds_mod.declared_unit(ax.path, spec.base)
+        # Sotto ``loop_unit: normalized`` ``violation`` ritorna i bounds in
+        # frazioni del sample: in secondi non si scrivono senza il file.
+        if bounds_mod.is_sample_fraction(ax.path, declared):
+            b_unit, dominio = "normalizzato", "in frazioni della durata del sample"
+        else:
+            b_unit, dominio = "s", "convertiti in secondi"
         for v in list(ax.values) + [ax.baseline]:
             b = bounds_mod.violation(ax.path, v, unit=declared)
             if b is not None:
                 unit = _UNIT_LABELS.get(declared, "s")
                 raise ctx.err(
                     f"Asse '{ax.name}' valore {v} {unit} fuori bounds {b} "
-                    f"(s) per il path '{ax.path}'.",
+                    f"({b_unit}) per il path '{ax.path}'.",
                     key=("axes", ax.name),
                     axis=ax.name,
-                    hint=f"i valori (e il baseline), convertiti in secondi, "
+                    hint=f"i valori (e il baseline), {dominio}, "
                     f"devono stare in {b}.",
                 )
 

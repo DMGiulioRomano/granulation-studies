@@ -540,3 +540,25 @@ def test_document_clamp_loop_normalized_non_tocca_le_frazioni():
     ld = doc["streams"][0]["pointer"]["loop_dur"]
     pts = ld["points"] if isinstance(ld, dict) else [[0, ld]]
     assert all(v == pytest.approx(0.002) for _, v in pts)
+
+
+def test_document_clamp_loop_normalized_alla_fine_del_file():
+    """Sotto ``loop_unit: normalized`` un valore emergente oltre 1 va portato a
+    1 (la fine del file), come farebbe l'engine: il documento dice cio' che si
+    rende."""
+    from granstudies.stack import generate_stack_document
+
+    data = _study_data()
+    data["base"]["pointer"] = {"loop_unit": "normalized", "loop_start": 0.1}
+    data["axes"]["loop_end"] = {
+        "path": "pointer.loop_end",
+        "baseline": 0.5,
+        "base": 1.4,
+        "range": 0,
+    }
+    data["stack"]["loop_end"] = {"base": 2, "range": 0}
+
+    doc = generate_stack_document(_specs(data))
+    le = doc["streams"][0]["pointer"]["loop_end"]
+    pts = le["points"] if isinstance(le, dict) else [[0, le]]
+    assert all(v == pytest.approx(1.0) for _, v in pts)

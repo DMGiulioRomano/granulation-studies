@@ -164,18 +164,24 @@ def score_pdf(
     )
 
 
-def parameter_bounds(output_sr: Optional[int] = None) -> dict:
+def parameter_bounds(
+    output_sr: Optional[int] = None,
+    sample_dur_sec: Optional[float] = None,
+) -> dict:
     """Bounds dei parametri via ``pge.api.parameter_bounds`` (engine #163).
 
     Senza argomenti equivale al registry statico ``GRANULAR_PARAMETERS``.
     Con ``output_sr`` il minimo di ``grain_duration`` diventa 1 campione
     (``1/output_sr``), lo stesso pavimento dinamico usato dall'engine in
-    render (issue #17 di questo repo).
+    render (issue #17 di questo repo). Con ``sample_dur_sec`` il massimo di
+    ``loop_start``/``loop_end``/``loop_dur`` diventa la durata del sample.
     """
     _ensure_engine_on_path()
     from pge import api
 
-    return api.parameter_bounds(output_sr=output_sr)
+    return api.parameter_bounds(
+        output_sr=output_sr, sample_dur_sec=sample_dur_sec
+    )
 
 
 def pitch_bounds(unit: str):
