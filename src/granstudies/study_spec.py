@@ -73,9 +73,14 @@ class Axis:
 # (plateau/transition) e' proprieta' del processo sweep e vive sotto ``sweep:``.
 _AXES_RESERVED_KEYS = ("interpolation", "seed")
 
-# Nome dei valori attesi per ogni ``grain.duration_unit``, per i messaggi
-# d'errore sui bounds. Unita' assente o ``seconds`` -> secondi.
-_UNIT_LABELS = {"samples": "campioni", "milliseconds": "ms"}
+# Nome dei valori attesi per ogni unita' dichiarata (``grain.duration_unit``,
+# ``pointer.loop_unit``: vedi ``bounds.declared_unit``), per i messaggi
+# d'errore sui bounds. Unita' assente, ``seconds`` o ``absolute`` -> secondi.
+_UNIT_LABELS = {
+    "samples": "campioni",
+    "milliseconds": "ms",
+    "normalized": "normalizzato",
+}
 
 # Vocabolario di ``interpolation`` (curva di Y fra i valori di test): ``step``
 # (tenuta), ``linear`` (rampa), ``cubic`` (curva). Un valore fuori da qui e' un

@@ -1000,7 +1000,7 @@ def _grain_dict(values):
 
 
 def test_grain_duration_seconds_sotto_il_millisecondo_ammessa():
-    # Il floor e' quello dinamico dell'engine (4 campioni a 48k ~ 8.3e-5 s),
+    # Il floor e' quello dinamico dell'engine (1 campione a 48k ~ 2.1e-5 s),
     # non il fallback statico di 1 ms: valori che l'engine renderizza non
     # devono essere rifiutati al parse solo perche' espressi in secondi.
     spec = parse_study_spec(_grain_dict([0.0001, 0.001]))
@@ -1048,6 +1048,16 @@ def test_loop_dur_normalized_sotto_il_minimo_in_secondi_ammesso():
 def test_loop_dur_in_secondi_sotto_il_minimo_rifiutato(loop_unit):
     with pytest.raises(ValueError, match="fuori bounds"):
         parse_study_spec(_loop_dict(loop_unit))
+
+
+def test_loop_start_normalized_negativo_rifiutato():
+    # Lo 0 di loop_start non dipende dalla durata del sample: sotto normalized
+    # un valore negativo resta fuori bounds, e l'errore non lo chiama secondi.
+    d = _loop_dict("normalized")
+    d["axes"] = {"pointer.loop_start": {"baseline": 0.1, "values": [-0.1, 0.2]}}
+    with pytest.raises(ValueError, match="fuori bounds") as exc:
+        parse_study_spec(d)
+    assert "-0.1 normalizzato" in str(exc.value)
 
 
 # --- assi categoriali (grain.envelope) --------------------------------------

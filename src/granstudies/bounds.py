@@ -17,10 +17,16 @@ from typing import Dict, Optional, Tuple
 # Path noti al registry dell'engine ma assenti da ``ALL_SCHEMAS`` (non hanno
 # una voce di schema YAML): unica tabella rimasta a mano. Tutto il resto viene
 # da ``engine_bridge.parameter_schema_paths``.
+#
+# La chiave e' il path dove l'engine *legge* il valore, non il nome del
+# registry: ``num_voices``/``scatter`` stanno nel blocco ``voices:``
+# (``Stream._init_voice_manager``). ``pointer_deviation`` resta fuori: il suo
+# valore non ha una chiave YAML (``_dummy_fixed_zero_``) e la sola manopola,
+# la banda ``pointer.offset_range``, ha i bounds ``min_range``/``max_range``,
+# non quelli del valore che ``bounds_for`` legge.
 _EXTRA_PATHS: Dict[str, str] = {
-    "pointer.deviation": "pointer_deviation",
-    "num_voices": "num_voices",
-    "scatter": "scatter",
+    "voices.num_voices": "num_voices",
+    "voices.scatter": "scatter",
 }
 
 _PITCH_PREFIX = "pitch."
@@ -146,7 +152,8 @@ def bounds_for(
 
     ``max`` puo' essere ``None`` (bound dinamico nell'engine): i ``loop_*``
     dipendono dalla durata del sample, che qui non si conosce, quindi di quelli
-    si valida solo il minimo — e solo in secondi (vedi ``_bounds_in_unit``).
+    si valida solo il minimo — in secondi, o sotto ``normalized`` solo se e' 0
+    (vedi ``_bounds_in_unit``).
 
     ``output_sr`` di default e' quello di render dell'engine, cosi' il minimo di
     ``grain.duration`` e' sempre il pavimento dinamico (1 campione) e mai il
@@ -210,10 +217,13 @@ def _bounds_in_unit(
 
     Le posizioni nel sample hanno bounds in secondi che l'engine applica dopo
     aver riscalato il valore secondo ``loop_unit``. Sotto ``normalized`` la
-    scala e' la durata del sample, che qui non si conosce: ``None``, nessun
-    confronto — il minimo di ``loop_dur`` (0.005 s) rifiuterebbe una frazione
-    che l'engine accetta. Lo stesso per un'unita' fuori vocabolario, che
-    l'engine rifiuta per conto suo (come ``gainmap``, che non la stima).
+    scala e' la durata del sample, che qui non si conosce ma e' positiva:
+    sopravvive solo un bound a zero, che nessun fattore sposta — lo 0 di
+    ``loop_start``/``loop_end``, che l'engine altrimenti applicherebbe
+    clampando in silenzio. Il minimo di ``loop_dur`` (0.005 s) no: rifiuterebbe
+    una frazione che l'engine accetta. Un'unita' fuori vocabolario: ``None``,
+    nessun confronto — l'engine la rifiuta per conto suo (come ``gainmap``,
+    che non la stima).
 
     Un path categoriale (``categorical_domain``) non ha un intervallo: ``None``,
     il valore e' un nome e la sua ammissione la decide il catalogo, al parse.
@@ -222,9 +232,13 @@ def _bounds_in_unit(
         return None
     sr = output_sr or default_output_sr()
     if path in _LOOP_SCALED_PATHS:
-        if unit is not None and unit not in _LOOP_UNITS_IN_SECONDS:
+        b = bounds_for(path, output_sr=sr)
+        if unit is None or unit in _LOOP_UNITS_IN_SECONDS:
+            return b
+        if unit != "normalized" or b is None:
             return None
-        return bounds_for(path, output_sr=sr)
+        lo, hi = b
+        return (lo if lo == 0 else None, hi if hi == 0 else None)
     b = bounds_for(path, output_sr=sr)
     if b is None:
         return None

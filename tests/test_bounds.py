@@ -129,14 +129,57 @@ def test_bounds_pitch_coincidono_con_value_bounds_per_ogni_unita():
 
 def test_path_della_vecchia_tabella_restano_noti():
     # Derivare la mappa dagli schema non deve far perdere la validazione a
-    # nessun path che la tabella a mano copriva.
+    # nessun parametro che la tabella a mano copriva. num_voices e scatter
+    # ci stavano col nome del registry; nello stream vivono nel blocco
+    # ``voices:`` (engine ``Stream._init_voice_manager``), e li' si validano.
     vecchi = {
         "density", "distribution", "fill_factor", "grain.duration", "pan",
-        "volume", "pointer.speed_ratio", "pointer.deviation", "scatter",
-        "num_voices", "pitch.semitones", "pitch.cents",
+        "volume", "pointer.speed_ratio", "voices.scatter",
+        "voices.num_voices", "pitch.semitones", "pitch.cents",
     }
     assert vecchi <= bounds.known_paths()
     assert all(bounds.bounds_for(p) is not None for p in vecchi)
+
+
+def test_bounds_voices_dal_registry():
+    from granstudies.engine_bridge import parameter_bounds
+
+    reg = parameter_bounds()
+    for path, key in (
+        ("voices.num_voices", "num_voices"),
+        ("voices.scatter", "scatter"),
+    ):
+        assert bounds.bounds_for(path) == (reg[key].min_val, reg[key].max_val)
+
+
+def test_nessun_path_noto_e_una_grafia_di_registry():
+    # Un path noto e' una chiave che l'engine legge. Una grafia di registry
+    # validata come path fa passare al parse un asse che atterra dove
+    # l'engine non guarda: il render gira e il parametro resta al default.
+    # - ``num_voices``/``scatter``: si scrivono dentro ``voices:``;
+    # - ``pointer.deviation``: il valore di ``pointer_deviation`` non ha una
+    #   chiave YAML (``_dummy_fixed_zero_``); la sola manopola e' la banda
+    #   ``pointer.offset_range``, i cui bounds sono ``min_range``/``max_range``
+    #   ([0, 1]) e non quelli del valore ([-1, 1]).
+    for p in ("num_voices", "scatter", "pointer.deviation"):
+        assert p not in bounds.known_paths(), p
+        assert bounds.bounds_for(p) is None, p
+
+
+def test_vocabolari_di_unita_coincidono_con_l_engine():
+    # Copie a livello di modulo (``diagnostics`` le importa senza toccare
+    # l'engine), da cui dipende ora il confronto coi bounds: ``LOOP_UNIT_SCOPE``
+    # decide quali path leggono ``loop_unit``. L'ordine conta: la prima
+    # grafia e' la canonica.
+    from granstudies.engine_bridge import _ensure_engine_on_path
+
+    _ensure_engine_on_path()
+    from pge.controllers import pointer_controller
+    from pge.core import stream
+
+    assert bounds.LOOP_UNITS == pointer_controller.LOOP_UNITS
+    assert bounds.LOOP_UNIT_SCOPE == pointer_controller._LOOP_UNIT_SCOPE
+    assert bounds.GRAIN_DURATION_UNITS == stream.GRAIN_DURATION_UNITS
 
 
 def test_bounds_read_direction_dagli_schema_engine():
@@ -174,6 +217,8 @@ def test_violation_confronta_nell_unita_e_ritorna_secondi():
         ("pitch.ratio", 0.5, None),
         ("pointer.loop_dur", 0.001, None),
         ("pointer.loop_dur", 0.001, "normalized"),
+        ("pointer.loop_start", -0.1, "normalized"),
+        ("pointer.loop_start", 0.5, "normalized"),
     ],
 )
 def test_violation_e_clamp_concordano(path, value, unit):
@@ -193,6 +238,22 @@ def test_loop_normalized_non_si_confronta_coi_bounds_in_secondi():
     for u in (None, "seconds", "absolute"):
         assert bounds.violation("pointer.loop_dur", 0.003, unit=u) == (0.005, None)
         assert bounds.clamp("pointer.loop_dur", 0.003, unit=u) == 0.005
+
+
+def test_loop_normalized_il_pavimento_a_zero_vale_in_ogni_scala():
+    # La durata del sample e' ignota ma positiva: nessun fattore sposta lo 0.
+    # Un loop_start/loop_end negativo in frazioni e' negativo anche in secondi,
+    # e l'engine lo clamperebbe in silenzio a 0 (``Parameter._clamp``): va
+    # fermato qui come in secondi. Il minimo di loop_dur (0.005 s) invece non
+    # e' invariante e resta fuori dal confronto.
+    for k in ("loop_start", "loop_end"):
+        path = f"pointer.{k}"
+        assert bounds.violation(path, -0.1, unit="normalized") == (0, None)
+        assert bounds.clamp(path, -0.1, unit="normalized") == 0
+        assert bounds.violation(path, 0.5, unit="normalized") is None
+    assert bounds.violation("pointer.loop_dur", -0.1, unit="normalized") is None
+    # fuori vocabolario l'engine rifiuta la chiave per conto suo: nessun confronto
+    assert bounds.violation("pointer.loop_start", -0.1, unit="normalised") is None
 
 
 def test_declared_unit_legge_la_chiave_giusta_per_path():
