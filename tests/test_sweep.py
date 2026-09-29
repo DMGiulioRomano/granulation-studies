@@ -118,3 +118,26 @@ def test_to_document_has_stream_id():
     )
     doc = generate_variants(spec)[0].to_document(spec)
     assert doc["streams"][0]["stream_id"]  # l'engine lo richiede
+
+
+def test_asse_categoriale_nelle_varianti_discrete():
+    # Un file per finestra: il valore scalare e' il nome, verbatim.
+    spec = parse_study_spec(
+        {
+            "study_id": "s",
+            "base": {"sample": "x.wav", "duration": 8},
+            "axes": {
+                "interpolation": "step",
+                "grain.envelope": {"values": ["expodec", "sinc"]},
+            },
+            "sweep": {"mode": "discrete", "orders": [0, 1]},
+        }
+    )
+    variants = generate_discrete_variants(spec)
+    assert [v.name for v in variants] == [
+        "o0__baseline",
+        "o1__grain.envelope=expodec",
+        "o1__grain.envelope=sinc",
+    ]
+    grains = [v.to_document(spec)["streams"][0]["grain"] for v in variants]
+    assert [g["envelope"] for g in grains] == ["hanning", "expodec", "sinc"]

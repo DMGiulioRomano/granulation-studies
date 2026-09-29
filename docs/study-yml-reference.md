@@ -80,6 +80,21 @@ axes:                             # * almeno un asse
     range: .002
     interpolation: cubic         # es. density a scalini + grain morbido nello stesso file
 
+  grain.envelope:                # asse CATEGORIALE: il dominio non e' un intervallo
+                                 # ma l'elenco dei nomi noti all'engine (le finestre
+                                 # di WindowRegistry, alias come `triangle` compresi).
+                                 # I values sono stringhe, non numeri; un nome fuori
+                                 # catalogo e' errore di parse, e il confronto bounds
+                                 # non si applica. Solo `values` (ramp e banda danno
+                                 # numeri); baseline omesso → default engine (hanning).
+    values: [hanning, expodec, sinc]
+    interpolation: step          # obbligatorio qui: fra due nomi non c'e' rampa
+                                 # (senza override vale `axes.interpolation`).
+                                 # Si muove solo in `sweep.mode: discrete` (un file
+                                 # per nome): l'engine non ha un envelope di nomi,
+                                 # quindi un file envelope che lo muove e' errore, e
+                                 # in `stack:` tiene un nome per stream.
+
 # Configurazione dello sweep (il processo possiede X: timing e durata derivata).
 sweep:
   mode: envelope                 # discrete | envelope | both (default discrete)

@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 
 from . import bounds as bounds_mod
 from . import gainmap
+from .errors import SpecError
 from .study_spec import StudySpec
 from .value_generators import band, band_at, expand_params, ramp
 from .x_strategies import resolve_x, walk, x_owns_n
@@ -168,6 +169,18 @@ def build_stack_stream(
         ]
         if len(env) == 1:
             overrides[ax.path] = env[0][1]
+        elif bounds_mod.categorical_domain(ax.path) is not None:
+            # Piu' nomi diventerebbero un envelope di nomi, che l'engine non
+            # legge: in stack un asse categoriale e' un nome per stream.
+            raise SpecError(
+                f"Asse '{ax.name}': un asse categoriale ('{ax.path}') in stack "
+                f"tiene un solo valore per stream (trovati {len(env)}).",
+                key=("axes", ax.name),
+                axis=ax.name,
+                stream=spec.stream_id,
+                hint="un nome per stream ('values: [expodec]'): nomi diversi "
+                "vanno su stream diversi.",
+            )
         else:
             overrides[ax.path] = env
             types[ax.path] = ax.interpolation

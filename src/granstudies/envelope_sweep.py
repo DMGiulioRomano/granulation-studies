@@ -17,6 +17,8 @@ import itertools
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
+from . import bounds as bounds_mod
+from .errors import SpecError
 from .study_spec import Axis, StudySpec
 
 
@@ -222,4 +224,31 @@ def generate_envelope_variants(spec: StudySpec) -> List[EnvelopeVariant]:
                     combinations=combinations,
                 )
             )
+    _check_categorical_not_moved(spec, variants)
     return variants
+
+
+def _check_categorical_not_moved(
+    spec: StudySpec, variants: List[EnvelopeVariant]
+) -> None:
+    """Ferma un asse categoriale mosso in un file envelope.
+
+    Mosso, l'asse diventerebbe ``{type: step, points: [[t, nome], ...]}``: per
+    ``grain.envelope`` l'engine accetta un nome, una lista, ``transition`` o
+    ``multistate``, non un envelope a breakpoint, e rifiuterebbe il file solo
+    al render. Fermo (al baseline) resta un nome scalare e va bene.
+    """
+    for ev in variants:
+        for name in ev.moved:
+            ax = spec.axis(name)
+            if bounds_mod.categorical_domain(ax.path) is None:
+                continue
+            raise SpecError(
+                f"Asse '{name}': un asse categoriale ('{ax.path}') non si muove "
+                f"in un file envelope (sweep.mode: {spec.mode}) — fra due nomi "
+                "l'engine non ha un envelope a breakpoint.",
+                key=("axes", name),
+                axis=name,
+                stream=spec.stream_id,
+                hint="usa 'sweep.mode: discrete': un file per valore.",
+            )

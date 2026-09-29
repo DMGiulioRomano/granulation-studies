@@ -295,3 +295,22 @@ def test_declared_unit_legge_la_chiave_giusta_per_path():
     assert bounds.declared_unit("density", doc) is None
     assert bounds.declared_unit("pointer.speed_ratio", doc) is None
     assert bounds.declared_unit("grain.duration", {}) is None
+
+
+def test_categorical_domain_e_il_catalogo_finestre_dell_engine():
+    # Nessuna tabella copiata: il dominio di grain.envelope e' il catalogo
+    # dell'engine, alias compresi.
+    dom = bounds.categorical_domain("grain.envelope")
+    from pge.controllers.window_registry import WindowRegistry
+
+    assert dom == frozenset(WindowRegistry.all_names())
+    assert {"hanning", "expodec", "triangle"} <= dom
+    assert bounds.categorical_domain("density") is None
+    assert bounds.categorical_domain("non.esiste") is None
+
+
+def test_path_categoriale_fuori_dal_confronto_bounds():
+    # Il registry da' a grain.envelope bounds (0, 0) che non descrivono un
+    # nome: violation e clamp (l'unico confronto) non li applicano.
+    assert bounds.violation("grain.envelope", "expodec") is None
+    assert bounds.clamp("grain.envelope", "expodec") == "expodec"
