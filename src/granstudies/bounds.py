@@ -150,9 +150,10 @@ def bounds_for(
     (l'ultimo segmento e' il nome dell'unita', come nel blocco ``pitch:`` dello
     YAML).
 
-    ``max`` puo' essere ``None`` (bound dinamico nell'engine): i ``loop_*``
-    dipendono dalla durata del sample, che qui non si conosce, quindi di quelli
-    si valida solo il minimo — in secondi, o sotto ``normalized`` solo se e' 0
+    ``max`` puo' essere ``None`` (bound dinamico nell'engine): il tetto dei
+    ``loop_*`` e' la durata del sample, che qui non si conosce, quindi in
+    secondi di quelli si valida solo il minimo. Sotto ``normalized`` il tetto
+    torna noto (1, la fine del file) e il minimo diventa un pavimento a 0
     (vedi ``_bounds_in_unit``).
 
     ``output_sr`` di default e' quello di render dell'engine, cosi' il minimo di
@@ -203,6 +204,44 @@ def declared_unit(path: str, doc: Dict) -> Optional[str]:
     return sub.get(key) if isinstance(sub, dict) else None
 
 
+def is_sample_fraction(path: str, unit: Optional[str]) -> bool:
+    """True se il valore di ``path`` e' una frazione della durata del sample.
+
+    Vale per le posizioni di ``LOOP_UNIT_SCOPE`` sotto ``loop_unit:
+    normalized`` (``unit`` e' quella di ``declared_unit``): li' ``violation``
+    ritorna i bounds in frazioni, non in secondi.
+    """
+    return path in _LOOP_SCALED_PATHS and unit == "normalized"
+
+
+def _sample_fraction_bounds(
+    path: str, lo: Optional[float]
+) -> Tuple[Optional[float], Optional[float]]:
+    """Bounds di una posizione nel sample in frazioni della sua durata.
+
+    L'engine riscala la frazione per ``sample_dur_sec`` e poi applica i bounds
+    in secondi ``[min_val, sample_dur_sec]``: in frazioni sono
+    ``[min_val / sample_dur_sec, 1]``. La durata qui non si conosce, ma:
+
+    - il tetto e' proporzionale alla durata, quindi in frazioni non ne dipende:
+      e' il max dell'engine a ``sample_dur_sec=1``, la fine del file. Oltre,
+      l'engine clamperebbe in silenzio;
+    - la scala e' positiva e non cambia il segno: un minimo >= 0 in secondi
+      rifiuta ogni frazione negativa, che l'engine altrimenti porterebbe al
+      minimo in silenzio. Il pavimento e' 0 — esatto per ``loop_start``/
+      ``loop_end`` (minimo 0), largo per ``loop_dur``, il cui minimo (0.005 s)
+      in frazioni dipende dal file e non si confronta (rifiuterebbe una
+      frazione che l'engine accetta). Resta fuori proprio ``loop_dur: 0``:
+      sotto il minimo su qualunque file, ma senza un valore ammesso noto a cui
+      ``clamp`` possa portarlo.
+    """
+    from .engine_bridge import parameter_bounds
+
+    ceiling = parameter_bounds(sample_dur_sec=1.0)[_path_map()[path]].max_val
+    floor = 0 if lo is not None and lo >= 0 else None
+    return floor, ceiling
+
+
 def _bounds_in_unit(
     path: str,
     *,
@@ -216,14 +255,11 @@ def _bounds_in_unit(
     posizioni nel sample; sugli altri path viene ignorato.
 
     Le posizioni nel sample hanno bounds in secondi che l'engine applica dopo
-    aver riscalato il valore secondo ``loop_unit``. Sotto ``normalized`` la
-    scala e' la durata del sample, che qui non si conosce ma e' positiva:
-    sopravvive solo un bound a zero, che nessun fattore sposta — lo 0 di
-    ``loop_start``/``loop_end``, che l'engine altrimenti applicherebbe
-    clampando in silenzio. Il minimo di ``loop_dur`` (0.005 s) no: rifiuterebbe
-    una frazione che l'engine accetta. Un'unita' fuori vocabolario: ``None``,
-    nessun confronto — l'engine la rifiuta per conto suo (come ``gainmap``,
-    che non la stima).
+    aver riscalato il valore secondo ``loop_unit``. Sotto ``normalized`` il
+    valore e' una frazione della durata del sample e i bounds si riportano in
+    frazioni (vedi ``_sample_fraction_bounds``). Un'unita' fuori vocabolario:
+    ``None``, nessun confronto — l'engine la rifiuta per conto suo (come
+    ``gainmap``, che non la stima).
 
     Un path categoriale (``categorical_domain``) non ha un intervallo: ``None``,
     il valore e' un nome e la sua ammissione la decide il catalogo, al parse.
@@ -233,12 +269,13 @@ def _bounds_in_unit(
     sr = output_sr or default_output_sr()
     if path in _LOOP_SCALED_PATHS:
         b = bounds_for(path, output_sr=sr)
+        if b is None:
+            return None
         if unit is None or unit in _LOOP_UNITS_IN_SECONDS:
             return b
-        if unit != "normalized" or b is None:
+        if unit != "normalized":
             return None
-        lo, hi = b
-        return (lo if lo == 0 else None, hi if hi == 0 else None)
+        return _sample_fraction_bounds(path, b[0])
     b = bounds_for(path, output_sr=sr)
     if b is None:
         return None
@@ -264,13 +301,17 @@ def violation(
     Unico punto in cui si decide se un valore e' ammesso: il confronto avviene
     nell'unita' di ``value`` (vedi ``_bounds_in_unit``), il ritorno e' nel
     dominio in cui i bounds sono dichiarati — secondi per ``grain.duration`` —
-    perche' e' quello in cui ha senso mostrarli in un errore.
+    perche' e' quello in cui ha senso mostrarli in un errore. Le frazioni del
+    sample fanno eccezione (``is_sample_fraction``): in secondi i loro bounds
+    non si scrivono senza la durata del file, e tornano in frazioni.
     """
     b = _bounds_in_unit(path, unit=unit, output_sr=output_sr)
     if b is None:
         return None
     lo, hi = b
     if (lo is not None and value < lo) or (hi is not None and value > hi):
+        if is_sample_fraction(path, unit):
+            return b
         return bounds_for(path, output_sr=output_sr)
     return None
 

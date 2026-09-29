@@ -219,6 +219,9 @@ def test_violation_confronta_nell_unita_e_ritorna_secondi():
         ("pointer.loop_dur", 0.001, "normalized"),
         ("pointer.loop_start", -0.1, "normalized"),
         ("pointer.loop_start", 0.5, "normalized"),
+        ("pointer.loop_end", 1.3, "normalized"),
+        ("pointer.loop_dur", -0.1, "normalized"),
+        ("pointer.loop_dur", 1.5, "normalized"),
     ],
 )
 def test_violation_e_clamp_concordano(path, value, unit):
@@ -241,19 +244,44 @@ def test_loop_normalized_non_si_confronta_coi_bounds_in_secondi():
 
 
 def test_loop_normalized_il_pavimento_a_zero_vale_in_ogni_scala():
-    # La durata del sample e' ignota ma positiva: nessun fattore sposta lo 0.
-    # Un loop_start/loop_end negativo in frazioni e' negativo anche in secondi,
-    # e l'engine lo clamperebbe in silenzio a 0 (``Parameter._clamp``): va
-    # fermato qui come in secondi. Il minimo di loop_dur (0.005 s) invece non
-    # e' invariante e resta fuori dal confronto.
-    for k in ("loop_start", "loop_end"):
+    # La durata del sample e' ignota ma positiva: nessun fattore cambia il
+    # segno. Una posizione negativa in frazioni e' negativa anche in secondi, e
+    # l'engine la clamperebbe in silenzio al minimo (``Parameter._clamp``): va
+    # fermata qui come in secondi. Per loop_start/loop_end il minimo e' 0 e il
+    # pavimento e' esatto; per loop_dur (0.005 s) e' largo ma sicuro: ogni
+    # frazione negativa e' sotto 0.005 s su qualunque file.
+    for k in ("loop_start", "loop_end", "loop_dur"):
         path = f"pointer.{k}"
-        assert bounds.violation(path, -0.1, unit="normalized") == (0, None)
-        assert bounds.clamp(path, -0.1, unit="normalized") == 0
-        assert bounds.violation(path, 0.5, unit="normalized") is None
-    assert bounds.violation("pointer.loop_dur", -0.1, unit="normalized") is None
+        assert bounds.violation(path, -0.1, unit="normalized") == (0, 1.0), k
+        assert bounds.clamp(path, -0.1, unit="normalized") == 0, k
+        assert bounds.violation(path, 0.5, unit="normalized") is None, k
     # fuori vocabolario l'engine rifiuta la chiave per conto suo: nessun confronto
     assert bounds.violation("pointer.loop_start", -0.1, unit="normalised") is None
+
+
+def test_loop_normalized_il_tetto_e_la_fine_del_file():
+    # Il tetto dinamico dei loop_* e' la durata del sample (``max_val =
+    # sample_dur_sec``): riportato in frazioni vale 1, su qualunque file. Una
+    # frazione oltre 1 e' oltre la fine del file, e l'engine la porterebbe li'
+    # in silenzio.
+    for k in ("loop_start", "loop_end", "loop_dur"):
+        path = f"pointer.{k}"
+        assert bounds.violation(path, 1.3, unit="normalized") == (0, 1.0), k
+        assert bounds.clamp(path, 1.3, unit="normalized") == 1.0, k
+        assert bounds.violation(path, 1.0, unit="normalized") is None, k
+    # in secondi la durata del file resta ignota: nessun tetto
+    for u in (None, "seconds", "absolute"):
+        assert bounds.violation("pointer.loop_end", 1.3, unit=u) is None
+
+
+def test_premessa_il_tetto_dei_loop_e_la_durata_del_sample():
+    # Il tetto in frazioni si legge dall'engine, non si trascrive: regge
+    # finche' il max dinamico dei loop_* e' proporzionale alla durata.
+    from granstudies.engine_bridge import parameter_bounds
+
+    for key in ("loop_start", "loop_end", "loop_dur"):
+        for dur in (0.5, 7.0):
+            assert parameter_bounds(sample_dur_sec=dur)[key].max_val == dur
 
 
 def test_declared_unit_legge_la_chiave_giusta_per_path():
