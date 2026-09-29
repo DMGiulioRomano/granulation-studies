@@ -562,3 +562,35 @@ def test_document_clamp_loop_normalized_alla_fine_del_file():
     le = doc["streams"][0]["pointer"]["loop_end"]
     pts = le["points"] if isinstance(le, dict) else [[0, le]]
     assert all(v == pytest.approx(1.0) for _, v in pts)
+
+
+# --- asse categoriale (grain.envelope) -----------------------------------------
+
+def _categorical_data(values_a, values_b=None):
+    data = _study_data()
+    data["axes"]["grain.envelope"] = {"values": values_a, "interpolation": "step"}
+    if values_b is not None:
+        data["streams"]["voce_b"]["axes"] = {"grain.envelope": {"values": values_b}}
+    return data
+
+
+def test_asse_categoriale_a_un_valore_e_un_nome_per_stream():
+    # Un valore per stream -> scalare: ogni voce dello stack con la sua
+    # finestra. Il clamp (bounds) non tocca il nome.
+    from granstudies.stack import generate_stack_document
+
+    doc = generate_stack_document(_specs(_categorical_data(["expodec"], ["sinc"])))
+    envs = [s["grain"]["envelope"] for s in doc["streams"]]
+    assert envs == ["expodec", "sinc"]
+
+
+def test_asse_categoriale_a_piu_valori_in_stack_e_errore():
+    # Piu' valori diventerebbero un envelope di nomi, che l'engine rifiuta.
+    from granstudies.errors import SpecError
+    from granstudies.stack import generate_stack_document
+
+    with pytest.raises(SpecError) as exc:
+        generate_stack_document(_specs(_categorical_data(["expodec", "sinc"])))
+    assert exc.value.axis == "grain.envelope"
+    assert exc.value.stream == "voce_a"
+    assert "stack" in exc.value.msg

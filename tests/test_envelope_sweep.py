@@ -453,3 +453,43 @@ def test_orders_empty_no_orderings_is_silence():
 def test_ordering_single_axis_is_error():
     with pytest.raises(Exception, match="meno di 2 assi"):
         _spec_orderings([["density"]])
+
+
+# --- asse categoriale (grain.envelope) -----------------------------------------
+
+def _categorical_spec(sweep):
+    return parse_study_spec(
+        {
+            "study_id": "s",
+            "base": {"sample": "x.wav"},
+            "axes": {
+                "density": {"baseline": 20, "values": [5, 50]},
+                "pan": {"baseline": 0.0, "values": [-1.0, 1.0]},
+                "grain.envelope": {
+                    "values": ["expodec", "sinc"],
+                    "interpolation": "step",
+                },
+            },
+            "sweep": {"mode": "envelope", **sweep},
+        }
+    )
+
+
+def test_asse_categoriale_mosso_in_envelope_e_errore():
+    # Fra due nomi non c'e' envelope: l'engine rifiuterebbe
+    # 'grain.envelope: {type: step, points: [[0, expodec], ...]}' al render.
+    # Meglio fermarsi qui, prima di scrivere un file che non suona.
+    from granstudies.errors import SpecError
+
+    with pytest.raises(SpecError) as exc:
+        generate_envelope_variants(_categorical_spec({"orders": [1]}))
+    assert exc.value.axis == "grain.envelope"
+    assert "discrete" in exc.value.hint
+
+
+def test_asse_categoriale_fermo_resta_scalare_in_envelope():
+    # Non mosso, l'asse resta al baseline: un nome scalare, che l'engine legge.
+    spec = _categorical_spec({"orderings": [["density", "pan"]]})
+    (ev,) = generate_envelope_variants(spec)
+    assert ev.moved == ["density", "pan"]
+    assert ev.overrides(spec)["grain.envelope"] == "hanning"

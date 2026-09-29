@@ -234,6 +234,30 @@ def _validate(spec: StudySpec, ctx: ErrCtx, *, orders_explicit: bool = False) ->
                 axis=ax.name,
                 hint="dichiara 'values', 'ramp' o una banda ('base'/'range'/'n').",
             )
+        # Asse categoriale (``grain.envelope``): il dominio e' un elenco di nomi,
+        # non un intervallo. I valori sono stringhe, si validano contro il
+        # catalogo dell'engine e saltano il confronto bounds, che qui non ha
+        # senso. Che i nomi arrivino da ``values`` e che l'interpolazione sia
+        # ``step`` lo garantisce gia' il parse (``_check_categorical_generator``,
+        # ``_check_categorical_interpolation``): li' si sa da dove viene il
+        # generatore e da dove l'interpolazione, qui non piu'.
+        domain = bounds_mod.categorical_domain(ax.path)
+        if domain is not None:
+            for slot, v in (
+                [("baseline", ax.baseline)] + [("values", x) for x in ax.values]
+            ):
+                # ``isinstance`` prima di ``in``: un nodo-expr o una lista non
+                # sono hashabili, e il confronto col catalogo alzerebbe un
+                # TypeError grezzo invece di questo errore col path.
+                if not isinstance(v, str) or v not in domain:
+                    raise ctx.err(
+                        f"Asse '{ax.name}': '{slot}' contiene {v!r}, che non e' "
+                        f"un valore ammesso per il path '{ax.path}'.",
+                        key=("axes", ax.name, slot),
+                        axis=ax.name,
+                        hint=f"ammessi: {', '.join(sorted(domain))}.",
+                    )
+            continue
         # Non-numero fuori sede: ``baseline`` e gli elementi di ``values`` sono
         # slot *strutturali* (il baseline di riposo, i valori che si enumerano),
         # non ambienti Env dove un ``expr:`` avrebbe senso. Qualunque non-numero
@@ -278,6 +302,85 @@ def _validate(spec: StudySpec, ctx: ErrCtx, *, orders_explicit: bool = False) ->
                     hint=f"i valori (e il baseline), {dominio}, "
                     f"devono stare in {b}.",
                 )
+
+
+def _check_categorical_generator(
+    name: str, path: str, cfg: Dict[str, Any], gen_key: str, ctx: ErrCtx
+) -> None:
+    """Un asse categoriale enumera i nomi con ``values``: non li genera.
+
+    ``ramp`` e la banda producono numeri. Il controllo sta qui e non in
+    ``_validate`` perche' il parse espande il generatore prima di costruire
+    l'asse: su un path categoriale chi sbaglia generatore ci scrive dei nomi
+    (``ramp: {start: hanning, ...}``), e l'aritmetica di ``ramp``/``band`` su
+    una stringa alzerebbe un ``TypeError`` grezzo, senza path ne' rimedio.
+
+    Lo stesso per ``values`` scritto senza lista (``values: expodec``): il
+    generatore la spezzerebbe in lettere e ``_validate`` accuserebbe la
+    ``'e'``. Su un asse di nomi e' lo sbaglio naturale, perche' in stack ne
+    serve uno per stream.
+    """
+    if bounds_mod.categorical_domain(path) is None:
+        return
+    if gen_key == "values":
+        raw = cfg["values"]
+        if isinstance(raw, str):
+            raise ctx.err(
+                f"Asse '{name}': 'values' vuole una lista di nomi (trovato "
+                f"{raw!r}).",
+                key=("axes", name, "values"),
+                axis=name,
+                hint=f"anche per un nome solo: 'values: [{raw}]'.",
+            )
+        return
+    raise ctx.err(
+        f"Asse '{name}': un asse categoriale ('{path}') enumera nomi, non li "
+        "genera.",
+        key=("axes", name),
+        axis=name,
+        hint="dichiara i nomi con 'values: [...]': 'ramp' e la banda "
+        "producono numeri.",
+    )
+
+
+def _check_categorical_interpolation(
+    name: str,
+    path: str,
+    cfg: Dict[str, Any],
+    axes_raw: Dict[str, Any],
+    interpolation: str,
+    ctx: ErrCtx,
+) -> None:
+    """Un asse categoriale vuole ``interpolation: step``: fra due nomi non c'e'
+    rampa da percorrere.
+
+    L'interpolazione di un asse viene da tre posti: scritta sull'asse,
+    ereditata da ``axes.interpolation``, o il default ``linear`` che nessuno
+    scrive. L'errore nomina la chiave che la dichiara davvero, quella che ha una
+    riga nel file: puntare sempre a ``axes.<asse>.interpolation`` lasciava
+    l'errore senza riga nei due casi piu' comuni, e "dichiarato: linear" su un
+    file che non lo scrive manda a cercare una chiave che non c'e'. Per questo
+    il controllo sta qui e non in ``_validate``, dove la provenienza e' persa.
+    """
+    if bounds_mod.categorical_domain(path) is None or interpolation == "step":
+        return
+    if "interpolation" in cfg:
+        key = ("axes", name, "interpolation")
+        fonte = f"dichiarata sull'asse: {interpolation}"
+    elif "interpolation" in axes_raw:
+        key = ("axes", "interpolation")
+        fonte = f"ereditata da 'axes.interpolation': {interpolation}"
+    else:
+        key = ("axes", name)
+        fonte = f"nessuna dichiarata, vale il default {interpolation}"
+    raise ctx.err(
+        f"Asse '{name}': un asse categoriale vuole 'interpolation: step' "
+        f"({fonte}).",
+        key=key,
+        axis=name,
+        hint="fra due valori nominali non c'e' rampa da percorrere: scrivi "
+        f"'interpolation: step' sull'asse (axes.{name}.interpolation).",
+    )
 
 
 def _resolve_baseline(
@@ -769,6 +872,11 @@ def parse_study_spec(
         # canonica values|ramp|band, con i parametri della banda raccolti piatti.
         with ctx.wrapping(key=("axes", name), axis=name):
             gen_key, gen_params = y_generator(cfg)
+        _check_categorical_generator(name, path, cfg, gen_key, ctx)
+        interpolation = cfg.get("interpolation", study_interpolation)
+        _check_categorical_interpolation(
+            name, path, cfg, axes_raw, interpolation, ctx
+        )
         _check_generator_complete(name, gen_key, gen_params, ctx)
         x_cfg = (stack_axes or {}).get(name)
         defers = gen_key == "band" and "n" not in gen_params
@@ -787,13 +895,24 @@ def parse_study_spec(
         else:
             # n-ownership, verso Y: con la camminata-X la Y non puo' contare i valori.
             if x_owns_n(x_cfg):
+                # Su un asse categoriale la banda e' vietata
+                # (``_check_categorical_generator``): il rimedio resta uno.
+                if bounds_mod.categorical_domain(path) is not None:
+                    hint = (
+                        f"togli la camminata-X (stack.{name}): un asse "
+                        "categoriale tiene un nome per stream, senza tempi."
+                    )
+                else:
+                    hint = (
+                        f"usa la banda senza 'n' su axes.{name}, oppure togli "
+                        f"la camminata-X (stack.{name})."
+                    )
                 raise ctx.err(
                     f"Asse '{name}': la camminata-X 'base' possiede n, ma il "
                     f"generatore Y '{gen_key}' enumera i valori.",
                     key=("stack", name),
                     axis=name,
-                    hint=f"usa la banda senza 'n' su axes.{name}, oppure togli "
-                    f"la camminata-X (stack.{name}).",
+                    hint=hint,
                 )
             # Seam sweep/Y dei generatori annidati: i nodi dentro gli Env
             # (base/range della banda, step del ramp) si compilano in
@@ -816,7 +935,7 @@ def parse_study_spec(
                     name, cfg, _defaults_cache, ctx, _grain_unit
                 ),
                 values=values,
-                interpolation=cfg.get("interpolation", study_interpolation),
+                interpolation=interpolation,
                 generator={gen_key: gen_params},
             )
         )

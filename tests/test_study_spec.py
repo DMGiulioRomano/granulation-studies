@@ -1,5 +1,6 @@
 import pytest
 
+from granstudies.errors import SpecError
 from granstudies.study_spec import parse_study_spec, resolve_streams
 
 
@@ -1090,3 +1091,193 @@ def test_loop_dur_normalized_negativo_rifiutato():
     d["axes"] = {"pointer.loop_dur": {"baseline": 0.1, "values": [-0.1, 0.2]}}
     with pytest.raises(ValueError, match="fuori bounds"):
         parse_study_spec(d)
+
+
+# --- assi categoriali (grain.envelope) --------------------------------------
+
+def _envelope_axis(values, interpolation="step", **axis):
+    return {
+        "study_id": "s",
+        "base": {"onset": 0, "duration": 8, "sample": "x.wav"},
+        "axes": {
+            "interpolation": interpolation,
+            "grain.duration": {"values": [0.001, 0.01]},
+            "grain.envelope": {"values": values, **axis},
+        },
+        "sweep": {"mode": "discrete", "orders": [2]},
+    }
+
+
+def test_categorical_axis_accepts_window_names():
+    # `grain.envelope` non ha min/max: il suo dominio e' il catalogo delle
+    # finestre dell'engine, e i valori sono stringhe.
+    spec = parse_study_spec(_envelope_axis(["hanning", "expodec", "sinc"]), "s")
+    ax = spec.axis("grain.envelope")
+    assert ax.values == ["hanning", "expodec", "sinc"]
+    assert ax.baseline == "hanning"      # default engine, non dichiarato
+
+
+def test_categorical_axis_rejects_unknown_window():
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(_envelope_axis(["hanning", "banana"]), "s")
+    e = exc.value
+    assert e.key == ("axes", "grain.envelope", "values")
+    assert "banana" in e.msg
+
+
+def test_categorical_axis_requires_step_interpolation():
+    # Il ``linear`` qui e' quello di studio (``axes.interpolation``): l'errore
+    # nomina la chiave che lo dichiara, non quella assente sull'asse.
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(_envelope_axis(["hanning", "expodec"], "linear"), "s")
+    assert exc.value.key == ("axes", "interpolation")
+
+
+_ENVELOPE_INTERP_YAML = {
+    "sull'asse": (
+        "axes:\n"
+        "  grain.envelope:\n"
+        "    values: [expodec, sinc]\n"
+        "    interpolation: cubic\n",
+        ("axes", "grain.envelope", "interpolation"),
+        4,
+        "dichiarata sull'asse: cubic",
+    ),
+    "ereditata": (
+        "axes:\n"
+        "  interpolation: linear\n"
+        "  grain.envelope:\n"
+        "    values: [expodec, sinc]\n",
+        ("axes", "interpolation"),
+        2,
+        "ereditata da 'axes.interpolation': linear",
+    ),
+    "default": (
+        "axes:\n"
+        "  grain.envelope:\n"
+        "    values: [expodec, sinc]\n",
+        ("axes", "grain.envelope"),
+        2,
+        "nessuna dichiarata, vale il default linear",
+    ),
+}
+
+
+@pytest.mark.parametrize("fonte", list(_ENVELOPE_INTERP_YAML))
+def test_categorical_axis_interpolation_errore_nomina_la_chiave_che_la_dichiara(fonte):
+    # L'interpolazione di un asse viene da tre posti: l'asse, 'axes.
+    # interpolation', o il default linear che nessuno scrive. L'errore deve
+    # puntare alla chiave che c'e' davvero (con la sua riga) e dire da dove
+    # viene il valore: "dichiarato: linear" su un file che non lo scrive da
+    # nessuna parte manda a cercare una chiave che non esiste.
+    from granstudies import yaml_loc
+
+    axes, key, line, fonte_msg = _ENVELOPE_INTERP_YAML[fonte]
+    text = (
+        "study_id: s\n"
+        + axes
+        + "base: {duration: 8, sample: x.wav}\n"
+        + "sweep: {mode: discrete}\n"
+    )
+    data, locs = yaml_loc.loads(text, source="study.yml")
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(data, "s", locs=locs)
+    e = exc.value
+    assert e.key == key
+    assert e.line == line + 1          # +1: la riga di study_id
+    assert fonte_msg in e.msg
+    assert "grain.envelope" in e.hint
+
+
+def test_categorical_axis_accetta_l_alias_dell_engine():
+    # `triangle` e' un alias di `bartlett` nel catalogo: l'engine lo accetta,
+    # quindi anche il parse.
+    spec = parse_study_spec(_envelope_axis(["triangle", "bartlett"]), "s")
+    assert spec.axis("grain.envelope").values == ["triangle", "bartlett"]
+
+
+def test_categorical_axis_baseline_fuori_catalogo_rifiutato():
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(_envelope_axis(["hanning"], baseline="banana"), "s")
+    assert exc.value.key == ("axes", "grain.envelope", "baseline")
+    assert "banana" in exc.value.msg
+    assert "expodec" in exc.value.hint     # il rimedio elenca il catalogo
+
+
+def test_categorical_axis_con_path_esplicito():
+    # Il dominio e' del path, non del nome dell'asse.
+    d = _envelope_axis(["hanning"])
+    d["axes"]["finestra"] = d["axes"].pop("grain.envelope")
+    d["axes"]["finestra"]["path"] = "grain.envelope"
+    d["axes"]["finestra"]["values"] = ["expodec", "sinc"]
+    assert parse_study_spec(d, "s").axis("finestra").values == ["expodec", "sinc"]
+    d["axes"]["finestra"]["values"] = ["banana"]
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(d, "s")
+    assert exc.value.key == ("axes", "finestra", "values")
+
+
+def test_categorical_axis_valore_non_nome_e_spec_error():
+    # Un nodo-expr (un dict) non e' un nome: errore di parse col path, non un
+    # TypeError grezzo dal confronto con il catalogo.
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(_envelope_axis(["hanning", {"expr": "1"}]), "s")
+    assert exc.value.key == ("axes", "grain.envelope", "values")
+
+
+def test_categorical_axis_vuole_values():
+    # ramp e banda generano numeri: fra due nomi non c'e' rampa ne' banda.
+    d = _envelope_axis(["hanning"])
+    d["axes"]["grain.envelope"] = {"ramp": {"start": 1, "stop": 3, "step": 1}}
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(d, "s")
+    assert exc.value.key == ("axes", "grain.envelope")
+    assert "values" in exc.value.hint
+
+
+@pytest.mark.parametrize(
+    "gen",
+    [
+        {"ramp": {"start": "hanning", "stop": "sinc", "step": 1}},
+        {"base": "hanning", "range": 1, "n": 2},
+        {"base": "hanning", "range": 1},
+    ],
+    ids=["ramp", "banda", "banda-senza-n"],
+)
+def test_categorical_axis_generatore_con_nomi_e_spec_error(gen):
+    # Su un asse categoriale chi sbaglia generatore ci scrive dei nomi, non dei
+    # numeri: l'errore dev'essere lo SpecError col rimedio, non il TypeError
+    # dell'aritmetica di ramp/banda su una stringa (che il parse esegue prima
+    # di arrivare al controllo del dominio), ne' il rimando alla camminata-X.
+    d = _envelope_axis(["hanning"])
+    d["axes"]["grain.envelope"] = gen
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(d, "s")
+    assert exc.value.key == ("axes", "grain.envelope")
+    assert "values" in exc.value.hint
+
+
+def test_categorical_axis_values_scalare_chiede_la_lista():
+    # ``values: expodec`` senza parentesi e' lo sbaglio naturale su un asse di
+    # nomi (in stack ne serve uno per stream): l'errore deve chiedere la lista,
+    # non accusare la lettera 'e' in cui la stringa verrebbe spezzata.
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(_envelope_axis("expodec"), "s")
+    e = exc.value
+    assert e.key == ("axes", "grain.envelope", "values")
+    assert "'e'" not in e.msg
+    assert "lista" in e.msg
+    assert "[expodec]" in e.hint
+
+
+def test_categorical_axis_camminata_x_non_suggerisce_la_banda():
+    # La camminata-X possiede n e vorrebbe una banda sulla Y: su un asse
+    # categoriale la banda e' vietata, quindi il rimedio non puo' proporla.
+    d = _envelope_axis(["expodec"])
+    d["stack"] = {"grain.envelope": {"base": 2, "range": 1}}
+    with pytest.raises(SpecError) as exc:
+        parse_study_spec(d, "s")
+    e = exc.value
+    assert e.key == ("stack", "grain.envelope")
+    assert "banda" not in e.hint
+    assert "stack.grain.envelope" in e.hint
