@@ -1829,7 +1829,9 @@ vecchio. Come per le varianti orfane dello sweep: **avviso, nessuna
 cancellazione**. Una combinazione orfana è spesso proprio quella che si vuole
 tenere — il «prima» da riascoltare. L'avviso arriva una volta per `render`, su
 stderr, e confronta le cartelle con **tutte** le combinazioni dichiarate: quelle
-lasciate fuori da `COMBO` non sono orfane. Vale anche per l'albero piatto di uno
+lasciate fuori da `COMBO` non sono orfane. Il confronto è per cartella, non per
+nome: rinominare uno stato solo nelle maiuscole (`Rada` → `rada`) su macOS
+lascia la stessa cartella, e non la segnala. Vale anche per l'albero piatto di uno
 studio a cui si aggiunge `for_each:` (`yaml/`, `audio/` direttamente sotto
 `generated/<study_id>/`): `study` non lo apre più, e l'avviso lo nomina.
 

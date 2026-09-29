@@ -795,6 +795,11 @@ def _warn_orphan_combos(study: str) -> None:
     quando lo studio ha assi esterni, perche' ``study`` non lo apre piu'.
     Va chiamata fuori dal loop, a combinazione vuota: ``gen_dir`` e' la
     radice dello studio.
+
+    Il confronto e' per **cartella**, non per nome: sul filesystem di default
+    di macOS ``griglia=Rada`` e ``griglia=rada`` sono una cartella sola, e
+    dopo aver rinominato uno stato solo nelle maiuscole ``listdir`` restituisce
+    il nome vecchio della cartella in cui il render ha appena scritto.
     """
     from .yaml_loc import load as load_with_locations
 
@@ -803,10 +808,17 @@ def _warn_orphan_combos(study: str) -> None:
     if not (os.path.isdir(root) and os.path.isfile(path)):
         return
     dichiarate = {c.label for c in for_each.parse(*load_with_locations(path))}
+
+    def identita(p: str) -> tuple:
+        st = os.stat(p)
+        return st.st_dev, st.st_ino
+
+    vive = {identita(os.path.join(root, label)) for label in dichiarate
+            if label and os.path.isdir(os.path.join(root, label))}
     orfane = sorted(
         os.path.join(root, nome) for nome in os.listdir(root)
-        if "=" in nome and nome not in dichiarate
-        and os.path.isdir(os.path.join(root, nome))
+        if "=" in nome and os.path.isdir(os.path.join(root, nome))
+        and identita(os.path.join(root, nome)) not in vive
     )
     piatto = "" not in dichiarate and any(
         os.path.isdir(os.path.join(root, d)) for d in ("yaml", "audio"))

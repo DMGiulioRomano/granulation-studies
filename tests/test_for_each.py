@@ -620,6 +620,27 @@ def test_l_albero_piatto_di_prima_e_orfano_sotto_for_each(tmp_path, monkeypatch,
     assert (tmp_path / "generated" / "s_fe" / "yaml").is_dir()
 
 
+def test_la_cartella_di_una_combinazione_dichiarata_non_e_orfana_con_un_altro_nome(
+        tmp_path, monkeypatch, capsys):
+    # Sul filesystem di default di macOS `griglia=Rada` e `griglia=rada` sono
+    # la stessa cartella: dopo aver rinominato lo stato solo nelle maiuscole il
+    # render scrive nella cartella di prima, che listdir restituisce col nome
+    # vecchio. Confrontata per nome, l'avviso la dava per orfana e consigliava
+    # di cancellarla: era quella viva. Qui due nomi per una cartella li da' un
+    # symlink, che e' la stessa situazione su un filesystem case-sensitive.
+    doc = dict(_DOC, for_each={"griglia": {"rada": {"base.volume": 0}}})
+    _studio(tmp_path, monkeypatch, doc)
+    _fake_engine(monkeypatch)
+    assert cli.main(["sweep", "s_fe"]) == 0
+    assert cli.main(["render", "s_fe", "--no-score"]) == 0
+    g = tmp_path / "generated" / "s_fe"
+    (g / "griglia=Rada").symlink_to(g / "griglia=rada", target_is_directory=True)
+    capsys.readouterr()
+
+    assert cli.main(["render", "s_fe", "--no-score"]) == 0
+    assert "orfan" not in capsys.readouterr().err
+
+
 def test_una_cache_dir_esplicita_si_separa_per_combinazione(tmp_path, monkeypatch):
     # Il manifest della cache stem si chiama come lo YAML (`stack.json`,
     # `<variante>.json`), e i basename sono gli stessi in ogni combinazione.
