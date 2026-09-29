@@ -48,6 +48,11 @@ BLOCK = "for_each"
 # un marcatore, e' una chiave che il generatore non conosce.
 _GEN_VOCAB = _BAND_KEYS | Y_GENERATOR_KEYS | {"step", "curve"}
 
+# I parametri di ``ramp`` (``value_generators.ramp``): l'unico marcatore il cui
+# valore e' legittimamente un dict, quindi l'unico dove un dict non basta a
+# dire "questo e' uno stato".
+_RAMP_KEYS = frozenset({"start", "stop", "step"})
+
 
 @dataclass(frozen=True)
 class Combo:
@@ -126,6 +131,15 @@ def _parse_axis(axis: str, cfg: Any, ctx: ErrCtx) -> List[Combo]:
     # Forma 1 — manopola singola: la chiave dell'asse *e'* il path da patchare,
     # il valore un generatore di sequenza (o una lista nuda).
     if is_generator_node(cfg) or isinstance(cfg, list):
+        if isinstance(cfg, dict) and "values" in cfg and not isinstance(cfg["values"], list):
+            # list() di una stringa la spezza in lettere, di un numero alza un
+            # TypeError senza posizione: lo sbaglio e' il valore solo.
+            raw = cfg["values"]
+            raise ctx.err(
+                f"{BLOCK}: l'asse '{axis}', 'values' vuole una lista (trovato {raw!r}).",
+                key=key,
+                hint=f"anche per un valore solo: 'values: [{raw}]'.",
+            )
         with ctx.wrapping(key=key, axis=axis):
             values = resolve({"values": cfg} if isinstance(cfg, list) else cfg)
         if not values:
@@ -177,16 +191,32 @@ def _reject_stato_generatore(axis: str, cfg: Any, ctx: ErrCtx, key: tuple) -> No
     molto piu' in la', incomprensibile ("banda: 'n' obbligatorio"). Il segnale
     e' la chiave estranea al vocabolario piatto del generatore — che e' anche
     il refuso opposto (una chiave sbagliata dentro un generatore vero).
+
+    Quando gli stati hanno *tutti* nomi del vocabolario (il caso tipico: uno
+    stato solo, ``values``) di chiavi estranee non ce ne sono, e il segnale e'
+    il valore: uno stato e' un dict di override, e ``values``/``base`` un dict
+    non lo prendono mai. ``ramp`` si', ma con le sue chiavi: un dict che non ne
+    ha nessuna e' un bundle. Senza, ``values`` leggeva le chiavi del bundle
+    come valori — una combinazione sola, un path che crea una chiave alla
+    radice, exit 0 e nessuna patch applicata.
     """
     if not isinstance(cfg, dict) or not is_generator_node(cfg):
         return
     estranee = sorted(k for k in cfg if k not in _GEN_VOCAB)
-    if not estranee:
+    bundle = sorted(
+        k for k in Y_GENERATOR_KEYS & cfg.keys()
+        if isinstance(cfg[k], dict) and (k != "ramp" or _RAMP_KEYS.isdisjoint(cfg[k]))
+    )
+    if not (estranee or bundle):
         return
+    if estranee:
+        problema = f"ma ha anche {estranee}, che il generatore non conosce."
+    else:
+        problema = (f"ma {bundle} vale un dict di override, che e' la forma di "
+                    "uno stato, non di un generatore.")
     raise ctx.err(
         f"{BLOCK}: l'asse '{axis}' e' letto come generatore (c'e' una chiave fra "
-        f"{sorted(Y_GENERATOR_KEYS)}) ma ha anche {estranee}, che il generatore "
-        "non conosce.",
+        f"{sorted(Y_GENERATOR_KEYS)}) {problema}",
         key=key,
         hint="se volevi un asse a stati nominati, nessuno stato puo' chiamarsi "
              f"{sorted(Y_GENERATOR_KEYS)}: rinominalo.",

@@ -113,6 +113,35 @@ def test_stato_che_si_chiama_come_un_generatore_e_errore():
     assert "nessuno stato puo' chiamarsi" in str(e.value)
 
 
+def test_uno_stato_solo_che_si_chiama_come_un_generatore_e_errore():
+    # Senza uno stato accanto dal nome qualunque, nessuna chiave estranea
+    # tradisce l'asse. `values` diventava la lista delle chiavi del bundle:
+    # una combinazione sola, `griglia=axes.density.values`, che scriveva quella
+    # stringa in una chiave `griglia` alla radice e usciva 0 con la griglia
+    # intatta. `ramp` era un TypeError nudo, `base` la banda a cui manca `n`.
+    # Il segnale e' il valore: uno stato e' un dict di override, e nessun
+    # parametro di `values`/`base` lo e' (quello di `ramp` si', ma con le sue
+    # chiavi).
+    for stato in ("values", "base", "ramp"):
+        with pytest.raises(SpecError) as e:
+            _combos({"griglia": {stato: {"axes.density.values": [5, 10]}}})
+        assert "nessuno stato puo' chiamarsi" in str(e.value), stato
+    # la rampa vera resta una rampa
+    assert len(_combos({"base.volume": {"ramp": {"start": 0, "stop": 12, "step": 6}}})) == 3
+
+
+def test_values_senza_lista_e_errore():
+    # `values: voce.wav` e' lo sbaglio naturale per un valore solo: list() di
+    # una stringa la spezzava in lettere (una cartella per lettera, o un
+    # doppione di etichetta che accusava la 'v'), di un numero alzava un
+    # TypeError senza posizione ne' rimedio.
+    for raw in ("abc", 0.5):
+        with pytest.raises(SpecError) as e:
+            _combos({"base.sample": {"values": raw}})
+        assert "vuole una lista" in str(e.value), raw
+        assert f"values: [{raw}]" in str(e.value.hint), raw
+
+
 def test_etichette_gemelle_sono_errore():
     with pytest.raises(SpecError) as e:
         _combos({"base.distribution": [0], "axes.distribution.values": [1]})

@@ -1742,7 +1742,7 @@ degenere, non un ramo speciale.
   contiene non serve a niente, quindi lo dà l'utente. Un bundle vuoto (`{}`) è
   lecito: è lo stato che non tocca niente. Nessuno stato può chiamarsi come una
   chiave di generatore (`values`, `ramp`, `base`): l'asse verrebbe letto come
-  Forma 1, ed è un errore.
+  Forma 1, ed è un errore — anche quando è l'unico stato dell'asse.
 - **I path sono su tutto il documento**, non solo su `base:`:
   `axes.grain.duration.values`, `stack.seed`, `percorso.arco`,
   `streams.x.volume`. Il valore viene **assegnato** al path, non fuso:
