@@ -2,8 +2,9 @@
 
 Issue #73. Porting da mare-nostrum (DMGiulioRomano/mare-nostrum@3d81f41 e
 DMGiulioRomano/mare-nostrum@1357ec2), dove il problema è stato trovato e
-misurato. Nessun cambio di sintassi `study.yml`, nessun cambio nell'audio
-prodotto: solo tempo di render.
+misurato. Nessun cambio di sintassi `study.yml` e nessun cambio udibile
+nell'audio: dove passa dal chunk path dell'engine cambia al più di 1 LSB a
+24 bit (cambia solo l'ordine delle somme float64).
 
 ## Il sintomo
 
@@ -52,10 +53,23 @@ annidano non c'è oversubscription. `_render_one` passa `jobs` a entrambe le
 pass (mix e stem).
 
 Il default del budget è **tutti i core** (`os.cpu_count()`), non più
-`min(8, cpu)`. Il cap a 8 proteggeva la RAM da molte varianti lunghe in memoria
-insieme; un minuto di buffer stereo float64 a 48 kHz pesa ~46 MB e le varianti
-degli studi vanno da pochi secondi a 10 minuti. Se la memoria non basta,
-`JOBS=n` lo abbassa.
+`min(8, cpu)`. Il cap a 8 proteggeva la RAM da molti buffer lunghi in memoria
+insieme, e quel rischio non sparisce con una variante sola.
+
+Un minuto di buffer stereo float64 a 48 kHz pesa ~46 MB, ma il picco di un
+render è ~3.5 volte il buffer, perché il `dc_block` ne fa una copia e lavora
+su temporanei per canale. Misurato con `tracemalloc` su `render_stream_to_file`
+di un task da 60 s: 161 MB di picco contro 46 MB di buffer. Nella pass STEMS,
+attiva di default, l'engine con `jobs > 1` rende **gli stream in parallelo**,
+uno per worker e ciascuno col suo buffer a durata piena. `brano01_v2` è un
+documento solo con 7 stream da 600 s: prende un worker e tutto il budget va
+all'engine. Il picco è ~1.6 GB per stream, quindi fino a ~11 GB con 7 core o
+più. Prima della modifica gli stem giravano in sequenza, con un picco di
+~1.6 GB. La pass di mix non si moltiplica: il buffer intero sta solo nel
+padre, i chunk dei worker ne coprono ~1/N ciascuno.
+
+Se la memoria non basta, `JOBS=n` abbassa il budget; `STEM=false` salta la
+pass che si moltiplica.
 
 ## Quanto rende, misurato (su mare-nostrum)
 

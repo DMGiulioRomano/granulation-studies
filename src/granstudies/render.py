@@ -493,11 +493,15 @@ def render_variants(
 
     if pending:
         # ponytail: tutti i core. Il vecchio cap a 8 proteggeva la RAM da
-        # molte varianti lunghe tenute in memoria insieme (un minuto di
-        # buffer stereo float64 a 48 kHz ~ 46 MB). Le varianti degli studi
-        # vanno da pochi secondi a 10 minuti (brano01_v2, ~460 MB, un solo
-        # documento: un worker, il budget all'engine). Se tornano molte
-        # varianti da decine di minuti, abbassare con jobs=.
+        # molti buffer lunghi in memoria insieme: un minuto di buffer stereo
+        # float64 a 48 kHz ~ 46 MB, e col dc_block il picco di un render e'
+        # ~3.5 volte il buffer. Una variante sola non basta a evitarlo: nella
+        # pass STEMS (il default) l'engine rende gli stream in parallelo, uno
+        # per worker, ciascuno col suo buffer a durata piena. brano01_v2 (un
+        # documento, 7 stream da 600 s: un worker, il budget all'engine) ha
+        # un picco di ~1.6 GB per stream, quindi fino a ~11 GB con 7 core o
+        # piu', contro ~1.6 GB del render sequenziale. Se la memoria non
+        # basta, abbassare con jobs= (JOBS=n) o saltare gli stem (STEM=false).
         budget = jobs or os.cpu_count() or 1
         workers, engine_jobs = _split_jobs(budget, len(pending))
         if workers == 1:
