@@ -142,6 +142,26 @@ def test_values_senza_lista_e_errore():
         assert f"values: [{raw}]" in str(e.value.hint), raw
 
 
+def test_un_generatore_malformato_e_un_errore_con_la_posizione():
+    # `ctx.wrapping` riavvolge solo i ValueError: un ramp senza `step` (lo
+    # sbaglio naturale), un ramp scalare o una banda con un range testuale
+    # uscivano come TypeError nudo, cioe' traceback invece del blocco d'errore.
+    for cfg in (
+        {"ramp": {"start": 0, "stop": 12}},
+        {"ramp": 5},
+        {"base": 0, "range": "sei", "n": 3},
+    ):
+        with pytest.raises(SpecError) as e:
+            _combos({"base.volume": cfg})
+        assert "base.volume" in str(e.value), cfg
+    # un numero non finito non ha un nome di cartella: `_fmt` alzava
+    # OverflowError (inf) o ValueError fuori da ogni contesto (nan)
+    for v in (float("inf"), float("nan")):
+        with pytest.raises(SpecError) as e:
+            _combos({"base.volume": [0, v]})
+        assert "finito" in str(e.value), v
+
+
 def test_etichette_gemelle_sono_errore():
     with pytest.raises(SpecError) as e:
         _combos({"base.distribution": [0], "axes.distribution.values": [1]})

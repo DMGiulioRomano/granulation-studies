@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import copy
 import itertools
+import math
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List
@@ -141,11 +142,29 @@ def _parse_axis(axis: str, cfg: Any, ctx: ErrCtx) -> List[Combo]:
                 hint=f"anche per un valore solo: 'values: [{raw}]'.",
             )
         with ctx.wrapping(key=key, axis=axis):
-            values = resolve({"values": cfg} if isinstance(cfg, list) else cfg)
+            try:
+                values = resolve({"values": cfg} if isinstance(cfg, list) else cfg)
+            except TypeError as e:
+                # ``wrapping`` riavvolge i ValueError; un generatore scritto male
+                # (``ramp`` senza ``step`` o scalare, un ``range`` testuale)
+                # arriva come TypeError, e senza questo usciva come traceback.
+                raise ValueError(
+                    f"{BLOCK}: l'asse '{axis}' ha un generatore che non si "
+                    f"risolve ({e}). Forme: 'values: [...]', "
+                    "'ramp: {start, stop, step}', banda 'base'/'range'/'n'."
+                ) from e
         if not values:
             raise ctx.err(f"{BLOCK}: l'asse '{axis}' non produce nessun valore.", key=key)
         out = []
         for v in values:
+            if isinstance(v, float) and not math.isfinite(v):
+                # ``_fmt`` passa da ``int(v)``: OverflowError su inf, ValueError
+                # su nan, entrambi senza posizione. E un nome di cartella
+                # ``volume=inf`` non direbbe comunque un valore renderizzabile.
+                raise ctx.err(
+                    f"{BLOCK}: l'asse '{axis}' ha un valore non finito ({v!r}).",
+                    key=key,
+                )
             if not _is_scalar(v):
                 raise ctx.err(
                     f"{BLOCK}: l'asse '{axis}' ha un valore non scalare, che non "
