@@ -296,8 +296,12 @@ def _set_path(doc: Dict[str, Any], path: str, value: Any, ctx: ErrCtx) -> None:
 
     Creare una chiave nuova e' lecito (``base.pan_range`` su un ``base:`` che
     non ce l'ha), creare una **sezione** no: ``bse.pan_range`` sarebbe un refuso
-    che passa in silenzio e non muove niente. Il resto della validazione arriva
-    da sola dal parse dello studio, che le chiavi sconosciute le rifiuta gia'.
+    che passa in silenzio e non muove niente. Il refuso sull'**ultimo**
+    segmento (``base.pan_rang``, o ``sed`` alla radice) invece passa: crea una
+    chiave che nessuno legge, e il parse dello studio non la ferma — le chiavi
+    sconosciute non le rifiuta, ne' in ``base:`` ne' alla radice. Le
+    combinazioni escono identiche. Il vocabolario delle chiavi vive nel
+    language server (gl-ls), non qui.
 
     Il path non si spezza su ogni punto: a ogni livello si cerca, fra i
     prefissi del resto del path, la chiave che il nodo ha davvero. E' cosi' che

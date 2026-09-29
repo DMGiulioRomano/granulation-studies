@@ -1748,7 +1748,10 @@ degenere, non un ramo speciale.
   `streams.x.volume`. Il valore viene **assegnato** al path, non fuso:
   `base.grain: {...}` sostituisce l'intero sotto-albero. Creare una chiave nuova
   è lecito (`base.pan_range` su un `base:` che non ce l'ha), creare una
-  **sezione** no (`bse.pan_range` è un errore, non un refuso silenzioso).
+  **sezione** no (`bse.pan_range` è un errore, non un refuso silenzioso). Il
+  refuso sull'**ultimo** segmento invece passa (`base.pan_rang`, o `sed` alla
+  radice): crea una chiave che nessuno legge, perché il parse dello studio le
+  chiavi sconosciute non le rifiuta, e le combinazioni escono identiche.
 - **Nomi d'asse dotted.** Il path non si spezza su ogni punto: a ogni livello
   vale la chiave che il documento ha davvero. `axes.grain.duration.values`
   raggiunge l'asse `grain.duration` (una chiave sola, col punto dentro), e
