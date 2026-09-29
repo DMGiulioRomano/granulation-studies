@@ -1047,3 +1047,13 @@ def test_loop_dur_normalized_sotto_il_minimo_in_secondi_ammesso():
 def test_loop_dur_in_secondi_sotto_il_minimo_rifiutato(loop_unit):
     with pytest.raises(ValueError, match="fuori bounds"):
         parse_study_spec(_loop_dict(loop_unit))
+
+
+def test_loop_start_normalized_negativo_rifiutato():
+    # Lo 0 di loop_start non dipende dalla durata del sample: sotto normalized
+    # un valore negativo resta fuori bounds, e l'errore non lo chiama secondi.
+    d = _loop_dict("normalized")
+    d["axes"] = {"pointer.loop_start": {"baseline": 0.1, "values": [-0.1, 0.2]}}
+    with pytest.raises(ValueError, match="fuori bounds") as exc:
+        parse_study_spec(d)
+    assert "-0.1 normalizzato" in str(exc.value)

@@ -217,6 +217,8 @@ def test_violation_confronta_nell_unita_e_ritorna_secondi():
         ("pitch.ratio", 0.5, None),
         ("pointer.loop_dur", 0.001, None),
         ("pointer.loop_dur", 0.001, "normalized"),
+        ("pointer.loop_start", -0.1, "normalized"),
+        ("pointer.loop_start", 0.5, "normalized"),
     ],
 )
 def test_violation_e_clamp_concordano(path, value, unit):
@@ -236,6 +238,22 @@ def test_loop_normalized_non_si_confronta_coi_bounds_in_secondi():
     for u in (None, "seconds", "absolute"):
         assert bounds.violation("pointer.loop_dur", 0.003, unit=u) == (0.005, None)
         assert bounds.clamp("pointer.loop_dur", 0.003, unit=u) == 0.005
+
+
+def test_loop_normalized_il_pavimento_a_zero_vale_in_ogni_scala():
+    # La durata del sample e' ignota ma positiva: nessun fattore sposta lo 0.
+    # Un loop_start/loop_end negativo in frazioni e' negativo anche in secondi,
+    # e l'engine lo clamperebbe in silenzio a 0 (``Parameter._clamp``): va
+    # fermato qui come in secondi. Il minimo di loop_dur (0.005 s) invece non
+    # e' invariante e resta fuori dal confronto.
+    for k in ("loop_start", "loop_end"):
+        path = f"pointer.{k}"
+        assert bounds.violation(path, -0.1, unit="normalized") == (0, None)
+        assert bounds.clamp(path, -0.1, unit="normalized") == 0
+        assert bounds.violation(path, 0.5, unit="normalized") is None
+    assert bounds.violation("pointer.loop_dur", -0.1, unit="normalized") is None
+    # fuori vocabolario l'engine rifiuta la chiave per conto suo: nessun confronto
+    assert bounds.violation("pointer.loop_start", -0.1, unit="normalised") is None
 
 
 def test_declared_unit_legge_la_chiave_giusta_per_path():
