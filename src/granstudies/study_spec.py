@@ -73,9 +73,14 @@ class Axis:
 # (plateau/transition) e' proprieta' del processo sweep e vive sotto ``sweep:``.
 _AXES_RESERVED_KEYS = ("interpolation", "seed")
 
-# Nome dei valori attesi per ogni ``grain.duration_unit``, per i messaggi
-# d'errore sui bounds. Unita' assente o ``seconds`` -> secondi.
-_UNIT_LABELS = {"samples": "campioni", "milliseconds": "ms"}
+# Nome dei valori attesi per ogni unita' dichiarata (``grain.duration_unit``,
+# ``pointer.loop_unit``: vedi ``bounds.declared_unit``), per i messaggi
+# d'errore sui bounds. Unita' assente, ``seconds`` o ``absolute`` -> secondi.
+_UNIT_LABELS = {
+    "samples": "campioni",
+    "milliseconds": "ms",
+    "normalized": "normalizzato",
+}
 
 # Vocabolario di ``interpolation`` (curva di Y fra i valori di test): ``step``
 # (tenuta), ``linear`` (rampa), ``cubic`` (curva). Un valore fuori da qui e' un
@@ -249,39 +254,30 @@ def _validate(spec: StudySpec, ctx: ErrCtx, *, orders_explicit: bool = False) ->
                 )
         # Sforo bloccante: i bounds engine sono un safety clamp, un valore
         # fuori range va fermato al parse invece di essere silenziosamente
-        # clampato in render.
-        #
-        # I bounds del registry sono in *secondi*. Se lo stream dichiara una
-        # ``grain.duration_unit`` diversa da ``seconds`` (stream.py:415), i
-        # valori dell'asse ``grain.duration`` sono in quell'unita' e vanno
-        # convertiti prima del confronto. Dichiarare un'unita' fine (campioni,
-        # millisecondi) e' anche il segnale che si lavora sotto il
-        # millisecondo, quindi ``output_sr`` porta il minimo al floor dinamico
-        # invece del fallback statico di 1 ms.
-        grain_unit = (
-            spec.base.get("grain", {}).get("duration_unit")
-            if ax.path == "grain.duration"
-            else None
-        )
-        if grain_unit == "seconds":
-            grain_unit = None
-        sr = bounds_mod.default_output_sr()
-        b = bounds_mod.bounds_for(ax.path, output_sr=sr if grain_unit else None)
-        if b is not None:
-            lo, hi = b
-            factor = bounds_mod.grain_duration_factor(grain_unit, sr)
-            for v in list(ax.values) + [ax.baseline]:
-                v_sec = v * factor
-                if (lo is not None and v_sec < lo) or (hi is not None and v_sec > hi):
-                    unit = _UNIT_LABELS.get(grain_unit, "s")
-                    raise ctx.err(
-                        f"Asse '{ax.name}' valore {v} {unit} fuori bounds {b} "
-                        f"(s) per il path '{ax.path}'.",
-                        key=("axes", ax.name),
-                        axis=ax.name,
-                        hint=f"i valori (e il baseline), convertiti in secondi, "
-                        f"devono stare in {b}.",
-                    )
+        # clampato in render. Il confronto lo fa ``bounds.violation`` (unico
+        # punto): qui si passa solo l'unita' dichiarata dallo stream, perche' i
+        # bounds sono in secondi ma i valori dell'asse ``grain.duration``
+        # possono essere in campioni o millisecondi (stream.py:415) e le
+        # posizioni nel sample frazioni del file (``loop_unit: normalized``).
+        declared = bounds_mod.declared_unit(ax.path, spec.base)
+        # Sotto ``loop_unit: normalized`` ``violation`` ritorna i bounds in
+        # frazioni del sample: in secondi non si scrivono senza il file.
+        if bounds_mod.is_sample_fraction(ax.path, declared):
+            b_unit, dominio = "normalizzato", "in frazioni della durata del sample"
+        else:
+            b_unit, dominio = "s", "convertiti in secondi"
+        for v in list(ax.values) + [ax.baseline]:
+            b = bounds_mod.violation(ax.path, v, unit=declared)
+            if b is not None:
+                unit = _UNIT_LABELS.get(declared, "s")
+                raise ctx.err(
+                    f"Asse '{ax.name}' valore {v} {unit} fuori bounds {b} "
+                    f"({b_unit}) per il path '{ax.path}'.",
+                    key=("axes", ax.name),
+                    axis=ax.name,
+                    hint=f"i valori (e il baseline), {dominio}, "
+                    f"devono stare in {b}.",
+                )
 
 
 def _resolve_baseline(

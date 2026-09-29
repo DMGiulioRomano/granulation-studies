@@ -987,3 +987,106 @@ def test_top_level_duration_still_wins_over_base_as_entry_override():
     d = _base_duration_dict()
     d["duration"] = 999
     assert parse_study_spec(d).duration == 999
+
+
+def _grain_dict(values):
+    return {
+        "study_id": "s",
+        "base": {"density": 20},
+        "axes": {"grain.duration": {"baseline": 0.01, "values": values}},
+        "sweep": {"orders": [0]},
+    }
+
+
+def test_grain_duration_seconds_sotto_il_millisecondo_ammessa():
+    # Il floor e' quello dinamico dell'engine (1 campione a 48k ~ 2.1e-5 s),
+    # non il fallback statico di 1 ms: valori che l'engine renderizza non
+    # devono essere rifiutati al parse solo perche' espressi in secondi.
+    spec = parse_study_spec(_grain_dict([0.0001, 0.001]))
+    assert spec.axes[0].values[0] == 0.0001
+
+
+def test_grain_duration_sotto_il_floor_dinamico_rifiutata():
+    with pytest.raises(ValueError, match="fuori bounds"):
+        parse_study_spec(_grain_dict([1e-6]))
+
+
+def test_pitch_ratio_fuori_bounds_rifiutato():
+    # pitch.ratio non era mappato: qualunque valore passava. I bounds sono
+    # quelli di RatioUnit nell'engine (0.001, 8.0).
+    d = {
+        "study_id": "s",
+        "base": {"density": 20},
+        "axes": {"pitch.ratio": {"baseline": 1.0, "values": [20]}},
+        "sweep": {"orders": [0]},
+    }
+    with pytest.raises(ValueError, match="fuori bounds"):
+        parse_study_spec(d)
+
+
+def _loop_dict(loop_unit=None):
+    base = {"density": 20, "pointer": {"loop_start": 0.1}}
+    if loop_unit is not None:
+        base["pointer"]["loop_unit"] = loop_unit
+    return {
+        "study_id": "s",
+        "base": base,
+        "axes": {"pointer.loop_dur": {"baseline": 0.1, "values": [0.003, 0.2]}},
+        "sweep": {"orders": [0]},
+    }
+
+
+def test_loop_dur_normalized_sotto_il_minimo_in_secondi_ammesso():
+    # 0.003 e' una frazione del sample, non 3 ms: il minimo di 0.005 s del
+    # registry non si confronta senza la durata del file.
+    spec = parse_study_spec(_loop_dict("normalized"))
+    assert spec.axes[0].values[0] == 0.003
+
+
+@pytest.mark.parametrize("loop_unit", [None, "seconds", "absolute"])
+def test_loop_dur_in_secondi_sotto_il_minimo_rifiutato(loop_unit):
+    with pytest.raises(ValueError, match="fuori bounds"):
+        parse_study_spec(_loop_dict(loop_unit))
+
+
+def test_loop_start_normalized_negativo_rifiutato():
+    # Lo 0 di loop_start non dipende dalla durata del sample: sotto normalized
+    # un valore negativo resta fuori bounds, e l'errore non lo chiama secondi.
+    d = _loop_dict("normalized")
+    d["axes"] = {"pointer.loop_start": {"baseline": 0.1, "values": [-0.1, 0.2]}}
+    with pytest.raises(ValueError, match="fuori bounds") as exc:
+        parse_study_spec(d)
+    assert "-0.1 normalizzato" in str(exc.value)
+
+
+@pytest.mark.parametrize("k", ["loop_start", "loop_end", "loop_dur"])
+def test_loop_normalized_oltre_la_fine_del_file_rifiutato(k):
+    # Il tetto dei loop_* e' la durata del sample: in frazioni vale 1. Oltre,
+    # l'engine clamperebbe in silenzio alla fine del file.
+    d = _loop_dict("normalized")
+    d["axes"] = {f"pointer.{k}": {"baseline": 0.1, "values": [0.2, 1.3]}}
+    with pytest.raises(ValueError, match="fuori bounds") as exc:
+        parse_study_spec(d)
+    assert "1.3 normalizzato" in str(exc.value)
+
+
+def test_loop_normalized_errore_non_parla_di_secondi():
+    # Sotto normalized i bounds sono in frazioni della durata del sample: il
+    # messaggio non li etichetta "(s)" e non chiede di convertire in secondi,
+    # conversione impossibile senza il file.
+    d = _loop_dict("normalized")
+    d["axes"] = {"pointer.loop_end": {"baseline": 0.1, "values": [1.3]}}
+    with pytest.raises(ValueError) as exc:
+        parse_study_spec(d)
+    msg = str(exc.value)
+    assert "(0, 1.0)" in msg
+    assert "(s)" not in msg
+    assert "secondi" not in msg
+    assert "frazioni della durata del sample" in msg
+
+
+def test_loop_dur_normalized_negativo_rifiutato():
+    d = _loop_dict("normalized")
+    d["axes"] = {"pointer.loop_dur": {"baseline": 0.1, "values": [-0.1, 0.2]}}
+    with pytest.raises(ValueError, match="fuori bounds"):
+        parse_study_spec(d)

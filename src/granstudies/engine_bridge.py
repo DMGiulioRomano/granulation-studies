@@ -164,18 +164,67 @@ def score_pdf(
     )
 
 
-def parameter_bounds(output_sr: Optional[int] = None) -> dict:
+def parameter_bounds(
+    output_sr: Optional[int] = None,
+    sample_dur_sec: Optional[float] = None,
+) -> dict:
     """Bounds dei parametri via ``pge.api.parameter_bounds`` (engine #163).
 
     Senza argomenti equivale al registry statico ``GRANULAR_PARAMETERS``.
     Con ``output_sr`` il minimo di ``grain_duration`` diventa 1 campione
     (``1/output_sr``), lo stesso pavimento dinamico usato dall'engine in
-    render (issue #17 di questo repo).
+    render (issue #17 di questo repo). Con ``sample_dur_sec`` il massimo di
+    ``loop_start``/``loop_end``/``loop_dur`` diventa la durata del sample.
     """
     _ensure_engine_on_path()
     from pge import api
 
-    return api.parameter_bounds(output_sr=output_sr)
+    return api.parameter_bounds(
+        output_sr=output_sr, sample_dur_sec=sample_dur_sec
+    )
+
+
+def pitch_bounds(unit: str):
+    """``ParameterBounds`` dell'unita' di pitch, dall'engine.
+
+    ``unit`` e' il nome dell'unita' come appare nel blocco ``pitch:`` dello
+    YAML (``semitones``, ``cents``, ``ratio``, ...). Le unita' sconosciute
+    sollevano l'errore dell'engine: qui non si duplica la lista dei preset.
+    """
+    _ensure_engine_on_path()
+    from pge.parameters.pitch_unit import make_pitch_unit
+
+    return make_pitch_unit(unit).value_bounds()
+
+
+def pitch_units() -> frozenset:
+    """Nomi delle unita' di pitch note all'engine (preset di ``pitch_unit``)."""
+    _ensure_engine_on_path()
+    from pge.parameters.pitch_unit import PITCH_UNIT_PRESETS
+
+    return frozenset(PITCH_UNIT_PRESETS)
+
+
+def parameter_schema_paths() -> dict:
+    """Mappa ``path YAML dotted -> chiave del registry`` da ``ALL_SCHEMAS``.
+
+    Il path dotted e' quello usato nello ``study.yml``: gli schema ``stream`` e
+    ``density`` portano gia' il path completo (``grain.duration``, ``density``),
+    quello ``pointer`` e' relativo alla sezione (``start`` ->
+    ``pointer.start``). I path segnaposto (``_dummy_fixed_zero_``,
+    ``_internal_calc_``) non sono chiavi YAML e restano fuori.
+    """
+    _ensure_engine_on_path()
+    from pge.parameters.parameter_schema import ALL_SCHEMAS
+
+    out: dict = {}
+    for section, schema in ALL_SCHEMAS.items():
+        for spec in schema:
+            if spec.yaml_path.startswith("_"):
+                continue
+            prefix = f"{section}." if section == "pointer" else ""
+            out[f"{prefix}{spec.yaml_path}"] = spec.name
+    return out
 
 
 def default_output_sr() -> int:

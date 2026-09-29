@@ -122,9 +122,9 @@ def build_stack_stream(
     Per ogni asse l'envelope si assembla con ``axis_envelope`` (X della
     strategy per-stream, seed per precedenza) e i valori si clampano ai bounds
     engine — i valori *espliciti* fuori bounds falliscono gia' al parse, qui
-    si proteggono quelli che emergono (Y-rand). ``output_sr`` attiva il floor
-    dinamico di ``grain.duration`` (1 campione invece del fallback statico di
-    1ms, issue #17): deve combaciare col sample rate usato in render.
+    si proteggono quelli che emergono (Y-rand). ``output_sr`` fissa il floor
+    dinamico di ``grain.duration`` (issue #17) e deve combaciare col sample
+    rate usato in render; ``None`` vale il default dell'engine.
 
     Regola scalare (stream statici legittimi): sequenza di un solo punto ->
     valore secco via ``deep_set``, non envelope costante.
@@ -148,7 +148,6 @@ def build_stack_stream(
     # ereditato; non dichiarato (None) lo lascia intatto.
     if spec.onset is not None:
         base["onset"] = spec.onset
-    grain_unit = base.get("grain", {}).get("duration_unit")
     overrides: Dict[str, Any] = {}
     types: Dict[str, str] = {}
     for ax in spec.axes:
@@ -160,7 +159,7 @@ def build_stack_stream(
             x_seed=spec.resolved_x_seed(),
             x_unit=spec.resolved_x_unit(),
         )
-        unit = grain_unit if ax.path == "grain.duration" else None
+        unit = bounds_mod.declared_unit(ax.path, base)
         env = [
             [t, bounds_mod.clamp(
                 ax.path, v, output_sr=output_sr, unit=unit
