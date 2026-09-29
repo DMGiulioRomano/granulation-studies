@@ -1,5 +1,6 @@
 import os
 
+import pytest
 import yaml
 
 from granstudies.study_spec import parse_study_spec
@@ -142,7 +143,7 @@ def test_dump_preserves_mtime_when_unchanged(tmp_path):
 
 def _fake_engine_render(calls):
     def fake(yaml_path, output_path, samples_dir, output_sr=48000,
-             per_stream=False, use_cache=False, cache_dir=None):
+             per_stream=False, use_cache=False, cache_dir=None, jobs=1):
         calls.append(yaml_path)
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
         with open(output_path, "w") as fh:
@@ -545,7 +546,7 @@ def test_render_variants_per_stream_merges_version_stems(tmp_path, monkeypatch):
     (yaml_dir / "stack.yml").write_text(yaml.safe_dump(doc))
 
     def fake(yaml_path, output_path, samples_dir, output_sr=48000,
-             per_stream=False, use_cache=False, cache_dir=None):
+             per_stream=False, use_cache=False, cache_dir=None, jobs=1):
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
         if not per_stream:
             with open(output_path, "w") as fh:
@@ -661,3 +662,144 @@ def test_render_stream_prefix_relative_to_mode_dir(tmp_path, monkeypatch):
     )
     audio = sorted(e["audio"] for e in manifest)
     assert all(os.sep + os.path.join("sweep", "envelope", "vox", "vox_") in a for a in audio)
+
+
+# --- ripartizione dei job tra i due livelli di parallelismo -----------------
+
+
+def test_split_jobs_single_variant_takes_whole_budget():
+    # Una variante lunghissima (studio a un asse): il pool esterno non ha
+    # niente da parallelizzare, quindi tutto il budget va all'engine.
+    assert render_mod._split_jobs(8, 1) == (1, 8)
+
+
+def test_split_jobs_saturated_pool_keeps_engine_sequential():
+    # Varianti >= budget: il pool esterno satura la macchina da solo, l'engine
+    # resta sequenziale (comportamento storico).
+    assert render_mod._split_jobs(4, 4) == (4, 1)
+    assert render_mod._split_jobs(4, 40) == (4, 1)
+
+
+def test_split_jobs_budget_one_is_fully_sequential():
+    assert render_mod._split_jobs(1, 1) == (1, 1)
+    assert render_mod._split_jobs(1, 10) == (1, 1)
+
+
+def test_split_jobs_never_oversubscribes():
+    for budget in range(1, 13):
+        for pending in range(1, 13):
+            workers, engine_jobs = render_mod._split_jobs(budget, pending)
+            assert workers >= 1 and engine_jobs >= 1
+            assert workers <= pending
+            assert workers * engine_jobs <= budget
+
+
+def _jobs_recorder(seen):
+    def fake(yaml_path, output_path, samples_dir, output_sr=48000,
+             per_stream=False, use_cache=False, cache_dir=None, jobs=1):
+        seen.append(jobs)
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+        with open(output_path, "w") as fh:
+            fh.write("x")
+        return [output_path]
+    return fake
+
+
+def _variant_dir(tmp_path, names):
+    variant_dir = str(tmp_path / "variants")
+    os.makedirs(variant_dir)
+    for name in names:
+        with open(os.path.join(variant_dir, f"{name}.yml"), "w", encoding="utf-8") as fh:
+            yaml.safe_dump({"streams": [{"stream_id": "s", "onset": 0}]}, fh)
+    return variant_dir
+
+
+def test_render_passes_engine_jobs_to_bridge(tmp_path, monkeypatch):
+    # Regressione: engine_bridge.render veniva chiamato senza `jobs`, quindi
+    # l'engine restava a jobs=1 e il chunk-parallel non si attivava mai.
+    variant_dir = _variant_dir(tmp_path, ["solo"])
+    seen = []
+    monkeypatch.setattr(render_mod.engine_bridge, "render", _jobs_recorder(seen))
+    render_variants(
+        variant_dir=variant_dir,
+        audio_dir=str(tmp_path / "audio"),
+        score_dir=None,
+        samples_dir="unused",
+        jobs=8,
+    )
+    # Una sola variante pendente: il pool esterno resta a 1 worker (path
+    # in-process) e l'engine riceve l'intero budget.
+    assert seen == [8]
+
+
+def test_render_jobs_one_is_sequential_on_both_levels(tmp_path, monkeypatch):
+    # JOBS=1: nessun pool esterno e nessun parallelismo nell'engine. Il fake
+    # registra nel processo padre, quindi tre chiamate viste qui dimostrano
+    # anche il path in-process (con un ProcessPoolExecutor `seen` resterebbe
+    # vuoto: i worker scrivono nella propria copia della lista).
+    variant_dir = _variant_dir(tmp_path, ["a", "b", "c"])
+    seen = []
+    monkeypatch.setattr(render_mod.engine_bridge, "render", _jobs_recorder(seen))
+    render_variants(
+        variant_dir=variant_dir,
+        audio_dir=str(tmp_path / "audio"),
+        score_dir=None,
+        samples_dir="unused",
+        jobs=1,
+    )
+    assert seen == [1, 1, 1]
+
+
+def _machine(monkeypatch, cpu, affinity):
+    # ``cpu`` core sulla macchina, ``affinity`` quelli concessi al processo.
+    # affinity=None: piattaforma senza sched_getaffinity (macOS);
+    # affinity=OSError: la chiamata esiste ma fallisce.
+    monkeypatch.setattr(render_mod.os, "cpu_count", lambda: cpu)
+    if affinity is None:
+        monkeypatch.delattr(render_mod.os, "sched_getaffinity", raising=False)
+        return
+
+    def getaffinity(pid):
+        if affinity is OSError:
+            raise OSError("sched_getaffinity non disponibile")
+        return set(range(affinity))
+
+    monkeypatch.setattr(render_mod.os, "sched_getaffinity", getaffinity, raising=False)
+
+
+def _default_budget_seen(tmp_path, monkeypatch):
+    # Una variante sola: il budget di default arriva tutto all'engine, quindi
+    # il `jobs` che il bridge riceve E' il budget.
+    variant_dir = _variant_dir(tmp_path, ["solo"])
+    seen = []
+    monkeypatch.setattr(render_mod.engine_bridge, "render", _jobs_recorder(seen))
+    render_variants(
+        variant_dir=variant_dir,
+        audio_dir=str(tmp_path / "audio"),
+        score_dir=None,
+        samples_dir="unused",
+    )
+    return seen
+
+
+def test_render_default_budget_is_all_cores(tmp_path, monkeypatch):
+    # Senza jobs il budget sono tutti i core, non piu' min(8, cpu).
+    _machine(monkeypatch, cpu=12, affinity=12)
+    assert _default_budget_seen(tmp_path, monkeypatch) == [12]
+
+
+def test_render_default_budget_respects_cpu_affinity(tmp_path, monkeypatch):
+    # "Tutti i core" sono quelli concessi al processo (taskset, cpuset di un
+    # container, CI), non quelli della macchina: contare questi ultimi
+    # sfora l'invariante workers * engine_jobs <= core, e la RAM della pass
+    # STEMS si moltiplica per core che il processo non puo' usare.
+    _machine(monkeypatch, cpu=12, affinity=2)
+    assert _default_budget_seen(tmp_path, monkeypatch) == [2]
+
+
+@pytest.mark.parametrize("affinity", [None, OSError])
+def test_render_default_budget_falls_back_to_cpu_count(tmp_path, monkeypatch, affinity):
+    # Dove l'affinity non c'e' (macOS) o non risponde, resta il conteggio
+    # della macchina: la stessa regola dell'engine (_available_cores).
+    _machine(monkeypatch, cpu=12, affinity=affinity)
+    assert _default_budget_seen(tmp_path, monkeypatch) == [12]

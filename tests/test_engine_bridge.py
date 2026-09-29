@@ -75,6 +75,65 @@ def test_score_pdf_is_created(studio):
     assert pdf.exists() and pdf.stat().st_size > 0
 
 
+def test_render_jobs_activates_parallel_path_without_changing_audio(tmp_path, monkeypatch):
+    """`jobs` arriva fino all'engine e non cambia il suono.
+
+    Il chunk-parallel dell'engine scatta solo sopra 1024 grani
+    (DEFAULT_MIN_PARALLEL_GRAINS), quindi qui il documento e' denso apposta:
+    density 1000 su 2s con distribution 0.5 da' ~1900 grani. L'engine
+    garantisce identita' entro 1 LSB a 24 bit (cambia solo l'ordine delle
+    somme float64).
+
+    Che il path parallelo sia stato preso lo dice lo spy su ``chunk_grains``,
+    non il confronto dell'audio: un bridge che perde ``jobs`` rende due volte
+    in sequenza, e due render sequenziali coincidono comunque.
+    """
+    engine_bridge._ensure_engine_on_path()
+    from pge.rendering import numpy_audio_renderer
+
+    chunk_jobs = []
+    chunk_grains = numpy_audio_renderer.chunk_grains
+
+    def spy(items, n_chunks):
+        chunk_jobs.append(n_chunks)
+        return chunk_grains(items, n_chunks)
+
+    monkeypatch.setattr(numpy_audio_renderer, "chunk_grains", spy)
+
+    samples = tmp_path / "samples"
+    samples.mkdir()
+    sr = 44100
+    t = np.arange(sr) / sr
+    sf.write(str(samples / "test.wav"), 0.5 * np.sin(2 * np.pi * 220 * t), sr)
+
+    doc = _minimal_doc("test.wav")
+    # Senza seed esplicito l'engine ne estrae uno di sessione diverso a ogni
+    # run: i due render non sarebbero confrontabili.
+    doc["seed"] = 4242
+    doc["streams"][0]["duration"] = 2
+    doc["streams"][0]["density"] = 1000
+    yaml_path = tmp_path / "denso.yml"
+    with open(yaml_path, "w", encoding="utf-8") as fh:
+        yaml.safe_dump(doc, fh)
+
+    seq = engine_bridge.render(
+        str(yaml_path), str(tmp_path / "seq.aif"),
+        samples_dir=str(samples), jobs=1,
+    )[0]
+    assert chunk_jobs == []          # jobs=1: path sequenziale
+    par = engine_bridge.render(
+        str(yaml_path), str(tmp_path / "par.aif"),
+        samples_dir=str(samples), jobs=4,
+    )[0]
+    assert chunk_jobs == [4]         # chunk path preso, con i job chiesti
+
+    a, _ = sf.read(seq, always_2d=True)
+    b, _ = sf.read(par, always_2d=True)
+    assert a.shape == b.shape
+    assert float(np.max(np.abs(a))) > 0.0
+    assert float(np.max(np.abs(a - b))) <= 2.0 ** -23   # 1 LSB a 24 bit
+
+
 def test_parameter_bounds_static_registry():
     """Senza output_sr: bounds statici del registry (comportamento storico)."""
     pb = engine_bridge.parameter_bounds()
