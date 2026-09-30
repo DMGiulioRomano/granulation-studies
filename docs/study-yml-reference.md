@@ -1881,6 +1881,7 @@ generated/<study_id>/
   yaml/versions/versions.yml     # solo per studi con blocco versions
   yaml/percorso/percorso.yml     # solo per studi con blocco percorso
   yaml/streams_expanded.yml      # solo per studi con spread: il dict streams espanso
+  yaml/<processo>/.sorgente      # impronta del documento che ha generato quegli YAML
   audio/sweep/envelope/<stream_id>/<study_id>_<stream_id>_e1__density.aif
   audio/stack/stack.aif
   audio/versions/versions.aif
@@ -1897,9 +1898,24 @@ che ha prodotto quell'audio»: l'audio viene dagli YAML delle varianti, scritti
 da `sweep`/`stack`/`versions`/`percorso`, che possono essere più vecchi del
 documento — si modifica lo `study.yml` e si lancia solo `make render`, e l'audio
 resta quello di prima. Quando succede il render lo dichiara su stderr
-(«N varianti sono più vecchie di study.yml»), così lo snapshot non copre l'audio
-stale invece di denunciarlo; dopo `make all-study` l'avviso tace, perché il giro
-riscrive le varianti. Con un blocco `for_each:`
+(«N varianti vengono da un altro study.yml», con i processi da rigenerare),
+così lo snapshot non copre l'audio stale invece di denunciarlo.
+
+La domanda è **da quale documento** vengono le varianti, non quale file è più
+recente: `_dump` non riscrive una variante identica — l'mtime fermo è il segnale
+con cui il render salta i già fatti — quindi a mtime una variante che
+`make all-study` aveva appena confermato uguale restava «più vecchia dello
+study.yml» per sempre, e l'avviso gridava a ogni render con un rimedio che non
+poteva spegnerlo. Ogni processo registra invece accanto ai propri YAML
+(`yaml/<processo>/.sorgente`) l'impronta del documento **patchato** da cui
+vengono, e il render la confronta con quella di adesso: dopo `all-study`
+l'avviso tace anche se nessuna variante è stata riscritta, e toccare il blocco
+`for_each:` non fa gridare le combinazioni che non muove (`apply` lo toglie
+prima del parse, quindi il loro documento patchato è lo stesso). Un processo
+senza marcatore — albero generato prima che esistesse, o `sweep STREAM=…`, che
+riscrive una stream sola — non dice niente: «non lo so» non è «è diverso».
+
+Con un blocco `for_each:`
 lo stesso albero, identico in ogni sotto-cartella, scende di un livello —
 `generated/<study_id>/<label>/` — e lo snapshot è il documento **patchato**.
 Là i `.sv` prendono la label in coda al basename

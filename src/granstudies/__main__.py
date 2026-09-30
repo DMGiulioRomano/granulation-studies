@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import hashlib
 import json
 import os
 import sys
@@ -79,6 +80,53 @@ _ALBERO_DI_COMBINAZIONE = ("yaml", "audio", "sv", "score", "cache", "study.yml")
 # radice puo' essere la ``CACHE_DIR`` esplicita divisa per combinazione, e un
 # avviso che grida dove non c'e' niente e' il primo che si impara a saltare.
 _SEGNALE_ALBERO_PIATTO = ("yaml", "audio")
+
+# Marcatore di provenienza degli YAML di un processo: l'impronta del documento
+# che li ha generati, accanto a loro. Non e' uno YAML, quindi nessuno dei walk
+# che cercano varianti lo raccoglie (``render_variants``, ``_warn_orphans``,
+# ``cmd_sv`` filtrano su ``.yml``/``.yaml``, e ``write_versions`` ripulisce
+# solo i ``*.yml``).
+_SORGENTE = ".sorgente"
+
+
+def _impronta(doc: Dict[str, Any]) -> str:
+    """Impronta del documento patchato: dice **cosa** diceva, non quando.
+
+    ``sort_keys`` perche' la domanda e' sul contenuto: due letture dello stesso
+    file devono dare la stessa impronta anche se un giro futuro riordinasse le
+    chiavi.
+    """
+    testo = yaml.safe_dump(doc, sort_keys=True, allow_unicode=True)
+    return hashlib.sha256(testo.encode("utf-8")).hexdigest()
+
+
+def _segna_sorgente(study: str, process: str, impronta: str) -> None:
+    """Registra accanto agli YAML di ``process`` il documento che li ha generati.
+
+    Lo scrivono i quattro generatori a lavoro finito; lo legge il render
+    (``_warn_varianti_stale``). L'impronta e' quella del documento **patchato**,
+    cioe' esattamente cio' da cui quelle varianti derivano: una modifica al
+    blocco ``for_each:`` che non tocca questa combinazione non la muove.
+    """
+    d = os.path.join(gen_dir(study), "yaml", process)
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, _SORGENTE), "w", encoding="utf-8") as fh:
+        fh.write(impronta + "\n")
+
+
+def _sorgente_di(variant_dir: str, process: str) -> str | None:
+    """L'impronta registrata da ``process``, o ``None`` se non ce n'e' una.
+
+    ``None`` e' "non lo so", mai "e' diversa": un albero generato prima che il
+    marcatore esistesse non deve far gridare il render, e il primo giro dei
+    generatori glielo scrive.
+    """
+    try:
+        with open(os.path.join(variant_dir, process, _SORGENTE),
+                  "r", encoding="utf-8") as fh:
+            return fh.read().strip() or None
+    except OSError:
+        return None
 
 
 def samples_dir(spec_samples: str | None) -> str:
@@ -199,6 +247,7 @@ def cmd_sweep(study: str, stream: str | None = None) -> int:
     if "sweep" not in data:
         print(f"[sweep] nessun blocco 'sweep:' in {study}/study.yml — niente da fare.")
         return 0
+    impronta = _impronta(data)
     specs = _load_specs(study, stream)
     if not specs:
         return 1
@@ -233,6 +282,11 @@ def cmd_sweep(study: str, stream: str | None = None) -> int:
         if not written:
             print(f"[sweep]{label} nessuna variante generata (mode={spec.mode})")
     _warn_orphans(out, written_all, scoped=stream is not None)
+    # Provenienza: solo dallo sweep intero. Con STREAM si riscrive una stream
+    # sola, quindi le altre restano quelle del documento di prima e il
+    # marcatore deve continuare a dirlo.
+    if stream is None:
+        _segna_sorgente(study, "sweep", impronta)
     return 0
 
 
@@ -280,6 +334,7 @@ def cmd_stack(study: str) -> int:
     if "stack" not in data:
         print(f"[stack] nessun blocco 'stack:' in {study}/study.yml — niente da fare.")
         return 0
+    impronta = _impronta(data)
     specs = _load_specs(study)
     if not specs:
         return 1
@@ -291,6 +346,7 @@ def cmd_stack(study: str) -> int:
     changed = before != os.path.getmtime(written[0])
     stato = "aggiornato" if changed else "invariato"
     print(f"[stack] documento multi-stream ({len(specs)} stream, {stato}) -> {written[0]}")
+    _segna_sorgente(study, "stack", impronta)
     return 0
 
 
@@ -303,6 +359,7 @@ def cmd_versions(study: str) -> int:
     if "versions" not in data:
         print(f"[versions] nessun blocco 'versions:' in {study}/study.yml — niente da fare.")
         return 0
+    impronta = _impronta(data)
     # Il parse per-versione avviene DOPO l'iniezione delle variabili nei let:
     # il documento grezzo puo' essere incompleto per costruzione (variabile
     # senza default nel let), quindi niente _load_specs qui.
@@ -334,6 +391,7 @@ def cmd_versions(study: str) -> int:
     print(
         f"[versions] {len(written)} documenti ({changed} aggiornati) -> {d}"
     )
+    _segna_sorgente(study, "versions", impronta)
     return 0
 
 
@@ -346,6 +404,7 @@ def cmd_percorso(study: str) -> int:
     if "percorso" not in data:
         print(f"[percorso] nessun blocco 'percorso:' in {study}/study.yml — niente da fare.")
         return 0
+    impronta = _impronta(data)
     # Come versions: il parse per-istanza avviene DOPO l'iniezione delle
     # traiettorie nei let, quindi niente _load_specs sul documento grezzo.
     raw, locs = _read_study(study)
@@ -366,6 +425,7 @@ def cmd_percorso(study: str) -> int:
     changed = before != os.path.getmtime(written[0])
     stato = "aggiornato" if changed else "invariato"
     print(f"[percorso] documento percorso ({stato}) -> {written[0]}")
+    _segna_sorgente(study, "percorso", impronta)
     return 0
 
 
@@ -413,7 +473,7 @@ def cmd_render(
     skipped = sum(1 for e in manifest if e["skipped"])
     done = len(manifest) - skipped
     print(f"[render] {done} varianti renderizzate, {skipped} saltate (aggiornate) in {tempo} -> {g}")
-    _warn_varianti_stale(study, manifest)
+    _warn_varianti_stale(manifest, variant_dir, _impronta(snapshot))
     # Snapshot dello study.yml **letto all'inizio di questo render**, riscritto a
     # ogni render: e' il documento patchato, quindi dice da se' i valori della
     # combinazione invece di rimandare al blocco ``for_each:``. Con la
@@ -799,8 +859,8 @@ def _combos(study: str) -> list:
     return scelte
 
 
-def _warn_varianti_stale(study: str, manifest: list) -> None:
-    """Avvisa se lo ``study.yml`` e' piu' recente delle varianti renderizzate.
+def _warn_varianti_stale(manifest: list, variant_dir: str, impronta: str) -> None:
+    """Avvisa se le varianti renderizzate vengono da un altro ``study.yml``.
 
     Il render non legge ``study.yml`` per fare l'audio: legge gli YAML che
     ``sweep``/``stack``/``versions``/``percorso`` hanno scritto. Modificare il
@@ -808,25 +868,50 @@ def _warn_varianti_stale(study: str, manifest: list) -> None:
     snapshot, che il documento nuovo lo riporta, sarebbe l'unico posto dove
     accorgersene: senza avviso lo copre invece di denunciarlo.
 
-    Dopo ``all-study`` tace: il giro riscrive le varianti, che restano piu'
-    recenti del documento. Si guarda **dopo** il render perche' il manifest
-    porta gia' l'elenco delle varianti — la regola di cosa sia una variante
-    vive in ``render_variants``, e una seconda copia qui divergerebbe — e
-    perche' e' la riga che qualifica lo snapshot scritto subito sotto.
+    La domanda e' **da quale documento** vengono, non quale file e' piu'
+    recente. L'mtime non sa rispondere: ``render._dump`` non riscrive una
+    variante il cui contenuto non cambia — apposta, l'mtime fermo e' il
+    segnale con cui il render salta i gia' fatti — quindi una variante che il
+    giro ha appena confermato uguale resta piu' vecchia del documento **per
+    sempre**. Misurato: si tocca lo ``study.yml`` in un punto che non muove
+    quella variante (un ``title``, o il blocco ``for_each:``, che ``apply``
+    toglie prima del parse), si rilancia ``make all-study``, e l'avviso
+    gridava lo stesso, con un rimedio — «rigenerale» — che non poteva
+    cambiare niente. Un avviso che grida dove non c'e' niente, e che non si
+    spegne, e' il primo che si impara a saltare, e si porta dietro quello
+    vero.
+
+    Percio' ogni generatore registra accanto ai propri YAML l'impronta del
+    documento patchato da cui vengono (``_segna_sorgente``), e qui si
+    confronta con quella del documento di adesso. Un processo senza marcatore
+    (albero generato prima che esistesse) non dice niente: "non lo so" non e'
+    "e' diverso", e il primo giro glielo scrive.
+
+    Il manifest dice quali processi hanno davvero dato varianti a questo
+    render — la regola di cosa sia una variante vive in ``render_variants``, e
+    una seconda copia qui divergerebbe — e si guarda **dopo** il render perche'
+    e' la riga che qualifica lo snapshot scritto subito sotto.
     """
-    path = os.path.join(study_dir(study), "study.yml")
-    if not os.path.isfile(path):
-        return
-    doc = os.path.getmtime(path)
-    vecchie = [e["yaml"] for e in manifest
-               if os.path.exists(e["yaml"]) and os.path.getmtime(e["yaml"]) < doc]
+    letta: Dict[str, str | None] = {}
+    vecchie: Dict[str, int] = {}
+    for e in manifest:
+        rel = os.path.relpath(e["yaml"], variant_dir).split(os.sep)
+        if len(rel) < 2:
+            continue                  # YAML fuori da un processo: nessun marcatore
+        process = rel[0]
+        if process not in letta:
+            letta[process] = _sorgente_di(variant_dir, process)
+        if letta[process] is not None and letta[process] != impronta:
+            vecchie[process] = vecchie.get(process, 0) + 1
     if not vecchie:
         return
-    print(f"[render] ATTENZIONE: {len(vecchie)} varianti su {len(manifest)} sono "
-          "piu' vecchie di study.yml: l'audio non lo riflette, e lo snapshot "
+    quali = ", ".join(sorted(vecchie))
+    n = sum(vecchie.values())
+    print(f"[render] ATTENZIONE: {n} varianti su {len(manifest)} vengono da un "
+          f"altro study.yml ({quali}): l'audio non lo riflette, e lo snapshot "
           "qui accanto dice il documento di adesso.", file=sys.stderr)
-    print("  Rigenerale (sweep / stack / versions / percorso, o 'make "
-          "all-study') e rirenderizza.", file=sys.stderr)
+    print(f"  Rigenerale ({quali}, o 'make all-study') e rirenderizza.",
+          file=sys.stderr)
 
 
 def _warn_orphan_combos(study: str) -> None:
@@ -864,20 +949,20 @@ def _warn_orphan_combos(study: str) -> None:
     path = os.path.join(study_dir(study), "study.yml")
     if not (os.path.isdir(root) and os.path.isfile(path)):
         return
-    dichiarate = {c.label for c in for_each.parse(*load_with_locations(path))}
+    etichette = {c.label for c in for_each.parse(*load_with_locations(path))}
 
     def identita(p: str) -> tuple:
         st = os.stat(p)
         return st.st_dev, st.st_ino
 
-    vive = {identita(os.path.join(root, label)) for label in dichiarate
+    vive = {identita(os.path.join(root, label)) for label in etichette
             if label and os.path.isdir(os.path.join(root, label))}
     orfane = sorted(
         os.path.join(root, nome) for nome in os.listdir(root)
         if "=" in nome and os.path.isdir(os.path.join(root, nome))
         and identita(os.path.join(root, nome)) not in vive
     )
-    piatto = "" not in dichiarate and any(
+    piatto = "" not in etichette and any(
         os.path.isdir(os.path.join(root, d)) for d in _SEGNALE_ALBERO_PIATTO)
     # Il segnale dice *se* l'albero piatto c'e'; l'elenco dice cosa togliere.
     piatte = [p for p in (os.path.join(root, nome)

@@ -97,7 +97,10 @@ def test_cmd_versions_writes_one_document_per_outer_value(tmp_path, monkeypatch)
     monkeypatch.setattr(cli, "gen_dir", lambda s: os.path.join(str(tmp_path), "generated", s))
     assert cli.cmd_versions(study) == 0
     d = os.path.join(str(tmp_path), "generated", study, "yaml", "versions")
-    assert sorted(os.listdir(d)) == ["versions__d=1.yml", "versions__d=2.yml"]
+    # accanto ai documenti c'e' il marcatore di provenienza (.sorgente), che
+    # documento non e': la domanda qui e' quanti YAML.
+    assert sorted(f for f in os.listdir(d) if f.endswith(".yml")) == [
+        "versions__d=1.yml", "versions__d=2.yml"]
     for label in ("1", "2"):
         with open(os.path.join(d, f"versions__d={label}.yml")) as fh:
             doc = yaml.safe_load(fh)

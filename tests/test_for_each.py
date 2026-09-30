@@ -472,7 +472,14 @@ def test_lo_snapshot_e_il_documento_letto_all_inizio_del_render(tmp_path, monkey
     assert snap["base"]["duration"] == 10
 
 
-def test_il_render_dice_se_lo_study_yml_e_piu_recente_delle_varianti(
+# L'avviso sulle varianti stale, riconosciuto dalla riga e non dalle parole:
+# quella di prima diceva "piu' vecchie di study.yml", e un test che cercasse
+# solo la formula nuova sarebbe verde anche sull'avviso sbagliato.
+_ATTENZIONE = "[render] ATTENZIONE"
+_STALE = "vengono da un altro study.yml"
+
+
+def test_il_render_dice_se_le_varianti_vengono_da_un_altro_study_yml(
         tmp_path, monkeypatch, capsys):
     # L'audio viene dalle varianti, non dallo study.yml: modificare il
     # documento e lanciare solo `render` lascia l'audio di prima, e lo snapshot
@@ -482,22 +489,140 @@ def test_il_render_dice_se_lo_study_yml_e_piu_recente_delle_varianti(
     _fake_engine(monkeypatch)
     assert cli.main(["sweep", "s_fe"]) == 0
     assert cli.main(["render", "s_fe", "--no-score"]) == 0
-    # appena generate, le varianti sono piu' recenti: l'avviso tace (e' il giro
-    # di `all-study`, che non deve gridare dove non c'e' niente)
-    assert "piu' vecchie" not in capsys.readouterr().err
+    # appena generate, le varianti vengono dal documento di adesso: l'avviso
+    # tace (e' il giro di `all-study`, che non deve gridare dove non c'e'
+    # niente)
+    assert _ATTENZIONE not in capsys.readouterr().err
 
     time.sleep(0.01)
     (sdir / "study.yml").write_text(yaml.safe_dump(dict(_DOC, title="dopo"),
                                                    sort_keys=False))
     assert cli.main(["render", "s_fe", "--no-score"]) == 0
     err = capsys.readouterr().err
-    assert "piu' vecchie di study.yml" in err and "sweep" in err
+    assert _STALE in err and "sweep" in err
     # ed e' vero cio' che l'avviso denuncia: lo snapshot e' il documento di
     # adesso, le varianti da cui viene l'audio sono di quello di prima
     g = tmp_path / "generated" / "s_fe" / "volume=0"
     assert yaml.safe_load((g / "study.yml").read_text())["title"] == "dopo"
     variante = next((g / "yaml").rglob("*.yml"))
     assert os.path.getmtime(variante) < os.path.getmtime(sdir / "study.yml")
+
+
+def test_rigenerare_spegne_l_avviso_anche_se_le_varianti_non_cambiano(
+        tmp_path, monkeypatch, capsys):
+    # Il rimedio dell'avviso deve poterlo spegnere. `_dump` non riscrive una
+    # variante identica — apposta, l'mtime fermo e' il segnale con cui il
+    # render salta i gia' fatti — quindi con il confronto a mtime una variante
+    # che `all-study` aveva appena confermato uguale restava "piu' vecchia
+    # dello study.yml" per sempre: l'avviso gridava a ogni render e il suo
+    # rimedio non poteva cambiare niente.
+    sdir = _studio(tmp_path, monkeypatch)
+    _fake_engine(monkeypatch)
+    assert cli.main(["sweep", "s_fe"]) == 0
+    assert cli.main(["render", "s_fe", "--no-score"]) == 0
+    variante = next((tmp_path / "generated" / "s_fe" / "volume=0" / "yaml").rglob("*.yml"))
+    prima = os.path.getmtime(variante)
+
+    time.sleep(0.01)
+    # una modifica che quelle varianti non le muove
+    (sdir / "study.yml").write_text(yaml.safe_dump(dict(_DOC, title="dopo"),
+                                                   sort_keys=False))
+    capsys.readouterr()
+    assert cli.main(["sweep", "s_fe"]) == 0          # il giro di `all-study`
+    assert cli.main(["render", "s_fe", "--no-score"]) == 0
+    err = capsys.readouterr().err
+    assert _ATTENZIONE not in err, err
+    # e la premessa: la variante non e' stata riscritta, resta piu' vecchia
+    # del documento — il dato su cui il confronto a mtime si sbagliava
+    assert os.path.getmtime(variante) == prima
+    assert prima < os.path.getmtime(sdir / "study.yml")
+
+
+def test_toccare_for_each_non_fa_gridare_le_combinazioni_che_non_muove(
+        tmp_path, monkeypatch, capsys):
+    # `apply` toglie il blocco `for_each:` prima del parse, quindi aggiungere
+    # un valore a un asse esterno non cambia il documento patchato delle
+    # combinazioni gia' c'erano: le loro varianti restano quelle giuste. E'
+    # il gesto piu' frequente di questa feature, e a mtime le faceva gridare
+    # tutte.
+    _studio(tmp_path, monkeypatch)
+    _fake_engine(monkeypatch)
+    assert cli.main(["sweep", "s_fe"]) == 0
+    assert cli.main(["render", "s_fe", "--no-score"]) == 0
+
+    time.sleep(0.01)
+    doc = dict(_DOC, for_each={"base.volume": {"values": [0, 6, 12]}})
+    (tmp_path / "studies" / "s_fe" / "study.yml").write_text(
+        yaml.safe_dump(doc, sort_keys=False))
+    capsys.readouterr()
+    monkeypatch.setenv("COMBO", "volume=0")
+    assert cli.main(["render", "s_fe", "--no-score"]) == 0
+    assert _ATTENZIONE not in capsys.readouterr().err
+
+
+def test_uno_sweep_di_una_sola_stream_non_dichiara_fresche_le_altre(
+        tmp_path, monkeypatch, capsys):
+    # `sweep STREAM=x` riscrive una stream sola: le altre restano quelle del
+    # documento di prima, quindi il marcatore non va aggiornato.
+    doc = dict(_DOC, streams={"a": {}, "b": {}})
+    sdir = _studio(tmp_path, monkeypatch, doc)
+    _fake_engine(monkeypatch)
+    assert cli.main(["sweep", "s_fe"]) == 0
+    assert cli.main(["render", "s_fe", "--no-score"]) == 0
+
+    time.sleep(0.01)
+    (sdir / "study.yml").write_text(yaml.safe_dump(dict(doc, title="dopo"),
+                                                   sort_keys=False))
+    capsys.readouterr()
+    assert cli.main(["sweep", "s_fe", "--stream", "a"]) == 0
+    assert cli.main(["render", "s_fe", "--no-score"]) == 0
+    assert _ATTENZIONE in capsys.readouterr().err
+
+
+def test_l_avviso_nomina_i_processi_da_rigenerare(tmp_path, monkeypatch, capsys):
+    # Il marcatore sta accanto agli YAML di ogni processo, non uno per studio:
+    # rigenerare lo sweep e non lo stack lascia stale solo lo stack, e il
+    # rimedio deve nominare quello, non i quattro comandi in blocco.
+    doc = {k: v for k, v in _DOC.items() if k != "for_each"}
+    doc["stack"] = {}
+    sdir = _studio(tmp_path, monkeypatch, doc)
+    _fake_engine(monkeypatch)
+    assert cli.main(["sweep", "s_fe"]) == 0
+    assert cli.main(["stack", "s_fe"]) == 0
+    assert cli.main(["render", "s_fe", "--no-score"]) == 0
+    assert _ATTENZIONE not in capsys.readouterr().err
+
+    time.sleep(0.01)
+    (sdir / "study.yml").write_text(yaml.safe_dump(dict(doc, title="dopo"),
+                                                   sort_keys=False))
+    assert cli.main(["sweep", "s_fe"]) == 0          # solo sweep
+    capsys.readouterr()
+    assert cli.main(["render", "s_fe", "--no-score"]) == 0
+    err = capsys.readouterr().err
+    assert "(stack)" in err and "Rigenerale (stack," in err
+    assert "sweep" not in err, err
+
+    assert cli.main(["stack", "s_fe"]) == 0
+    capsys.readouterr()
+    assert cli.main(["render", "s_fe", "--no-score"]) == 0
+    assert _ATTENZIONE not in capsys.readouterr().err
+
+
+def test_un_albero_senza_marcatore_non_fa_gridare_il_render(
+        tmp_path, monkeypatch, capsys):
+    # "Non lo so" non e' "e' diverso": un albero generato prima che il
+    # marcatore esistesse tace, e il primo giro dei generatori glielo scrive.
+    sdir = _studio(tmp_path, monkeypatch)
+    _fake_engine(monkeypatch)
+    assert cli.main(["sweep", "s_fe"]) == 0
+    for marker in (tmp_path / "generated" / "s_fe").rglob(cli._SORGENTE):
+        marker.unlink()
+    time.sleep(0.01)
+    (sdir / "study.yml").write_text(yaml.safe_dump(dict(_DOC, title="dopo"),
+                                                   sort_keys=False))
+    capsys.readouterr()
+    assert cli.main(["render", "s_fe", "--no-score"]) == 0
+    assert _ATTENZIONE not in capsys.readouterr().err
 
 
 def test_una_patch_su_axes_cambia_le_varianti_generate(tmp_path, monkeypatch):
