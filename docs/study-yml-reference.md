@@ -1752,6 +1752,10 @@ degenere, non un ramo speciale.
   refuso sull'**ultimo** segmento invece passa (`base.pan_rang`, o `sed` alla
   radice): crea una chiave che nessuno legge, perché il parse dello studio le
   chiavi sconosciute non le rifiuta, e le combinazioni escono identiche.
+  Un path è una **stringa** senza segmenti vuoti: `base.` o `base..volume` (un
+  punto di troppo) sono errore, e un nome d'asse o un path che YAML legge come
+  numero o booleano (`2024:`, `on:`) va fra virgolette. Il nome di uno stato
+  invece è libero: `griglia: {1: {...}}` dà `griglia=1`.
 - **Nomi d'asse dotted.** Il path non si spezza su ogni punto: a ogni livello
   vale la chiave che il documento ha davvero. `axes.grain.duration.values`
   raggiunge l'asse `grain.duration` (una chiave sola, col punto dentro), e

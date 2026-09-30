@@ -132,11 +132,14 @@ def _parse_axis(axis: str, cfg: Any, ctx: ErrCtx) -> List[Combo]:
     # esso soundfile), e questo modulo lo importa anche la CLI a freddo.
     from .sweep import _fmt
 
+    # Il nome non e' ancora una stringa: la riga e' quella del blocco.
+    _require_str(axis, "il nome dell'asse", ctx, (BLOCK,))
     key = (BLOCK, axis)
     _reject_stato_generatore(axis, cfg, ctx, key)
     # Forma 1 — manopola singola: la chiave dell'asse *e'* il path da patchare,
     # il valore un generatore di sequenza (o una lista nuda).
     if is_generator_node(cfg) or isinstance(cfg, list):
+        _reject_empty_segment(axis, ctx, key)
         if isinstance(cfg, dict) and "values" in cfg and not isinstance(cfg["values"], list):
             # list() di una stringa la spezza in lettere, di un numero alza un
             # TypeError senza posizione: lo sbaglio e' il valore solo.
@@ -204,9 +207,49 @@ def _parse_axis(axis: str, cfg: Any, ctx: ErrCtx) -> List[Combo]:
                 hint=f"es. '{stato}: {{base.distribution: 0.5}}'. Un bundle vuoto "
                      "({}) e' lecito: e' lo stato che non tocca niente.",
             )
+        # Il nome dello stato resta libero (finisce nella label com'e' scritto,
+        # ``griglia=1``); le chiavi del bundle no, sono path.
+        for path in bundle:
+            _require_str(path, "un path", ctx, skey)
+            _reject_empty_segment(path, ctx, skey)
         out.append(Combo(label=f"{_slug(axis)}={_slug(str(stato))}",
                          patch=tuple(bundle.items())))
     return out
+
+
+def _require_str(nome: Any, cosa: str, ctx: ErrCtx, key: tuple) -> None:
+    """Un nome d'asse o un path e' una stringa, anche quando YAML non lo crede.
+
+    YAML fa numeri e booleani anche delle chiavi (``2024:``, ``on:``): arrivati
+    a ``_slug``, ``_short`` o ``_set_path`` uscivano come TypeError o
+    AttributeError, cioe' traceback invece del blocco d'errore.
+    """
+    if isinstance(nome, str):
+        return
+    raise ctx.err(
+        f"{BLOCK}: {cosa} {nome!r} non e' una stringa (YAML l'ha letto come "
+        f"{type(nome).__name__}).",
+        key=key,
+        hint="scrivilo fra virgolette: YAML legge da se' i numeri e parole come "
+             "on/off/yes/no anche quando sono chiavi.",
+    )
+
+
+def _reject_empty_segment(path: str, ctx: ErrCtx, key: tuple) -> None:
+    """Un segmento vuoto (``base.``, ``base..volume``) e' sempre un refuso.
+
+    In coda creava in silenzio una chiave ``''`` che nessuno legge: la guardia
+    di ``_set_path`` sulle sezioni inesistenti non la vede, perche' la sezione
+    (``base``) c'e'.
+    """
+    if "" not in path.split("."):
+        return
+    raise ctx.err(
+        f"{BLOCK}: il path '{path}' ha un segmento vuoto (un punto di troppo).",
+        key=key,
+        hint="i segmenti sono chiavi dello study.yml separate da un punto solo: "
+             "'base.distribution', 'axes.grain.duration.values'.",
+    )
 
 
 def _reject_stato_generatore(axis: str, cfg: Any, ctx: ErrCtx, key: tuple) -> None:

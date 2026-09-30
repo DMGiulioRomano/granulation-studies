@@ -186,6 +186,41 @@ def test_un_generatore_malformato_e_un_errore_con_la_posizione():
         assert "finito" in str(e.value), v
 
 
+def test_un_nome_d_asse_o_un_path_che_non_e_una_stringa_e_un_errore():
+    # YAML fa numeri e booleani anche delle chiavi (`2024:`, `on:`): un nome
+    # d'asse o un path di bundle cosi' arrivava a `_slug`/`_short`/`_set_path`
+    # e usciva come TypeError/AttributeError, cioe' traceback. Il rimedio e'
+    # scriverlo fra virgolette.
+    for block in (
+        {1: [0, 6]},                                  # Forma 1: il path e' la chiave
+        {2024: {"a": {}}},                            # Forma 2: il nome dell'asse
+        {True: {"a": {}}},                            # `on:` in YAML 1.1
+        {"griglia": {"a": {1: 2}}},                   # un path dentro un bundle
+    ):
+        with pytest.raises(SpecError) as e:
+            _combos(block)
+        assert "stringa" in str(e.value), block
+        assert "virgolette" in str(e.value.hint), block
+    # Uno stato resta libero: e' un nome, non un path, e finisce nella label
+    # com'e' scritto (`griglia=1`).
+    assert [c.label for c in _combos({"griglia": {1: {}, 2: {}}})] == [
+        "griglia=1", "griglia=2"]
+
+
+def test_un_path_con_un_segmento_vuoto_e_un_errore():
+    # `base.` (il punto in piu' in coda) creava in silenzio una chiave '' dentro
+    # `base:`, che nessuno legge: la guardia sulle sezioni inesistenti non la
+    # vedeva, perche' `base` esiste. Un segmento vuoto e' sempre un refuso.
+    for block in (
+        {"base.": [0, 6]},
+        {".base.volume": [0, 6]},
+        {"griglia": {"a": {"base..volume": 6}}},
+    ):
+        with pytest.raises(SpecError) as e:
+            _combos(block)
+        assert "segmento vuoto" in str(e.value), block
+
+
 def test_etichette_gemelle_sono_errore():
     with pytest.raises(SpecError) as e:
         _combos({"base.distribution": [0], "axes.distribution.values": [1]})
