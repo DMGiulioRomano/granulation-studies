@@ -819,24 +819,32 @@ def _report_error(args) -> int:
     return 2
 
 
-def _combos(study: str) -> list:
-    """Le combinazioni da girare: quelle dichiarate, ristrette da ``COMBO``.
+def _combos(study: str) -> tuple[list, list]:
+    """``(tutte le combinazioni dichiarate, quelle da girare)``.
 
     ``COMBO`` e' un filtro di sessione, non un interruttore di modalita': senza,
     si fa tutto. Serve a non rirenderizzare decine di varianti da venti minuti
     per sentirne una, e a non aprire decine di sessioni di Sonic Visualiser
     insieme.
+
+    Le dichiarate escono insieme alle scelte perche' l'avviso sulle orfane le
+    vuole tutte (quelle fuori dal filtro non sono orfane) e non deve rileggere
+    il documento per riaverle: e' una seconda fonte di verita', e girerebbe a
+    render finito — su uno ``study.yml`` che nel frattempo si e' toccato, che
+    e' il ciclo di lavoro. Un blocco rimasto a meta' li' faceva uscire 2 un
+    render andato a buon fine.
     """
     from .yaml_loc import load as load_with_locations
 
     path = os.path.join(study_dir(study), "study.yml")
     if not os.path.isfile(path):
-        return [for_each.EMPTY]          # l'errore lo da' il comando, con contesto
+        # l'errore lo da' il comando, con contesto
+        return [for_each.EMPTY], [for_each.EMPTY]
     raw, locs = load_with_locations(path)
     combos = for_each.parse(raw, locs)
     voluta = os.environ.get("COMBO", "").strip()
     if not voluta:
-        return combos
+        return combos, combos
     # Filtro per **fetta**, non per combinazione singola: i vincoli sono
     # segmenti di label (``distribution=0.3``), e passa chi li contiene tutti.
     # Con quattro assi esterni le combinazioni sono decine e la label intera e'
@@ -856,7 +864,7 @@ def _combos(study: str) -> list:
                  f"fra loro. Combinazioni dichiarate: {disponibili}. "
                  "Togli COMBO dall'ambiente per girarle tutte.",
         )
-    return scelte
+    return combos, scelte
 
 
 def _warn_varianti_stale(manifest: list, variant_dir: str, impronta: str) -> None:
@@ -914,7 +922,7 @@ def _warn_varianti_stale(manifest: list, variant_dir: str, impronta: str) -> Non
           file=sys.stderr)
 
 
-def _warn_orphan_combos(study: str) -> None:
+def _warn_orphan_combos(study: str, dichiarate: list) -> None:
     """Segnala le cartelle di combinazioni che ``for_each:`` non dichiara piu'.
 
     Togliere un valore dal blocco lascia la sua cartella con l'audio gia'
@@ -942,14 +950,17 @@ def _warn_orphan_combos(study: str) -> None:
     di macOS ``griglia=Rada`` e ``griglia=rada`` sono una cartella sola, e
     dopo aver rinominato uno stato solo nelle maiuscole ``listdir`` restituisce
     il nome vecchio della cartella in cui il render ha appena scritto.
-    """
-    from .yaml_loc import load as load_with_locations
 
+    Le combinazioni dichiarate arrivano da ``_dispatch``, che le ha gia' lette
+    a inizio giro: qui e' un avviso, e un avviso che gira a render finito non
+    puo' permettersi di rileggere e riparsare il documento — nel frattempo si
+    e' toccato (e' il ciclo di lavoro che lo snapshot dichiara), e un blocco
+    rimasto a meta' faceva uscire 2 un render che aveva scritto tutto l'audio.
+    """
     root = gen_dir(study)
-    path = os.path.join(study_dir(study), "study.yml")
-    if not (os.path.isdir(root) and os.path.isfile(path)):
+    if not os.path.isdir(root):
         return
-    etichette = {c.label for c in for_each.parse(*load_with_locations(path))}
+    etichette = {c.label for c in dichiarate}
 
     def identita(p: str) -> tuple:
         st = os.stat(p)
@@ -995,7 +1006,10 @@ def _dispatch(args) -> int:
     dallo stesso ``study.yml``, non da uno stato per sessione.
     """
     global _COMBO
-    combos = _combos(args.study) if getattr(args, "study", None) else [for_each.EMPTY]
+    if getattr(args, "study", None):
+        dichiarate, combos = _combos(args.study)
+    else:
+        dichiarate = combos = [for_each.EMPTY]
     rc = 0
     try:
         for i, c in enumerate(combos, 1):
@@ -1009,7 +1023,7 @@ def _dispatch(args) -> int:
     # c'e' in ogni pipeline (``all-study`` finisce li') e quello che produce
     # l'audio che resta indietro.
     if args.command == "render":
-        _warn_orphan_combos(args.study)
+        _warn_orphan_combos(args.study, dichiarate)
     return rc
 
 

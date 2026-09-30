@@ -389,9 +389,13 @@ def test_gen_dir_scende_di_un_livello_solo_con_la_combinazione(tmp_path, monkeyp
 
 def test_combo_filtra_e_una_label_sbagliata_e_errore(tmp_path, monkeypatch):
     _studio(tmp_path, monkeypatch)
-    assert [c.label for c in cli._combos("s_fe")] == ["volume=0", "volume=6"]
+    assert [c.label for c in cli._combos("s_fe")[1]] == ["volume=0", "volume=6"]
     monkeypatch.setenv("COMBO", "volume=6")
-    assert [c.label for c in cli._combos("s_fe")] == ["volume=6"]
+    dichiarate, scelte = cli._combos("s_fe")
+    assert [c.label for c in scelte] == ["volume=6"]
+    # le dichiarate escono comunque tutte: l'avviso sulle orfane le vuole
+    # intere, e le legge da qui invece di rileggere il documento
+    assert [c.label for c in dichiarate] == ["volume=0", "volume=6"]
     monkeypatch.setenv("COMBO", "volume=99")
     with pytest.raises(SpecError) as e:
         cli._combos("s_fe")
@@ -809,20 +813,20 @@ def test_combo_seleziona_una_fetta_non_solo_una_combinazione(tmp_path, monkeypat
     # Con piu' assi esterni la label intera e' lunga da scrivere e la domanda
     # e' quasi sempre parziale: "tutte le pan a volume 6".
     _studio(tmp_path, monkeypatch, _DOC_4)
-    assert [c.label for c in cli._combos("s_fe")] == [
+    assert [c.label for c in cli._combos("s_fe")[1]] == [
         "volume=0__pan=0", "volume=0__pan=90", "volume=6__pan=0", "volume=6__pan=90"]
     monkeypatch.setenv("COMBO", "volume=6")
-    assert [c.label for c in cli._combos("s_fe")] == ["volume=6__pan=0", "volume=6__pan=90"]
+    assert [c.label for c in cli._combos("s_fe")[1]] == ["volume=6__pan=0", "volume=6__pan=90"]
     # i vincoli sono in and, in qualunque ordine
     monkeypatch.setenv("COMBO", "pan=90__volume=0")
-    assert [c.label for c in cli._combos("s_fe")] == ["volume=0__pan=90"]
+    assert [c.label for c in cli._combos("s_fe")[1]] == ["volume=0__pan=90"]
 
 
 def test_il_match_e_per_segmento_intero(tmp_path, monkeypatch):
     # `distribution=0` non deve prendersi anche `distribution=0.3`.
     _studio(tmp_path, monkeypatch, dict(_DOC, for_each={"base.volume": {"values": [0, 0.3]}}))
     monkeypatch.setenv("COMBO", "volume=0")
-    assert [c.label for c in cli._combos("s_fe")] == ["volume=0"]
+    assert [c.label for c in cli._combos("s_fe")[1]] == ["volume=0"]
 
 
 def test_il_separatore_non_compare_dentro_un_segmento():
@@ -844,7 +848,7 @@ def test_combo_non_prende_uno_stato_che_ne_contiene_il_nome(tmp_path, monkeypatc
     _studio(tmp_path, monkeypatch, dict(_DOC, for_each={
         "g": {"a": {"base.volume": 1}, "a__b": {"base.volume": 2}}}))
     monkeypatch.setenv("COMBO", "g=a")
-    assert [c.label for c in cli._combos("s_fe")] == ["g=a"]
+    assert [c.label for c in cli._combos("s_fe")[1]] == ["g=a"]
     # e il rimedio dice qual e' il separatore dei vincoli
     monkeypatch.setenv("COMBO", "g=c")
     with pytest.raises(SpecError) as e:
@@ -1025,3 +1029,34 @@ def test_senza_orfane_nessun_avviso(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("COMBO", "volume=6")
     assert cli.main(["render", "s_fe", "--no-score"]) == 0
     assert "orfan" not in capsys.readouterr().err
+
+
+def test_uno_study_yml_toccato_durante_il_render_non_lo_fa_uscire_2(
+        tmp_path, monkeypatch, capsys):
+    """L'avviso sulle orfane gira a render finito, e non deve poterlo far
+    fallire.
+
+    Modificare lo ``study.yml`` mentre il render gira e' il ciclo di lavoro —
+    e' la ragione per cui lo snapshot si legge all'inizio. Finche' l'avviso
+    rileggeva e riparsava il documento per riavere le combinazioni dichiarate,
+    un blocco lasciato a meta' in quella finestra faceva uscire 2 un render che
+    aveva scritto tutto il suo audio. Le dichiarate le passa ``_dispatch``, che
+    le ha gia' lette a inizio giro.
+    """
+    sdir = _studio(tmp_path, monkeypatch)
+    _fake_engine(monkeypatch)
+    assert cli.main(["sweep", "s_fe"]) == 0
+
+    import granstudies.render as render_mod
+    motore = render_mod.engine_bridge.render
+
+    def rompe_il_documento(*a, **kw):
+        (sdir / "study.yml").write_text(yaml.safe_dump(
+            dict(_DOC, for_each={"base.volume": {"values": 0}}), sort_keys=False))
+        return motore(*a, **kw)
+
+    monkeypatch.setattr(render_mod.engine_bridge, "render", rompe_il_documento)
+    assert cli.main(["render", "s_fe", "--no-score", "--jobs", "1"]) == 0
+    # e l'audio c'e' davvero, per tutte e due le combinazioni
+    g = tmp_path / "generated" / "s_fe"
+    assert len(list(g.rglob("*.aif"))) == 2
