@@ -67,9 +67,11 @@ Il criterio, che è anche la riga di doc del blocco:
 
 ### Naming delle cartelle
 
-- Valore **scalare** → `chiave=valore`, sanificato (`[^A-Za-z0-9._-]` → `_`),
-  senza il prefisso di sezione (`base.`, `axes.`) né il nome del generatore in
-  coda (`.values`).
+- Valore **scalare** → `chiave=valore`, sanificato (ogni corsa di caratteri
+  fuori da `[A-Za-z0-9.-]`, `_` compreso, → un `_` solo, e i `_` in testa e in
+  coda cadono: `__` separa gli assi, quindi nessun segmento lo contiene), senza
+  il prefisso di sezione (`base.`, `axes.`) né il nome del generatore in coda
+  (`.values`).
 - Qualunque altra cosa (lista, dict, breakpoint, banda) → l'asse **deve** essere
   a stati nominati: il nome lo dà l'utente. Niente indici anonimi `d0/ d1/`: un
   nome di cartella che non dice cosa contiene non serve a niente.
