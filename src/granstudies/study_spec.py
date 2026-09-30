@@ -368,7 +368,7 @@ def _check_enumerated_generator(
             key=("axes", name),
             axis=name,
             hint=f"dichiara i valori con 'values: [{valori}]': 'ramp' e la "
-            "banda producono anche valori intermedi, che l'engine rifiuta "
+            "banda possono produrre valori intermedi, che l'engine rifiuta "
             "invece di arrotondarli.",
         )
     if bounds_mod.categorical_domain(path) is None:
