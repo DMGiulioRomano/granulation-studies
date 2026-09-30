@@ -1892,7 +1892,14 @@ generated/<study_id>/
 `make sweep` / `make stack` / `make versions` / `make percorso`.
 
 Il render scrive accanto all'albero uno `study.yml`: lo snapshot del documento
-che ha prodotto quell'audio, riscritto a ogni render. Con un blocco `for_each:`
+**letto all'inizio di quel render**, riscritto a ogni render. Non «il documento
+che ha prodotto quell'audio»: l'audio viene dagli YAML delle varianti, scritti
+da `sweep`/`stack`/`versions`/`percorso`, che possono essere più vecchi del
+documento — si modifica lo `study.yml` e si lancia solo `make render`, e l'audio
+resta quello di prima. Quando succede il render lo dichiara su stderr
+(«N varianti sono più vecchie di study.yml»), così lo snapshot non copre l'audio
+stale invece di denunciarlo; dopo `make all-study` l'avviso tace, perché il giro
+riscrive le varianti. Con un blocco `for_each:`
 lo stesso albero, identico in ogni sotto-cartella, scende di un livello —
 `generated/<study_id>/<label>/` — e lo snapshot è il documento **patchato**.
 Là i `.sv` prendono la label in coda al basename

@@ -377,7 +377,9 @@ def cmd_render(
 
     spec = _load_spec(study)
     # Lo snapshot si legge adesso e si scrive alla fine: un render dura minuti,
-    # e lo study.yml trovato a render finito puo' essere gia' un altro.
+    # e lo study.yml trovato a render finito puo' essere gia' un altro. Chiude
+    # la finestra *dentro* il render; quella fra generazione e render la
+    # dichiara ``_warn_varianti_stale``.
     snapshot = _read_study(study)[0]
     g = gen_dir(study)
     # Il render e' generico: discende yaml/ ricorsivamente (sweep/, stack/,
@@ -411,10 +413,16 @@ def cmd_render(
     skipped = sum(1 for e in manifest if e["skipped"])
     done = len(manifest) - skipped
     print(f"[render] {done} varianti renderizzate, {skipped} saltate (aggiornate) in {tempo} -> {g}")
-    # Snapshot dello study.yml che ha prodotto questo audio, riscritto a ogni
-    # render: e' il documento **patchato**, quindi dice da se' i valori della
+    _warn_varianti_stale(study, manifest)
+    # Snapshot dello study.yml **letto all'inizio di questo render**, riscritto a
+    # ogni render: e' il documento patchato, quindi dice da se' i valori della
     # combinazione invece di rimandare al blocco ``for_each:``. Con la
     # combinazione vuota ha gli stessi valori dello study.yml.
+    #
+    # Non dice "il documento che ha prodotto questo audio": l'audio viene dagli
+    # YAML delle varianti, scritti da sweep/stack/versions/percorso, che possono
+    # essere piu' vecchi del documento. Quando lo sono, l'avviso qui sopra lo
+    # dichiara — la promessa e' quella, e la finestra non e' chiudibile da qui.
     with open(os.path.join(g, "study.yml"), "w", encoding="utf-8") as fh:
         yaml.safe_dump(snapshot, fh, sort_keys=False, allow_unicode=True)
     return 0
@@ -789,6 +797,36 @@ def _combos(study: str) -> list:
                  "Togli COMBO dall'ambiente per girarle tutte.",
         )
     return scelte
+
+
+def _warn_varianti_stale(study: str, manifest: list) -> None:
+    """Avvisa se lo ``study.yml`` e' piu' recente delle varianti renderizzate.
+
+    Il render non legge ``study.yml`` per fare l'audio: legge gli YAML che
+    ``sweep``/``stack``/``versions``/``percorso`` hanno scritto. Modificare il
+    documento e lanciare solo ``render`` lascia quindi l'audio di prima — e lo
+    snapshot, che il documento nuovo lo riporta, sarebbe l'unico posto dove
+    accorgersene: senza avviso lo copre invece di denunciarlo.
+
+    Dopo ``all-study`` tace: il giro riscrive le varianti, che restano piu'
+    recenti del documento. Si guarda **dopo** il render perche' il manifest
+    porta gia' l'elenco delle varianti — la regola di cosa sia una variante
+    vive in ``render_variants``, e una seconda copia qui divergerebbe — e
+    perche' e' la riga che qualifica lo snapshot scritto subito sotto.
+    """
+    path = os.path.join(study_dir(study), "study.yml")
+    if not os.path.isfile(path):
+        return
+    doc = os.path.getmtime(path)
+    vecchie = [e["yaml"] for e in manifest
+               if os.path.exists(e["yaml"]) and os.path.getmtime(e["yaml"]) < doc]
+    if not vecchie:
+        return
+    print(f"[render] ATTENZIONE: {len(vecchie)} varianti su {len(manifest)} sono "
+          "piu' vecchie di study.yml: l'audio non lo riflette, e lo snapshot "
+          "qui accanto dice il documento di adesso.", file=sys.stderr)
+    print("  Rigenerale (sweep / stack / versions / percorso, o 'make "
+          "all-study') e rirenderizza.", file=sys.stderr)
 
 
 def _warn_orphan_combos(study: str) -> None:

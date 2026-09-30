@@ -15,6 +15,7 @@ import glob
 import os
 import shutil
 import subprocess
+import time
 
 import pytest
 import yaml
@@ -469,6 +470,34 @@ def test_lo_snapshot_e_il_documento_letto_all_inizio_del_render(tmp_path, monkey
     snap = yaml.safe_load(
         (tmp_path / "generated" / "s_fe" / "volume=0" / "study.yml").read_text())
     assert snap["base"]["duration"] == 10
+
+
+def test_il_render_dice_se_lo_study_yml_e_piu_recente_delle_varianti(
+        tmp_path, monkeypatch, capsys):
+    # L'audio viene dalle varianti, non dallo study.yml: modificare il
+    # documento e lanciare solo `render` lascia l'audio di prima, e lo snapshot
+    # — che il documento nuovo lo riporta — sarebbe l'unico posto dove
+    # accorgersene. Senza avviso lo copre invece di denunciarlo.
+    sdir = _studio(tmp_path, monkeypatch)
+    _fake_engine(monkeypatch)
+    assert cli.main(["sweep", "s_fe"]) == 0
+    assert cli.main(["render", "s_fe", "--no-score"]) == 0
+    # appena generate, le varianti sono piu' recenti: l'avviso tace (e' il giro
+    # di `all-study`, che non deve gridare dove non c'e' niente)
+    assert "piu' vecchie" not in capsys.readouterr().err
+
+    time.sleep(0.01)
+    (sdir / "study.yml").write_text(yaml.safe_dump(dict(_DOC, title="dopo"),
+                                                   sort_keys=False))
+    assert cli.main(["render", "s_fe", "--no-score"]) == 0
+    err = capsys.readouterr().err
+    assert "piu' vecchie di study.yml" in err and "sweep" in err
+    # ed e' vero cio' che l'avviso denuncia: lo snapshot e' il documento di
+    # adesso, le varianti da cui viene l'audio sono di quello di prima
+    g = tmp_path / "generated" / "s_fe" / "volume=0"
+    assert yaml.safe_load((g / "study.yml").read_text())["title"] == "dopo"
+    variante = next((g / "yaml").rglob("*.yml"))
+    assert os.path.getmtime(variante) < os.path.getmtime(sdir / "study.yml")
 
 
 def test_una_patch_su_axes_cambia_le_varianti_generate(tmp_path, monkeypatch):
