@@ -101,8 +101,9 @@ axes:                             # * almeno un asse
                                  # solo l'inviluppo: 0.3 non e' un verso e 0 non ha
                                  # segno, e l'engine li rifiuta invece di arrotondarli.
                                  # Un valore (o il baseline) fuori dall'insieme e'
-                                 # errore di parse. Solo `values`: ramp e banda
-                                 # genererebbero anche i valori intermedi.
+                                 # errore di parse. Solo `values`: ramp e banda possono
+                                 # generare valori intermedi (e' rifiutata anche una
+                                 # ramp che cade sull'insieme: il rimedio e' uno).
     baseline: 1                  # obbligatorio: senza chiave l'engine va in modalita'
                                  # 'auto', non ha un default numerico
     values: [-1, 1]
@@ -110,6 +111,10 @@ axes:                             # * almeno un asse
                                  # sulla chiave. A differenza del categoriale si muove
                                  # ovunque: in `sweep.mode: envelope` e in `stack:`
                                  # diventa `{type: step, points: ...}`, che l'engine legge.
+                                 # In `stack:` pero' la X lineare mette l'ultimo valore
+                                 # su t = 1, dove uno `step` non suona piu': `values:
+                                 # [-1, 1]` legge all'indietro per tutto lo stream. Il
+                                 # verso che cambia a meta' e' `values: [-1, 1, 1]`.
 
 # Configurazione dello sweep (il processo possiede X: timing e durata derivata).
 sweep:

@@ -7,8 +7,8 @@ verso, ``0`` non ha segno. Da qui tre regole per l'asse, tutte al parse dello
 ``study.yml`` invece che al render:
 
 - i valori (e il baseline) stanno nell'insieme dell'engine;
-- si enumerano con ``values``: ``ramp`` e la banda generano anche fra un
-  elemento e l'altro;
+- si enumerano con ``values``: ``ramp`` e la banda possono generare anche fra
+  un elemento e l'altro;
 - ``interpolation: step``, l'unica che l'engine accetta sulla chiave.
 
 L'oracolo dei documenti generati e' il validatore dell'engine stesso
@@ -211,6 +211,20 @@ def test_lo_stack_genera_un_envelope_step_che_l_engine_accetta():
     assert raw["type"] == "step"
     assert {p[1] for p in raw["points"]} <= {-1, 1}
     _engine_normalize(raw)  # non solleva
+
+
+def test_in_stack_l_ultimo_verso_cade_su_t_1():
+    # Il reference lo scrive accanto all'asse: la X lineare mette l'ultimo
+    # punto su t = 1 (``x_strategies.linear``, t_i = i/(n-1)), dove uno
+    # ``step`` non suona piu'. Con due versi il secondo non si sente mai; il
+    # cambio a meta' vuole il verso d'arrivo scritto due volte.
+    def punti(values):
+        d = _study({"baseline": 1, "values": values}, stack={})
+        stream = build_stack_stream(parse_study_spec(d, "s"))
+        return stream["grain"]["read_direction"]["points"]
+
+    assert punti([-1, 1]) == [[0.0, -1], [1.0, 1]]
+    assert punti([-1, 1, 1]) == [[0.0, -1], [0.5, 1], [1.0, 1]]
 
 
 @pytest.mark.parametrize("other_interp", ["step", "linear"])

@@ -155,7 +155,7 @@ def discrete_domain(path: str) -> Optional[frozenset]:
     non lo e'.
 
     Un asse su un path discreto enumera i suoi valori (``values: [-1, 1]``):
-    ``ramp`` e la banda produrrebbero anche valori fra un elemento e l'altro,
+    ``ramp`` e la banda possono produrre valori fra un elemento e l'altro,
     dove l'engine non ha niente da renderizzare. ``violation``/``clamp``
     applicano i bounds come su ogni path, ma sono solo l'inviluppo: un valore
     dentro i bounds e fuori dall'insieme lo ferma ``study_spec``, contro questo
