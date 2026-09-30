@@ -217,6 +217,11 @@ def test_lo_stack_genera_un_envelope_step_che_l_engine_accetta():
 def test_l_envelope_sweep_genera_un_envelope_che_l_engine_accetta(other_interp):
     # Con un altro asse lineare nello stesso file la griglia resta a plateau e
     # l'asse step tiene un punto per plateau (layout C); tutti step, collassa.
+    # L'oracolo legge il documento che il writer scrive, non un envelope
+    # ricostruito dai pezzi della variante: il ``type`` lo decide il writer, e
+    # ricostruendolo qui un file con ``type: linear`` passava.
+    from granstudies.render import _envelope_document
+
     d = _study({"baseline": 1, "values": [-1, 1]}, mode="envelope")
     d["axes"]["density"] = {
         "baseline": 20, "values": [10, 30], "interpolation": other_interp,
@@ -224,7 +229,8 @@ def test_l_envelope_sweep_genera_un_envelope_che_l_engine_accetta(other_interp):
     d["sweep"]["orders"] = [2]
     spec = parse_study_spec(d, "s")
     (ev,) = generate_envelope_variants(spec)
-    points = ev.overrides(spec)[AX]
-    assert ev.envelope_types(spec)[AX] == "step"
-    assert {p[1] for p in points} <= {-1, 1}
-    _engine_normalize({"type": "step", "points": points})  # non solleva
+    (stream,) = _envelope_document(spec, ev)["streams"]
+    raw = stream["grain"]["read_direction"]
+    assert raw["type"] == "step"
+    assert {p[1] for p in raw["points"]} <= {-1, 1}
+    _engine_normalize(raw)  # non solleva
