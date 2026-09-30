@@ -252,6 +252,42 @@ def _reject_empty_segment(path: str, ctx: ErrCtx, key: tuple) -> None:
     )
 
 
+def _reject_sezione_sostituita(node: Dict[str, Any], chiave: str, path: str,
+                               value: Any, livello: int, ctx: ErrCtx) -> None:
+    """Una sezione del documento non si sostituisce con un non-dict.
+
+    Scrivere la sezione invece del path — ``base`` per ``base.volume``, un
+    suffisso dimenticato — le assegnava lo scalare, e il parse dello studio da'
+    le sezioni per dict: un valore falsy la svuotava in silenzio
+    (``data.get("base") or {}``, e l'audio usciva dai default del motore), uno
+    truthy usciva come AttributeError nudo da dentro ``parse_study_spec``. La
+    guardia sulle sezioni inesistenti non lo vede: ``base`` c'e'.
+
+    Sostituirla con un **dict** resta lecito: e' la sostituzione dell'intero
+    sotto-albero che la Forma 2 documenta.
+
+    Vale solo **alla radice**, dove le chiavi che tengono un dict sono tutte e
+    sole le sezioni (``base``, ``axes``, ``sweep``, ``stack``, ``versions``,
+    ``percorso``, ``let``, ``streams``, ``spread``) e quelle scalari
+    (``seed``, ``study_id``, ``samples_dir``, ``title``) restano manopole
+    legittime. Piu' in giu' servirebbe sapere se un parametro puo' essere un Env
+    (``base.volume: {points: ...}``), cioe' il vocabolario delle chiavi, che
+    vive nel language server e non qui: la' un non-dict sopra un dict resta il
+    refuso che passa, come quello sull'ultimo segmento.
+    """
+    if livello or isinstance(value, dict) or not isinstance(node.get(chiave), dict):
+        return
+    raise ctx.err(
+        f"{BLOCK}: il path '{path}' nomina una sezione del documento, e il "
+        f"valore {value!r} non e' un dict: la patch la sostituirebbe, "
+        "cancellandola.",
+        key=(BLOCK,),
+        hint=f"il path di una manopola scende dentro la sezione: "
+             f"'{path}.<chiave>'. Per sostituire la sezione intera serve un "
+             "dict, con un asse a stati nominati.",
+    )
+
+
 def _reject_stato_generatore(axis: str, cfg: Any, ctx: ErrCtx, key: tuple) -> None:
     """Uno stato chiamato ``base``/``values``/``ramp`` legge l'asse come Forma 1.
 
@@ -367,7 +403,9 @@ def _set_path(doc: Dict[str, Any], path: str, value: Any, ctx: ErrCtx) -> None:
 
     Creare una chiave nuova e' lecito (``base.pan_range`` su un ``base:`` che
     non ce l'ha), creare una **sezione** no: ``bse.pan_range`` sarebbe un refuso
-    che passa in silenzio e non muove niente. Il refuso sull'**ultimo**
+    che passa in silenzio e non muove niente. Nominare una sezione *esistente*
+    per assegnarle un non-dict e' un errore a sua volta
+    (``_reject_sezione_sostituita``): la cancellerebbe. Il refuso sull'**ultimo**
     segmento (``base.pan_rang``, o ``sed`` alla radice) invece passa: crea una
     chiave che nessuno legge, e il parse dello studio non la ferma — le chiavi
     sconosciute non le rifiuta, ne' in ``base:`` ne' alla radice. Le
@@ -417,6 +455,7 @@ def _set_path(doc: Dict[str, Any], path: str, value: Any, ctx: ErrCtx) -> None:
             )
         chiave = ".".join(rest[:spans[0]])
         if i + spans[0] == len(parts):
+            _reject_sezione_sostituita(node, chiave, path, value, i, ctx)
             node[chiave] = value
             return
         node = node[chiave]

@@ -91,6 +91,30 @@ def test_prodotto_cartesiano_lessicografico():
 
 # --- parse: le guardie -----------------------------------------------------
 
+def test_una_sezione_non_si_sostituisce_con_uno_scalare():
+    # `base` invece di `base.volume`: un suffisso dimenticato. Il valore si
+    # assegna, quindi la sezione intera diventava lo scalare — e il parse dello
+    # studio da' le sezioni per dict: un valore falsy la svuotava in silenzio
+    # (`data.get("base") or {}`) e l'audio usciva dai default del motore, uno
+    # truthy usciva come AttributeError nudo da dentro parse_study_spec.
+    doc = {"base": {"volume": 0, "sample": "c.wav"}, "axes": {"d": {"values": [1]}}}
+    for valore in (6, 0, None, "ciao", [1, 2], True):
+        with pytest.raises(SpecError) as e:
+            for_each.apply(doc, for_each.Combo("x", (("base", valore),)))
+        assert "sezione" in str(e.value), valore
+    assert doc["base"] == {"volume": 0, "sample": "c.wav"}   # e l'originale non si tocca
+    # Sostituirla con un dict resta lecito: e' la Forma 2 documentata.
+    fuori = for_each.apply(doc, for_each.Combo("x", (("base", {"volume": 3}),)))
+    assert fuori["base"] == {"volume": 3}
+    # La regola e' solo per la radice: piu' in giu' servirebbe sapere se un
+    # parametro puo' essere un Env, cioe' il vocabolario che qui non c'e'.
+    giu = for_each.apply(doc, for_each.Combo("x", (("base.volume", 3),)))
+    assert giu["base"] == {"volume": 3, "sample": "c.wav"}
+    # e una chiave radice che tiene uno scalare resta una manopola legittima
+    doc2 = {"seed": 1, "base": {}}
+    assert for_each.apply(doc2, for_each.Combo("x", (("seed", 7),)))["seed"] == 7
+
+
 def test_valore_non_scalare_manda_agli_stati_nominati():
     # Una lista non puo' diventare un nome di cartella, e un indice anonimo
     # (d0/ d1/) non dice cosa contiene: il nome lo da' l'utente.
@@ -410,6 +434,17 @@ def test_il_giro_completo_produce_una_cartella_per_combinazione(tmp_path, monkey
     a0 = next((g / "volume=0" / "audio").rglob("*.aif")).read_text()
     a6 = next((g / "volume=6" / "audio").rglob("*.aif")).read_text()
     assert a0 != a6
+
+
+def test_la_sezione_al_posto_del_path_non_esce_come_traceback(tmp_path, monkeypatch, capsys):
+    # Il refuso piu' facile che ci sia — la sezione invece del path — usciva
+    # come AttributeError nudo (valore truthy) o come exit 0 con il blocco
+    # `base:` svanito (valore falsy). Qui e' un errore con la posizione.
+    _studio(tmp_path, monkeypatch, dict(_DOC, for_each={"base": {"values": [0, 6]}}))
+    assert cli.main(["sweep", "s_fe"]) == 2
+    err = capsys.readouterr().err
+    assert "sezione" in err and "base.<chiave>" in err
+    assert not (tmp_path / "generated").exists()
 
 
 def test_lo_snapshot_e_il_documento_letto_all_inizio_del_render(tmp_path, monkeypatch):

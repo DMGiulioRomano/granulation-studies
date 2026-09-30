@@ -1742,14 +1742,31 @@ degenere, non un ramo speciale.
   contiene non serve a niente, quindi lo dà l'utente. Un bundle vuoto (`{}`) è
   lecito: è lo stato che non tocca niente. Nessuno stato può chiamarsi come una
   chiave di generatore (`values`, `ramp`, `base`): l'asse verrebbe letto come
-  Forma 1, ed è un errore — anche quando è l'unico stato dell'asse.
+  Forma 1, ed è un errore — anche quando è l'unico stato dell'asse. I wrapper
+  **morti** del vocabolario dei generatori (`rand:`, `linear_env:`) non sono
+  riservati, perché il nome di uno stato resta libero: `{base.volume: {rand:
+  {…}}}` è un asse con un solo stato chiamato `rand`, e i path sono le chiavi
+  del wrapper. Con `base`/`range` dentro — la forma di una banda vera — li
+  ferma la regola sulle sezioni qui sotto; con solo `n` scrive una chiave nuova
+  alla radice e passa, come il refuso sull'ultimo segmento. Dentro `axes:` gli
+  stessi due nomi hanno il loro errore dedicato.
 - **I path sono su tutto il documento**, non solo su `base:`:
   `axes.grain.duration.values`, `stack.seed`, `percorso.arco`,
   `streams.x.volume`. Il valore viene **assegnato** al path, non fuso:
   `base.grain: {...}` sostituisce l'intero sotto-albero. Creare una chiave nuova
   è lecito (`base.pan_range` su un `base:` che non ce l'ha), creare una
-  **sezione** no (`bse.pan_range` è un errore, non un refuso silenzioso). Il
-  refuso sull'**ultimo** segmento invece passa (`base.pan_rang`, o `sed` alla
+  **sezione** no (`bse.pan_range` è un errore, non un refuso silenzioso).
+  Nominare una sezione che *esiste* per assegnarle un **non-dict** è errore a
+  sua volta — `base: 0` dove si voleva `base.volume: 0`, un suffisso
+  dimenticato: la patch la sostituirebbe, e il parse dà le sezioni per dict,
+  quindi un valore falsy la svuoterebbe in silenzio (l'audio dai default del
+  motore) e uno truthy uscirebbe come traceback. Sostituirla con un dict resta
+  lecito: è la Forma 2. La regola vale **alla radice**, dove le chiavi che
+  tengono un dict sono tutte e sole le sezioni e quelle scalari (`seed`,
+  `study_id`, `samples_dir`, `title`) restano manopole; più in giù
+  (`base.grain: hanning`) servirebbe sapere se un parametro può essere un Env,
+  cioè il vocabolario che sta nel language server, e lì il refuso passa.
+  Passa anche quello sull'**ultimo** segmento (`base.pan_rang`, o `sed` alla
   radice): crea una chiave che nessuno legge, perché il parse dello studio le
   chiavi sconosciute non le rifiuta, e le combinazioni escono identiche.
   Un path è una **stringa** senza segmenti vuoti: `base.` o `base..volume` (un
