@@ -9,13 +9,21 @@
     granstudies matrix   STUDY      costruisce kinship.json
     granstudies compose  STUDY      genera final.yml dal percorso/grafo
     granstudies render-final STUDY  renderizza il brano finale
+    granstudies where    STUDY      stampa le cartelle di output correnti
 
 STUDY e' il nome della cartella sotto ``studies/`` (es. base).
+
+Con un blocco ``for_each:`` ogni comando gira una volta **per combinazione**
+(vedi ``granstudies.for_each``): il documento viene patchato e l'output va in
+``generated/<study>/<label>/``. L'env ``COMBO`` restringe il giro a una fetta
+delle combinazioni, per non rirenderizzare decine di varianti da venti minuti
+per sentirne una.
 """
 from __future__ import annotations
 
 import argparse
 import glob
+import hashlib
 import json
 import os
 import sys
@@ -24,9 +32,10 @@ from typing import Any, Dict
 
 import yaml
 
+from . import for_each
 from .document_let import apply_document_let
 from .engine_bridge import REPO_ROOT
-from .errors import SpecError
+from .errors import ErrCtx, SpecError
 
 
 # --- layout dei path -------------------------------------------------------
@@ -35,8 +44,89 @@ def study_dir(study: str) -> str:
     return os.path.join(REPO_ROOT, "studies", study)
 
 
+# Combinazione corrente: la imposta ``_dispatch``, che gira il comando una volta
+# per ogni combinazione dichiarata in ``for_each:``. E' un contesto di processo,
+# non un parametro: i ``cmd_*`` non sanno che esistono gli assi esterni, e i due
+# punti che li vedono sono ``gen_dir`` (dove si scrive) e ``_read_study`` (cosa
+# si legge).
+_COMBO: for_each.Combo = for_each.EMPTY
+
+
+def combo() -> for_each.Combo:
+    return _COMBO
+
+
 def gen_dir(study: str) -> str:
-    return os.path.join(REPO_ROOT, "generated", study)
+    """Cartella di output dello studio, per la combinazione corrente.
+
+    Senza ``for_each:`` (o con la combinazione vuota) e' ``generated/<study>/``,
+    identica a uno studio senza assi esterni; con gli assi esterni scende di un
+    livello, ``generated/<study>/<label>/``, e sotto ha lo stesso albero
+    (``yaml/``, ``audio/``, ``sv/``, ``cache/``, ``score/``).
+    """
+    parts = [REPO_ROOT, "generated", study]
+    if _COMBO.label:
+        parts.append(_COMBO.label)
+    return os.path.join(*parts)
+
+
+# Cio' che ``gen_dir`` tiene: le cartelle di processo piu' lo snapshot che
+# ``cmd_render`` scrive accanto. Sotto ``generated/<study>/`` sono l'albero
+# piatto, cioe' la combinazione vuota; sotto una label sono la combinazione.
+_ALBERO_DI_COMBINAZIONE = ("yaml", "audio", "sv", "score", "cache", "study.yml")
+
+# Le due voci che ogni giro scrive: sono il segnale che l'albero piatto c'e'.
+# Le altre lo accompagnano ma da sole non lo dicono — una ``cache/`` alla
+# radice puo' essere la ``CACHE_DIR`` esplicita divisa per combinazione, e un
+# avviso che grida dove non c'e' niente e' il primo che si impara a saltare.
+_SEGNALE_ALBERO_PIATTO = ("yaml", "audio")
+
+# Marcatore di provenienza degli YAML di un processo: l'impronta del documento
+# che li ha generati, accanto a loro. Non e' uno YAML, quindi nessuno dei walk
+# che cercano varianti lo raccoglie (``render_variants``, ``_warn_orphans``,
+# ``cmd_sv`` filtrano su ``.yml``/``.yaml``, e ``write_versions`` ripulisce
+# solo i ``*.yml``).
+_SORGENTE = ".sorgente"
+
+
+def _impronta(doc: Dict[str, Any]) -> str:
+    """Impronta del documento patchato: dice **cosa** diceva, non quando.
+
+    ``sort_keys`` perche' la domanda e' sul contenuto: due letture dello stesso
+    file devono dare la stessa impronta anche se un giro futuro riordinasse le
+    chiavi.
+    """
+    testo = yaml.safe_dump(doc, sort_keys=True, allow_unicode=True)
+    return hashlib.sha256(testo.encode("utf-8")).hexdigest()
+
+
+def _segna_sorgente(study: str, process: str, impronta: str) -> None:
+    """Registra accanto agli YAML di ``process`` il documento che li ha generati.
+
+    Lo scrivono i quattro generatori a lavoro finito; lo legge il render
+    (``_warn_varianti_stale``). L'impronta e' quella del documento **patchato**,
+    cioe' esattamente cio' da cui quelle varianti derivano: una modifica al
+    blocco ``for_each:`` che non tocca questa combinazione non la muove.
+    """
+    d = os.path.join(gen_dir(study), "yaml", process)
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, _SORGENTE), "w", encoding="utf-8") as fh:
+        fh.write(impronta + "\n")
+
+
+def _sorgente_di(variant_dir: str, process: str) -> str | None:
+    """L'impronta registrata da ``process``, o ``None`` se non ce n'e' una.
+
+    ``None`` e' "non lo so", mai "e' diversa": un albero generato prima che il
+    marcatore esistesse non deve far gridare il render, e il primo giro dei
+    generatori glielo scrive.
+    """
+    try:
+        with open(os.path.join(variant_dir, process, _SORGENTE),
+                  "r", encoding="utf-8") as fh:
+            return fh.read().strip() or None
+    except OSError:
+        return None
 
 
 def samples_dir(spec_samples: str | None) -> str:
@@ -57,10 +147,23 @@ def _load_spec(study: str):
     return specs[0]
 
 
+def _read_study(study: str) -> tuple[Dict[str, Any], Any]:
+    """Il documento dello studio, patchato con la combinazione corrente.
+
+    E' l'unico punto in cui ``study.yml`` viene letto: da qui in giu' il
+    documento e' uno studio normale, senza blocco ``for_each:``. Le posizioni
+    restano quelle del file sorgente — una chiave patchata riporta la riga
+    dov'e' dichiarata nel documento, non quella dell'asse esterno che l'ha
+    mossa, ed e' comunque il posto giusto dove andare a guardare.
+    """
+    from .yaml_loc import load as load_with_locations
+
+    raw, locs = load_with_locations(os.path.join(study_dir(study), "study.yml"))
+    return for_each.apply(raw, _COMBO, locs), locs
+
+
 def _load_data(study: str) -> Dict[str, Any]:
-    path = os.path.join(study_dir(study), "study.yml")
-    with open(path, "r", encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
+    return _read_study(study)[0]
 
 
 def _emit(items) -> None:
@@ -78,10 +181,8 @@ def _emit(items) -> None:
 def _load_specs(study: str, stream: str | None = None) -> list:
     from .diagnostics import check_corredi, check_loop_unit
     from .study_spec import resolve_streams
-    from .yaml_loc import load as load_with_locations
 
-    path = os.path.join(study_dir(study), "study.yml")
-    data, locs = load_with_locations(path)
+    data, locs = _read_study(study)
     # Diagnostica non fatale sul documento **grezzo**: apply_document_let
     # consuma e rimuove il blocco ``let:``, dove i corredi sono dichiarati.
     _emit(check_corredi(data, locs))
@@ -146,6 +247,7 @@ def cmd_sweep(study: str, stream: str | None = None) -> int:
     if "sweep" not in data:
         print(f"[sweep] nessun blocco 'sweep:' in {study}/study.yml — niente da fare.")
         return 0
+    impronta = _impronta(data)
     specs = _load_specs(study, stream)
     if not specs:
         return 1
@@ -180,6 +282,11 @@ def cmd_sweep(study: str, stream: str | None = None) -> int:
         if not written:
             print(f"[sweep]{label} nessuna variante generata (mode={spec.mode})")
     _warn_orphans(out, written_all, scoped=stream is not None)
+    # Provenienza: solo dallo sweep intero. Con STREAM si riscrive una stream
+    # sola, quindi le altre restano quelle del documento di prima e il
+    # marcatore deve continuare a dirlo.
+    if stream is None:
+        _segna_sorgente(study, "sweep", impronta)
     return 0
 
 
@@ -227,6 +334,7 @@ def cmd_stack(study: str) -> int:
     if "stack" not in data:
         print(f"[stack] nessun blocco 'stack:' in {study}/study.yml — niente da fare.")
         return 0
+    impronta = _impronta(data)
     specs = _load_specs(study)
     if not specs:
         return 1
@@ -238,6 +346,7 @@ def cmd_stack(study: str) -> int:
     changed = before != os.path.getmtime(written[0])
     stato = "aggiornato" if changed else "invariato"
     print(f"[stack] documento multi-stream ({len(specs)} stream, {stato}) -> {written[0]}")
+    _segna_sorgente(study, "stack", impronta)
     return 0
 
 
@@ -250,13 +359,11 @@ def cmd_versions(study: str) -> int:
     if "versions" not in data:
         print(f"[versions] nessun blocco 'versions:' in {study}/study.yml — niente da fare.")
         return 0
+    impronta = _impronta(data)
     # Il parse per-versione avviene DOPO l'iniezione delle variabili nei let:
     # il documento grezzo puo' essere incompleto per costruzione (variabile
     # senza default nel let), quindi niente _load_specs qui.
-    from .yaml_loc import load as load_with_locations
-
-    path = os.path.join(study_dir(study), "study.yml")
-    raw, locs = load_with_locations(path)
+    raw, locs = _read_study(study)
     # Il rilievo dipende dalla combinazione quando ``versions:`` muove
     # ``spread.n`` o un corredo: si controlla ogni combinazione e si deduplica.
     from .diagnostics import check_corredi_combos
@@ -284,6 +391,7 @@ def cmd_versions(study: str) -> int:
     print(
         f"[versions] {len(written)} documenti ({changed} aggiornati) -> {d}"
     )
+    _segna_sorgente(study, "versions", impronta)
     return 0
 
 
@@ -296,12 +404,10 @@ def cmd_percorso(study: str) -> int:
     if "percorso" not in data:
         print(f"[percorso] nessun blocco 'percorso:' in {study}/study.yml — niente da fare.")
         return 0
+    impronta = _impronta(data)
     # Come versions: il parse per-istanza avviene DOPO l'iniezione delle
     # traiettorie nei let, quindi niente _load_specs sul documento grezzo.
-    from .yaml_loc import load as load_with_locations
-
-    path = os.path.join(study_dir(study), "study.yml")
-    raw, locs = load_with_locations(path)
+    raw, locs = _read_study(study)
     from .diagnostics import check_corredi
 
     _emit(check_corredi(raw, locs))
@@ -319,6 +425,7 @@ def cmd_percorso(study: str) -> int:
     changed = before != os.path.getmtime(written[0])
     stato = "aggiornato" if changed else "invariato"
     print(f"[percorso] documento percorso ({stato}) -> {written[0]}")
+    _segna_sorgente(study, "percorso", impronta)
     return 0
 
 
@@ -329,6 +436,11 @@ def cmd_render(
     from .render import render_variants
 
     spec = _load_spec(study)
+    # Lo snapshot si legge adesso e si scrive alla fine: un render dura minuti,
+    # e lo study.yml trovato a render finito puo' essere gia' un altro. Chiude
+    # la finestra *dentro* il render; quella fra generazione e render la
+    # dichiara ``_warn_varianti_stale``.
+    snapshot = _read_study(study)[0]
     g = gen_dir(study)
     # Il render e' generico: discende yaml/ ricorsivamente (sweep/, stack/,
     # versions/, percorso/) e rispecchia i sotto-path sotto audio/ e score/.
@@ -336,6 +448,13 @@ def cmd_render(
     if not os.path.isdir(variant_dir):
         print(f"[render] nessuno YAML: esegui prima 'sweep {study}', 'stack {study}', 'versions {study}' o 'percorso {study}'.", file=sys.stderr)
         return 1
+    # Una cache esplicita si divide per combinazione come quella di default: i
+    # manifest si chiamano come lo YAML (``stack.json``), che e' lo stesso in
+    # ogni combinazione, e condivisi darebbero per "clean" uno stream il cui
+    # fingerprint l'ha scritto un'altra combinazione, con lo stem vecchio
+    # ancora su disco in questa.
+    if cache_dir and _COMBO.label:
+        cache_dir = os.path.join(cache_dir, _COMBO.label)
     t0 = time.perf_counter()
     manifest = render_variants(
         variant_dir=variant_dir,
@@ -354,6 +473,18 @@ def cmd_render(
     skipped = sum(1 for e in manifest if e["skipped"])
     done = len(manifest) - skipped
     print(f"[render] {done} varianti renderizzate, {skipped} saltate (aggiornate) in {tempo} -> {g}")
+    _warn_varianti_stale(manifest, variant_dir, _impronta(snapshot))
+    # Snapshot dello study.yml **letto all'inizio di questo render**, riscritto a
+    # ogni render: e' il documento patchato, quindi dice da se' i valori della
+    # combinazione invece di rimandare al blocco ``for_each:``. Con la
+    # combinazione vuota ha gli stessi valori dello study.yml.
+    #
+    # Non dice "il documento che ha prodotto questo audio": l'audio viene dagli
+    # YAML delle varianti, scritti da sweep/stack/versions/percorso, che possono
+    # essere piu' vecchi del documento. Quando lo sono, l'avviso qui sopra lo
+    # dichiara — la promessa e' quella, e la finestra non e' chiudibile da qui.
+    with open(os.path.join(g, "study.yml"), "w", encoding="utf-8") as fh:
+        yaml.safe_dump(snapshot, fh, sort_keys=False, allow_unicode=True)
     return 0
 
 
@@ -454,6 +585,17 @@ def cmd_compose(study: str, seed: int | None, steps: int | None, start: str | No
     return 0
 
 
+def sv_combo_suffix() -> str:
+    """Suffisso del basename dei ``.sv`` quando lo studio ha assi esterni.
+
+    Sonic Visualiser identifica una sessione dal nome del file: due
+    combinazioni dello stesso studio producono ``.sv`` omonimi, e se una e' gia'
+    aperta l'altra non si apre — proprio il confronto fra combinazioni, che e' il
+    motivo per cui esistono. La label le distingue.
+    """
+    return f"__{_COMBO.label}" if _COMBO.label else ""
+
+
 def _cmd_sv_document(study: str, g: str, layout: str, total: list, process: str,
                      axis_paths: list | None = None) -> None:
     """Emette i .sv dei documenti multi-stream di un processo (``stack``/
@@ -475,14 +617,15 @@ def _cmd_sv_document(study: str, g: str, layout: str, total: list, process: str,
         if not os.path.exists(audio):
             print(f"[sv] audio {base} mancante: esegui prima 'render'.", file=sys.stderr)
             continue
-        suffix = f"_{layout}" if layout == "single" else ""
+        suffix = (f"_{layout}" if layout == "single" else "") + sv_combo_suffix()
         out = os.path.join(g, "sv", process, f"{study}_{base}" + suffix + ".sv")
         stack_to_sv(variant, audio, out, layout=layout, axis_paths=axis_paths)
         total.append(out)
         print(f"[sv] {out}")
 
         # Un pane per stem (audio separato per stream): richiede 'render --stem'.
-        stems_out = os.path.join(g, "sv", process, f"{study}_{base}_stems.sv")
+        stems_out = os.path.join(
+            g, "sv", process, f"{study}_{base}_stems" + sv_combo_suffix() + ".sv")
         if stack_stems_to_sv(variant, audio_dir, stems_out, process=base,
                              axis_paths=axis_paths):
             total.append(stems_out)
@@ -534,13 +677,16 @@ def cmd_sv(study: str, layout: str, markers: bool = True, stream: str | None = N
                 continue
             variant_name = fname[:-4]
             # Il basename include lo studio (per distinguerlo aprendo piu' .sv
-            # in Sonic Visualiser) e lo stream (per distinguere i file in SV).
+            # in Sonic Visualiser) e lo stream (per distinguere i file in SV);
+            # con gli assi esterni ci si aggiunge la label della combinazione,
+            # stessa ragione (vedi ``sv_combo_suffix``). L'audio resta senza: il
+            # suo nome lo cerca ``cmd_sv``, ed e' gia' unico per cartella.
             basename = f"{study}_{sub}_{variant_name}" if sub else f"{study}_{variant_name}"
             audio = os.path.join(audio_dir, basename + ".aif")
             if not os.path.exists(audio):
                 print(f"[sv] {basename}: audio mancante, salto.", file=sys.stderr)
                 continue
-            suffix = f"_{layout}" if layout == "single" else ""
+            suffix = (f"_{layout}" if layout == "single" else "") + sv_combo_suffix()
             out = os.path.join(sv_dir, basename + suffix + ".sv")
             variant_to_sv(os.path.join(variant_dir, fname), audio, out,
                           layout=layout, markers=markers, markers_scope=markers_scope)
@@ -564,6 +710,18 @@ def cmd_render_final(study: str) -> int:
     sdir = samples_dir(spec.samples_dir)
     engine_bridge.render(final_yaml, audio, samples_dir=sdir)
     print(f"[render-final] {audio}")
+    return 0
+
+
+def cmd_where(study: str) -> int:
+    """Stampa la cartella di output della combinazione corrente, nient'altro.
+
+    Girando dentro il loop delle combinazioni ne stampa una per riga, filtro
+    ``COMBO`` compreso: e' l'unica fonte di verita' su dove si scrive, e la
+    funzione ``study`` in ``.zsh_completions/_study`` la interroga invece di
+    ricostruirsi i path in zsh.
+    """
+    print(gen_dir(study))
     return 0
 
 
@@ -598,7 +756,8 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--no-cache", dest="cache", action="store_false",
                     help="disattiva il caching incrementale per gli stem")
     rp.add_argument("--cache-dir", default=None,
-                    help="directory manifest cache (default: <study>/generated/cache)")
+                    help="directory manifest cache (default: generated/<study>/cache; "
+                         "con for_each: una sotto-cartella per combinazione)")
     rp.add_argument("--jobs", type=int, default=None,
                     help="budget totale di processi, ripartito tra varianti in "
                          "parallelo e core per singolo render (default: tutti i core)")
@@ -618,6 +777,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     fp = sub.add_parser("render-final", help="renderizza il brano finale")
     fp.add_argument("study")
+
+    wp = sub.add_parser("where", help="stampa le cartelle di output correnti "
+                                      "(una per combinazione di for_each:)")
+    wp.add_argument("study")
 
     svp = sub.add_parser("sv", help="genera sessioni .sv per Sonic Visualiser")
     svp.add_argument("study")
@@ -657,7 +820,215 @@ def _report_error(args) -> int:
     return 2
 
 
+def _combos(study: str) -> tuple[list, list]:
+    """``(tutte le combinazioni dichiarate, quelle da girare)``.
+
+    ``COMBO`` e' un filtro di sessione, non un interruttore di modalita': senza,
+    si fa tutto. Serve a non rirenderizzare decine di varianti da venti minuti
+    per sentirne una, e a non aprire decine di sessioni di Sonic Visualiser
+    insieme.
+
+    Le dichiarate escono insieme alle scelte perche' l'avviso sulle orfane le
+    vuole tutte (quelle fuori dal filtro non sono orfane) e non deve rileggere
+    il documento per riaverle: e' una seconda fonte di verita', e girerebbe a
+    render finito — su uno ``study.yml`` che nel frattempo si e' toccato, che
+    e' il ciclo di lavoro. Un blocco rimasto a meta' li' faceva uscire 2 un
+    render andato a buon fine.
+    """
+    from .yaml_loc import load as load_with_locations
+
+    path = os.path.join(study_dir(study), "study.yml")
+    if not os.path.isfile(path):
+        # l'errore lo da' il comando, con contesto
+        return [for_each.EMPTY], [for_each.EMPTY]
+    raw, locs = load_with_locations(path)
+    combos = for_each.parse(raw, locs)
+    voluta = os.environ.get("COMBO", "").strip()
+    if not voluta:
+        return combos, combos
+    # Filtro per **fetta**, non per combinazione singola: i vincoli sono
+    # segmenti di label (``distribution=0.3``), e passa chi li contiene tutti.
+    # Con quattro assi esterni le combinazioni sono decine e la label intera e'
+    # lunga da scrivere, mentre la domanda vera e' quasi sempre parziale —
+    # "tutte le dispersioni a distribution 0.3". Il match e' per segmento
+    # intero, quindi ``distribution=0`` non prende ``distribution=0.3``.
+    vincoli = [v for v in voluta.split("__") if v]
+    scelte = [c for c in combos if set(vincoli) <= set(c.label.split("__"))]
+    if not scelte:
+        # Virgole e non a-capo: il rimedio passa da ``textwrap.fill`` nel
+        # blocco d'errore, che gli a-capo li fonde e incollerebbe le label.
+        disponibili = ", ".join(c.label for c in combos if c.label) or "nessuna"
+        raise ErrCtx(locs=locs).err(
+            f"COMBO='{voluta}' non seleziona nessuna combinazione di '{study}'.",
+            key=(for_each.BLOCK,),
+            hint="i vincoli sono segmenti di label separati da '__', in and "
+                 f"fra loro. Combinazioni dichiarate: {disponibili}. "
+                 "Togli COMBO dall'ambiente per girarle tutte.",
+        )
+    return combos, scelte
+
+
+def _warn_varianti_stale(manifest: list, variant_dir: str, impronta: str) -> None:
+    """Avvisa se le varianti renderizzate vengono da un altro ``study.yml``.
+
+    Il render non legge ``study.yml`` per fare l'audio: legge gli YAML che
+    ``sweep``/``stack``/``versions``/``percorso`` hanno scritto. Modificare il
+    documento e lanciare solo ``render`` lascia quindi l'audio di prima — e lo
+    snapshot, che il documento nuovo lo riporta, sarebbe l'unico posto dove
+    accorgersene: senza avviso lo copre invece di denunciarlo.
+
+    La domanda e' **da quale documento** vengono, non quale file e' piu'
+    recente. L'mtime non sa rispondere: ``render._dump`` non riscrive una
+    variante il cui contenuto non cambia — apposta, l'mtime fermo e' il
+    segnale con cui il render salta i gia' fatti — quindi una variante che il
+    giro ha appena confermato uguale resta piu' vecchia del documento **per
+    sempre**. Misurato: si tocca lo ``study.yml`` in un punto che non muove
+    quella variante (un ``title``, o il blocco ``for_each:``, che ``apply``
+    toglie prima del parse), si rilancia ``make all-study``, e l'avviso
+    gridava lo stesso, con un rimedio — «rigenerale» — che non poteva
+    cambiare niente. Un avviso che grida dove non c'e' niente, e che non si
+    spegne, e' il primo che si impara a saltare, e si porta dietro quello
+    vero.
+
+    Percio' ogni generatore registra accanto ai propri YAML l'impronta del
+    documento patchato da cui vengono (``_segna_sorgente``), e qui si
+    confronta con quella del documento di adesso. Un processo senza marcatore
+    (albero generato prima che esistesse) non dice niente: "non lo so" non e'
+    "e' diverso", e il primo giro glielo scrive.
+
+    Il manifest dice quali processi hanno davvero dato varianti a questo
+    render — la regola di cosa sia una variante vive in ``render_variants``, e
+    una seconda copia qui divergerebbe — e si guarda **dopo** il render perche'
+    e' la riga che qualifica lo snapshot scritto subito sotto.
+    """
+    letta: Dict[str, str | None] = {}
+    vecchie: Dict[str, int] = {}
+    for e in manifest:
+        rel = os.path.relpath(e["yaml"], variant_dir).split(os.sep)
+        if len(rel) < 2:
+            continue                  # YAML fuori da un processo: nessun marcatore
+        process = rel[0]
+        if process not in letta:
+            letta[process] = _sorgente_di(variant_dir, process)
+        if letta[process] is not None and letta[process] != impronta:
+            vecchie[process] = vecchie.get(process, 0) + 1
+    if not vecchie:
+        return
+    quali = ", ".join(sorted(vecchie))
+    n = sum(vecchie.values())
+    print(f"[render] ATTENZIONE: {n} varianti su {len(manifest)} vengono da un "
+          f"altro study.yml ({quali}): l'audio non lo riflette, e lo snapshot "
+          "qui accanto dice il documento di adesso.", file=sys.stderr)
+    print(f"  Rigenerale ({quali}, o 'make all-study') e rirenderizza.",
+          file=sys.stderr)
+
+
+def _warn_orphan_combos(study: str, dichiarate: list) -> None:
+    """Segnala le cartelle di combinazioni che ``for_each:`` non dichiara piu'.
+
+    Togliere un valore dal blocco lascia la sua cartella con l'audio gia'
+    ascoltato, e spesso e' proprio il «prima» da riascoltare: come per le
+    varianti orfane dello sweep (``_warn_orphans``), avviso e nessuna
+    cancellazione. Il confronto e' con **tutte** le combinazioni dichiarate,
+    non con la fetta di ``COMBO``: quelle fuori dal filtro non sono orfane.
+
+    Le cartelle di combinazione si riconoscono dall'``=`` che ogni label ha
+    (``chiave=valore``, ``asse=stato``) e che nessun'altra voce di
+    ``generated/<study>/`` porta. L'albero piatto (``yaml/``, ``audio/`` e
+    compagnia direttamente sotto lo studio, piu' lo snapshot) e' a sua volta la
+    combinazione vuota: orfano quando lo studio ha assi esterni, perche'
+    ``study`` non lo apre piu'.
+    Va chiamata fuori dal loop, a combinazione vuota: ``gen_dir`` e' la
+    radice dello studio.
+
+    Di quell'orfana si nominano le **cartelle**, non la radice che le contiene:
+    la radice e' anche quella delle combinazioni vive, e l'avviso chiude con
+    «rimuovile a mano» — un consiglio che, dato sulla radice, cancellava
+    l'audio appena renderizzato insieme all'albero di prima. Ogni riga
+    dell'elenco resta quindi un path che si puo' togliere davvero.
+
+    Il confronto e' per **cartella**, non per nome: sul filesystem di default
+    di macOS ``griglia=Rada`` e ``griglia=rada`` sono una cartella sola, e
+    dopo aver rinominato uno stato solo nelle maiuscole ``listdir`` restituisce
+    il nome vecchio della cartella in cui il render ha appena scritto.
+
+    Le combinazioni dichiarate arrivano da ``_dispatch``, che le ha gia' lette
+    a inizio giro: qui e' un avviso, e un avviso che gira a render finito non
+    puo' permettersi di rileggere e riparsare il documento — nel frattempo si
+    e' toccato (e' il ciclo di lavoro che lo snapshot dichiara), e un blocco
+    rimasto a meta' faceva uscire 2 un render che aveva scritto tutto l'audio.
+    """
+    root = gen_dir(study)
+    if not os.path.isdir(root):
+        return
+    etichette = {c.label for c in dichiarate}
+
+    def identita(p: str) -> tuple:
+        st = os.stat(p)
+        return st.st_dev, st.st_ino
+
+    vive = {identita(os.path.join(root, label)) for label in etichette
+            if label and os.path.isdir(os.path.join(root, label))}
+    orfane = sorted(
+        os.path.join(root, nome) for nome in os.listdir(root)
+        if "=" in nome and os.path.isdir(os.path.join(root, nome))
+        and identita(os.path.join(root, nome)) not in vive
+    )
+    piatto = "" not in etichette and any(
+        os.path.isdir(os.path.join(root, d)) for d in _SEGNALE_ALBERO_PIATTO)
+    # Il segnale dice *se* l'albero piatto c'e'; l'elenco dice cosa togliere.
+    piatte = [p for p in (os.path.join(root, nome)
+                          for nome in _ALBERO_DI_COMBINAZIONE)
+              if os.path.exists(p)] if piatto else []
+    if not (orfane or piatto):
+        return
+    n = len(orfane) + int(piatto)
+    print(f"[for_each] ATTENZIONE: {n} combinazioni orfane "
+          "(non piu' dichiarate in for_each:):", file=sys.stderr)
+    if piatte:
+        print(f"  albero piatto, da prima di for_each: (non {root}, che ora "
+              "tiene le combinazioni vive — solo cio' che sta qui sotto):",
+              file=sys.stderr)
+        for p in piatte:
+            print(f"    {p}", file=sys.stderr)
+    for p in orfane:
+        print(f"  {p}", file=sys.stderr)
+    print("  Rimuovile a mano se non servono piu': restano li' con l'audio gia' "
+          "ascoltato.", file=sys.stderr)
+
+
 def _dispatch(args) -> int:
+    """Esegue il comando una volta per combinazione di ``for_each:``.
+
+    Il loop sta qui e non nei ``cmd_*``: la combinazione e' un contesto (dove si
+    scrive, cosa si legge), non un argomento che dodici comandi dovrebbero
+    passarsi. ``make sweep`` e ``make render`` sono processi distinti e rifanno
+    il giro ognuno per conto suo — combacia perche' le combinazioni si leggono
+    dallo stesso ``study.yml``, non da uno stato per sessione.
+    """
+    global _COMBO
+    if getattr(args, "study", None):
+        dichiarate, combos = _combos(args.study)
+    else:
+        dichiarate = combos = [for_each.EMPTY]
+    rc = 0
+    try:
+        for i, c in enumerate(combos, 1):
+            _COMBO = c
+            if c.label and args.command != "where":
+                print(f"[for_each] {c.label}  ({i}/{len(combos)})")
+            rc = _run(args) or rc
+    finally:
+        _COMBO = for_each.EMPTY
+    # Una volta per giro, non per combinazione, e sul render: e' il passo che
+    # c'e' in ogni pipeline (``all-study`` finisce li') e quello che produce
+    # l'audio che resta indietro.
+    if args.command == "render":
+        _warn_orphan_combos(args.study, dichiarate)
+    return rc
+
+
+def _run(args) -> int:
     if args.command == "sweep":
         return cmd_sweep(args.study, args.stream)
     if args.command == "stack":
@@ -677,6 +1048,8 @@ def _dispatch(args) -> int:
         return cmd_compose(args.study, args.seed, args.steps, args.start)
     if args.command == "render-final":
         return cmd_render_final(args.study)
+    if args.command == "where":
+        return cmd_where(args.study)
     if args.command == "sv":
         return cmd_sv(args.study, args.layout, markers=not args.no_markers, stream=args.stream,
                       markers_scope=args.markers_scope)

@@ -42,6 +42,63 @@ make compose STUDY=1-10ms
 make render-final STUDY=1-10ms
 ```
 
+## `for_each:` — n valori del parametro, n file
+
+Gli `axes:` di uno studio scorrono **dentro** il file: ogni valore è un plateau
+dello sweep, e ogni asse in più moltiplica la durata. Un terzo asse
+triplicherebbe il file, e il confronto fra `distribution: 0` e
+`distribution: 1` finirebbe a minuti di distanza dentro lo stesso ascolto.
+
+`for_each:` è l'asse **esterno**: non allunga il file, ne fa uno per valore.
+
+```yaml
+for_each:
+  base.distribution: {values: [0, 0.5, 1]}   # 3 render dello stesso sweep
+```
+
+```bash
+study 1-10ms                                # genera e apre tutte le combinazioni
+COMBO=distribution=1 study 1-10ms           # solo la fetta a distribution 1
+make where STUDY=1-10ms                     # dove si sta scrivendo, una riga per combinazione
+```
+
+Ogni combinazione ha il suo albero completo sotto
+`generated/<studio>/distribution=0.5/`, con dentro anche lo snapshot dello
+`study.yml` patchato che l'ha prodotta e i suoi `.sv` (la label è nel basename:
+Sonic Visualiser identifica la sessione dal nome, e con due `.sv` omonimi la
+seconda non si apre — proprio il confronto per cui gli assi esterni esistono).
+Senza `for_each:` l'albero resta quello piatto di sempre,
+`generated/<studio>/`.
+
+`COMBO` taglia una **fetta**: i vincoli sono segmenti di label separati da
+`__`, in and fra loro (`COMBO=griglia=rada__distribution=0.5`), e il match è
+per segmento intero (`distribution=0` non prende `distribution=0.5`). Con più
+assi esterni le combinazioni sono decine e generarle tutte non ha senso: il
+documento dichiara lo spazio, `COMBO` sceglie cosa materializzare oggi.
+
+Le chiavi sono path su tutto il documento, non solo su `base:` — quindi
+funziona anche dove un asse interno non potrebbe esistere: `stack.seed` (cinque
+realizzazioni della stessa camminata stocastica), `percorso.arco` (la stessa
+legge distesa su tre durate), `axes.*.values` (due griglie diverse dello stesso
+studio, anche su un asse dotted come `grain.duration`). Per gli override non
+scalari serve un nome:
+
+```yaml
+for_each:
+  griglia:
+    fitta: {axes.grain.duration.values: [0.001, 0.002, 0.005, 0.01]}
+    rada:  {axes.grain.duration.values: [0.001, 0.01]}
+```
+
+Dettagli, guardie e forme in `docs/study-yml-reference.md`. Togliere un valore
+dal blocco non cancella la sua cartella: resta lì con l'audio già ascoltato,
+segnalata come orfana dal render.
+
+> Dopo un aggiornamento del repo, la funzione `study` già caricata in una shell
+> aperta resta quella vecchia: il precmd di `setup.sh` ricarica
+> `.zsh_completions/` solo al cambio di repo. Per prendere la nuova senza
+> riaprire il terminale: `source .zsh_completions/_study`.
+
 ## Struttura
 
 - `src/granstudies/` — il pacchetto (uno stadio per modulo).

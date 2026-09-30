@@ -1,0 +1,497 @@
+"""``for_each:`` — l'asse esterno: moltiplica i file, non i gradini.
+
+Gli ``axes:`` di uno studio sono assi **interni**: scorrono nel tempo dentro
+lo stesso file. ``for_each:`` e' l'asse **esterno**: ogni combinazione dei suoi
+valori e' una **patch sullo ``study.yml``** e produce un render intero a se',
+in ``generated/<study>/<label>/``.
+
+    Interno se il confronto sta nella **giustapposizione** (lo senti cambiare
+    mentre suona). Esterno se sta nel **riascolto** (devi risentire la stessa
+    cosa da capo), o se la chiave definisce il file stesso — ``seed``,
+    ``sample``, ``arco``, la durata.
+
+La grammatica e' quella di ``versions:`` (assi ortogonali, prodotto cartesiano
+lessicografico nell'ordine di dichiarazione), con due sole forme:
+
+    for_each:
+      base.distribution: {values: [0, 0.5, 1]}   # asse a manopola singola
+      griglia:                                    # asse a stati nominati
+        fitta: {axes.fill_factor.values: [0.5, 0.7, 0.85, 1, 2, 4, 8]}
+        rada:  {axes.fill_factor.values: [0.5, 1, 4]}
+
+Le chiavi delle patch sono **path puntati su tutto il documento**, non solo su
+``base:``: e' cio' che rende esterno anche ``stack.seed`` o ``percorso.arco``,
+che come assi interni non esisterebbero (la timeline *e'* il file). Il valore
+viene **assegnato** al path, non fuso: ``base.grain: {...}`` sostituisce
+l'intero sotto-albero. Il path si risolve sulle chiavi che il documento ha
+davvero, quindi attraversa anche un nome d'asse dotted:
+``axes.grain.duration.values`` raggiunge l'asse ``grain.duration``.
+
+Il blocco assente e' la combinazione vuota — ``generated/<study>/`` piatto,
+come uno studio senza ``for_each``: il caso degenere, non un ramo speciale.
+"""
+from __future__ import annotations
+
+import copy
+import itertools
+import math
+import re
+from dataclasses import dataclass
+from typing import Any, Dict, List
+
+from .errors import ErrCtx
+from .value_generators import _BAND_KEYS, Y_GENERATOR_KEYS, is_generator_node, resolve
+from .yaml_loc import Locations
+
+BLOCK = "for_each"
+
+# Il vocabolario piatto di un generatore di sequenza: tutto il resto, accanto a
+# un marcatore, e' una chiave che il generatore non conosce.
+_GEN_VOCAB = _BAND_KEYS | Y_GENERATOR_KEYS | {"step", "curve"}
+
+# I marcatori il cui valore e' legittimamente un dict, con le chiavi che quel
+# dict ha: i parametri di ``ramp`` (``value_generators.ramp``) e l'Env di una
+# banda (``base: {points, type?, curve?}``, ``value_generators._threshold_at``).
+# Solo li' un dict non basta a dire "questo e' uno stato"; ``values`` non ne
+# prende mai uno.
+_DICT_MARKER_KEYS = {
+    "ramp": frozenset({"start", "stop", "step"}),
+    "base": frozenset({"points", "type", "curve"}),
+}
+
+
+@dataclass(frozen=True)
+class Combo:
+    """Una combinazione: il nome della sua cartella e la patch che la produce."""
+
+    label: str
+    patch: tuple  # ((path, valore), ...) — hashable, ordine di dichiarazione
+
+    @property
+    def overrides(self) -> Dict[str, Any]:
+        return dict(self.patch)
+
+
+EMPTY = Combo(label="", patch=())
+
+
+def parse(data: Dict[str, Any] | None, locs: Locations | None = None) -> List[Combo]:
+    """Le combinazioni dichiarate dal documento, in ordine lessicografico.
+
+    Senza blocco ``for_each:`` ritorna la sola combinazione vuota: chi itera
+    non ha un ramo in meno da scrivere, e uno studio senza assi esterni resta
+    esattamente com'era.
+    """
+    block = (data or {}).get(BLOCK)
+    if block is None:
+        return [EMPTY]
+    ctx = ErrCtx(locs=locs)
+    if not isinstance(block, dict) or not block:
+        raise ctx.err(
+            f"'{BLOCK}:' dev'essere un dict di assi non vuoto.",
+            key=(BLOCK,),
+            hint="un asse per riga: 'base.distribution: {values: [0, 0.5, 1]}', "
+                 "oppure toglilo del tutto.",
+        )
+    axes = [_parse_axis(name, cfg, ctx) for name, cfg in block.items()]
+    _reject_collisions(list(block), axes, ctx)
+    combos: List[Combo] = []
+    # Primo asse dichiarato = piu' esterno (varia piu' lentamente), come negli
+    # `orderings` dello sweep e negli assi di `versions:`.
+    for tup in itertools.product(*axes):
+        patch: List[tuple] = []
+        for part in tup:
+            patch.extend(part.patch)
+        combos.append(Combo(label="__".join(p.label for p in tup), patch=tuple(patch)))
+    return combos
+
+
+def apply(data: Dict[str, Any], combo: Combo, locs: Locations | None = None) -> Dict[str, Any]:
+    """Il documento con la patch della combinazione applicata.
+
+    Il blocco ``for_each:`` viene **rimosso**: da qui in giu' (stream, sweep,
+    stack, versions, percorso) il documento e' uno studio normale, e nessun
+    parser deve conoscere l'esistenza degli assi esterni.
+    """
+    out = copy.deepcopy(data) if data else {}
+    out.pop(BLOCK, None)
+    ctx = ErrCtx(locs=locs)
+    for path, value in combo.patch:
+        _set_path(out, path, value, ctx)
+    return out
+
+
+def labels(combos: List[Combo]) -> List[str]:
+    return [c.label for c in combos]
+
+
+# --- parse -----------------------------------------------------------------
+
+def _parse_axis(axis: str, cfg: Any, ctx: ErrCtx) -> List[Combo]:
+    # Import locale: ``sweep`` tira dentro l'intero parse dello studio (e con
+    # esso soundfile), e questo modulo lo importa anche la CLI a freddo.
+    from .sweep import _fmt
+
+    # Il nome non e' ancora una stringa: la riga e' quella del blocco.
+    _require_str(axis, "il nome dell'asse", ctx, (BLOCK,))
+    key = (BLOCK, axis)
+    _reject_stato_generatore(axis, cfg, ctx, key)
+    # Forma 1 — manopola singola: la chiave dell'asse *e'* il path da patchare,
+    # il valore un generatore di sequenza (o una lista nuda).
+    if is_generator_node(cfg) or isinstance(cfg, list):
+        _reject_empty_segment(axis, ctx, key)
+        if isinstance(cfg, dict) and "values" in cfg and not isinstance(cfg["values"], list):
+            # list() di una stringa la spezza in lettere, di un numero alza un
+            # TypeError senza posizione: lo sbaglio e' il valore solo.
+            raw = cfg["values"]
+            raise ctx.err(
+                f"{BLOCK}: l'asse '{axis}', 'values' vuole una lista (trovato {raw!r}).",
+                key=key,
+                hint=f"anche per un valore solo: 'values: [{raw}]'.",
+            )
+        with ctx.wrapping(key=key, axis=axis):
+            try:
+                values = resolve({"values": cfg} if isinstance(cfg, list) else cfg)
+            except (TypeError, LookupError) as e:
+                # ``wrapping`` riavvolge i ValueError; un generatore scritto male
+                # arriva come TypeError (``ramp`` senza ``step`` o scalare, un
+                # ``range`` testuale) o come KeyError/IndexError (un Env di banda
+                # senza ``points``, o con ``points`` vuoto), e senza questo
+                # usciva come traceback.
+                raise ValueError(
+                    f"{BLOCK}: l'asse '{axis}' ha un generatore che non si "
+                    f"risolve ({e}). Forme: 'values: [...]', "
+                    "'ramp: {start, stop, step}', banda 'base'/'range'/'n'."
+                ) from e
+        if not values:
+            raise ctx.err(f"{BLOCK}: l'asse '{axis}' non produce nessun valore.", key=key)
+        out = []
+        for v in values:
+            if isinstance(v, float) and not math.isfinite(v):
+                # ``_fmt`` passa da ``int(v)``: OverflowError su inf, ValueError
+                # su nan, entrambi senza posizione. E un nome di cartella
+                # ``volume=inf`` non direbbe comunque un valore renderizzabile.
+                raise ctx.err(
+                    f"{BLOCK}: l'asse '{axis}' ha un valore non finito ({v!r}).",
+                    key=key,
+                )
+            if not _is_scalar(v):
+                raise ctx.err(
+                    f"{BLOCK}: l'asse '{axis}' ha un valore non scalare, che non "
+                    "puo' diventare un nome di cartella.",
+                    key=key,
+                    hint="dagli un nome tu, con un asse a stati nominati: "
+                         f"'{_short(axis)}: {{rada: {{{axis}: [...]}}}}'.",
+                )
+            out.append(Combo(label=f"{_short(axis)}={_slug(_fmt(v))}",
+                             patch=((axis, v),)))
+        return out
+    # Forma 2 — stati nominati: ogni entry e' un bundle di override, e il nome
+    # dello stato e' quello che finisce nella cartella. E' l'unica forma
+    # ammessa per gli override non scalari: un nome di cartella che non dice
+    # cosa contiene e' il difetto che le take avevano.
+    if not isinstance(cfg, dict) or not cfg:
+        raise ctx.err(
+            f"{BLOCK}: l'asse '{axis}' dev'essere un generatore, una lista, o un "
+            "dict di stati nominati.",
+            key=key,
+        )
+    out = []
+    for stato, bundle in cfg.items():
+        skey = (BLOCK, axis, stato)
+        if not isinstance(bundle, dict):
+            raise ctx.err(
+                f"{BLOCK}: l'asse '{axis}', stato '{stato}': uno stato e' un "
+                "bundle di override '{path puntato: valore}'.",
+                key=skey,
+                hint=f"es. '{stato}: {{base.distribution: 0.5}}'. Un bundle vuoto "
+                     "({}) e' lecito: e' lo stato che non tocca niente.",
+            )
+        # Il nome dello stato resta libero (finisce nella label com'e' scritto,
+        # ``griglia=1``); le chiavi del bundle no, sono path.
+        for path in bundle:
+            _require_str(path, "un path", ctx, skey)
+            _reject_empty_segment(path, ctx, skey)
+        out.append(Combo(label=f"{_slug(axis)}={_slug(str(stato))}",
+                         patch=tuple(bundle.items())))
+    return out
+
+
+def _require_str(nome: Any, cosa: str, ctx: ErrCtx, key: tuple) -> None:
+    """Un nome d'asse o un path e' una stringa, anche quando YAML non lo crede.
+
+    YAML fa numeri e booleani anche delle chiavi (``2024:``, ``on:``): arrivati
+    a ``_slug``, ``_short`` o ``_set_path`` uscivano come TypeError o
+    AttributeError, cioe' traceback invece del blocco d'errore.
+    """
+    if isinstance(nome, str):
+        return
+    raise ctx.err(
+        f"{BLOCK}: {cosa} {nome!r} non e' una stringa (YAML l'ha letto come "
+        f"{type(nome).__name__}).",
+        key=key,
+        hint="scrivilo fra virgolette: YAML legge da se' i numeri e parole come "
+             "on/off/yes/no anche quando sono chiavi.",
+    )
+
+
+def _reject_empty_segment(path: str, ctx: ErrCtx, key: tuple) -> None:
+    """Un segmento vuoto (``base.``, ``base..volume``) e' sempre un refuso.
+
+    In coda creava in silenzio una chiave ``''`` che nessuno legge: la guardia
+    di ``_set_path`` sulle sezioni inesistenti non la vede, perche' la sezione
+    (``base``) c'e'.
+    """
+    if "" not in path.split("."):
+        return
+    raise ctx.err(
+        f"{BLOCK}: il path '{path}' ha un segmento vuoto (un punto di troppo).",
+        key=key,
+        hint="i segmenti sono chiavi dello study.yml separate da un punto solo: "
+             "'base.distribution', 'axes.grain.duration.values'.",
+    )
+
+
+def _reject_sezione_sostituita(node: Dict[str, Any], chiave: str, path: str,
+                               value: Any, livello: int, ctx: ErrCtx) -> None:
+    """Una sezione del documento non si sostituisce con un non-dict.
+
+    Scrivere la sezione invece del path — ``base`` per ``base.volume``, un
+    suffisso dimenticato — le assegnava lo scalare, e il parse dello studio da'
+    le sezioni per dict: un valore falsy la svuotava in silenzio
+    (``data.get("base") or {}``, e l'audio usciva dai default del motore), uno
+    truthy usciva come AttributeError nudo da dentro ``parse_study_spec``. La
+    guardia sulle sezioni inesistenti non lo vede: ``base`` c'e'.
+
+    Sostituirla con un **dict** resta lecito: e' la sostituzione dell'intero
+    sotto-albero che la Forma 2 documenta.
+
+    Vale solo **alla radice**, dove le chiavi che tengono un dict sono tutte e
+    sole le sezioni (``base``, ``axes``, ``sweep``, ``stack``, ``versions``,
+    ``percorso``, ``let``, ``streams``, ``spread``) e quelle scalari
+    (``seed``, ``study_id``, ``samples_dir``, ``title``) restano manopole
+    legittime. Piu' in giu' servirebbe sapere se un parametro puo' essere un Env
+    (``base.volume: {points: ...}``), cioe' il vocabolario delle chiavi, che
+    vive nel language server e non qui: la' un non-dict sopra un dict resta il
+    refuso che passa, come quello sull'ultimo segmento.
+    """
+    if livello or isinstance(value, dict) or not isinstance(node.get(chiave), dict):
+        return
+    raise ctx.err(
+        f"{BLOCK}: il path '{path}' nomina una sezione del documento, e il "
+        f"valore {value!r} non e' un dict: la patch la sostituirebbe, "
+        "cancellandola.",
+        key=(BLOCK,),
+        hint=f"il path di una manopola scende dentro la sezione: "
+             f"'{path}.<chiave>'. Per sostituire la sezione intera serve un "
+             "dict, con un asse a stati nominati.",
+    )
+
+
+def _reject_stato_generatore(axis: str, cfg: Any, ctx: ErrCtx, key: tuple) -> None:
+    """Uno stato chiamato ``base``/``values``/``ramp`` legge l'asse come Forma 1.
+
+    Il discriminatore guarda la forma, non i nomi: un asse a stati nominati con
+    uno stato di nome ``base`` diventa una banda, e l'errore vero salta fuori
+    molto piu' in la', incomprensibile ("banda: 'n' obbligatorio"). Il segnale
+    e' la chiave estranea al vocabolario piatto del generatore — che e' anche
+    il refuso opposto (una chiave sbagliata dentro un generatore vero).
+
+    Quando gli stati hanno *tutti* nomi del vocabolario (il caso tipico: uno
+    stato solo, ``values``) di chiavi estranee non ce ne sono, e il segnale e'
+    il valore: uno stato e' un dict di override, e ``values`` un dict non lo
+    prende mai. ``ramp`` e ``base`` si', ma con le loro chiavi (i parametri
+    della rampa, l'Env della banda): un dict che non ne ha nessuna e' un
+    bundle. Senza, ``values`` leggeva le chiavi del bundle come valori — una
+    combinazione sola, un path che crea una chiave alla radice, exit 0 e
+    nessuna patch applicata.
+    """
+    if not isinstance(cfg, dict) or not is_generator_node(cfg):
+        return
+    estranee = sorted(k for k in cfg if k not in _GEN_VOCAB)
+    bundle = sorted(
+        k for k in Y_GENERATOR_KEYS & cfg.keys()
+        if isinstance(cfg[k], dict)
+        and _DICT_MARKER_KEYS.get(k, frozenset()).isdisjoint(cfg[k])
+    )
+    if not (estranee or bundle):
+        return
+    if estranee:
+        problema = f"ma ha anche {estranee}, che il generatore non conosce."
+    else:
+        problema = (f"ma {bundle} vale un dict di override, che e' la forma di "
+                    "uno stato, non di un generatore.")
+    raise ctx.err(
+        f"{BLOCK}: l'asse '{axis}' e' letto come generatore (c'e' una chiave fra "
+        f"{sorted(Y_GENERATOR_KEYS)}) {problema}",
+        key=key,
+        hint="se volevi un asse a stati nominati, nessuno stato puo' chiamarsi "
+             f"{sorted(Y_GENERATOR_KEYS)}: rinominalo.",
+    )
+
+
+def _reject_collisions(names: List[str], axes: List[List[Combo]], ctx: ErrCtx) -> None:
+    """Due assi non possono etichettare allo stesso modo ne' toccare lo stesso path.
+
+    Etichette gemelle darebbero cartelle ambigue (``distribution=0__distribution=1``);
+    due assi sullo stesso path renderebbero il valore finale dipendente
+    dall'ordine di dichiarazione, che qui non e' una precedenza dichiarata.
+    Vale anche per due path uno dentro l'altro (``base.grain`` e
+    ``base.grain.duration``): il valore si assegna, non si fonde, quindi il
+    sotto-albero dell'uno cancella la foglia dell'altro o ne e' cancellato,
+    secondo l'ordine.
+
+    Dentro un asse, lo stesso vale per i valori: due che si scrivono uguali
+    nel nome della cartella (il doppione vero, ``1`` e ``1.0``, due nomi che lo
+    slug fonde) darebbero due combinazioni in una cartella sola, e la seconda
+    riscriverebbe la prima. "Uguali" a meno delle maiuscole: sul filesystem di
+    default di macOS ``griglia=Rada`` e ``griglia=rada`` sono una cartella.
+    """
+    seen_label: Dict[str, str] = {}
+    seen_path: Dict[str, str] = {}
+    for name, parts in zip(names, axes):
+        visti: Dict[str, str] = {}
+        for part in parts:
+            gemella = visti.get(part.label.casefold())
+            if gemella is not None:
+                anche = f" (e '{gemella}')" if gemella != part.label else ""
+                raise ctx.err(
+                    f"{BLOCK}: l'asse '{name}' da' due volte l'etichetta "
+                    f"'{part.label}'{anche}: due combinazioni finirebbero nella "
+                    "stessa cartella.",
+                    key=(BLOCK, name),
+                    hint="togli il doppione o rinomina lo stato; se due valori "
+                         "diversi nel nome di una cartella si scrivono uguali "
+                         "(anche solo a meno delle maiuscole), passa a un asse a "
+                         "stati nominati e dagli i nomi tu.",
+                )
+            visti[part.label.casefold()] = part.label
+        etichetta = parts[0].label.split("=", 1)[0]
+        if etichetta in seen_label:
+            raise ctx.err(
+                f"{BLOCK}: gli assi '{seen_label[etichetta]}' e '{name}' danno la "
+                f"stessa etichetta '{etichetta}' nel nome della cartella.",
+                key=(BLOCK, name),
+                hint="rinomina uno dei due (un asse a stati nominati porta il nome "
+                     "che gli dai).",
+            )
+        seen_label[etichetta] = name
+        for part in parts:
+            for path, _v in part.patch:
+                for altro, owner in seen_path.items():
+                    if owner == name or not _overlap(altro, path):
+                        continue
+                    toccati = (f"entrambi '{path}'" if altro == path
+                               else f"'{altro}' e '{path}', uno dentro l'altro")
+                    raise ctx.err(
+                        f"{BLOCK}: gli assi '{owner}' e '{name}' toccano {toccati}.",
+                        key=(BLOCK, name),
+                        hint="uniscili in un solo asse a stati nominati.",
+                    )
+                seen_path[path] = name
+
+
+def _overlap(a: str, b: str) -> bool:
+    """Lo stesso path, o uno dentro l'altro (confine su un segmento intero)."""
+    return a == b or a.startswith(b + ".") or b.startswith(a + ".")
+
+
+# --- patch -----------------------------------------------------------------
+
+def _set_path(doc: Dict[str, Any], path: str, value: Any, ctx: ErrCtx) -> None:
+    """Assegna ``value`` al path puntato. Il contenitore padre deve esistere.
+
+    Creare una chiave nuova e' lecito (``base.pan_range`` su un ``base:`` che
+    non ce l'ha), creare una **sezione** no: ``bse.pan_range`` sarebbe un refuso
+    che passa in silenzio e non muove niente. Nominare una sezione *esistente*
+    per assegnarle un non-dict e' un errore a sua volta
+    (``_reject_sezione_sostituita``): la cancellerebbe. Il refuso sull'**ultimo**
+    segmento (``base.pan_rang``, o ``sed`` alla radice) invece passa: crea una
+    chiave che nessuno legge, e il parse dello studio non la ferma — le chiavi
+    sconosciute non le rifiuta, ne' in ``base:`` ne' alla radice. Le
+    combinazioni escono identiche. Il vocabolario delle chiavi vive nel
+    language server (gl-ls), non qui.
+
+    Il path non si spezza su ogni punto: a ogni livello si cerca, fra i
+    prefissi del resto del path, la chiave che il nodo ha davvero. E' cosi' che
+    ``axes.grain.duration.values`` raggiunge l'asse ``grain.duration`` (una
+    chiave sola, col punto dentro) invece di cercare un ``grain`` che non
+    c'e'. Due prefissi presenti insieme (assi ``grain`` e ``grain.duration``)
+    sono un'ambiguita': errore, come per le chiavi puntate di ``streams:``,
+    mai una scelta silenziosa.
+    """
+    parts = path.split(".")
+    node: Any = doc
+    i = 0
+    while True:
+        if not isinstance(node, dict):
+            raise ctx.err(
+                f"{BLOCK}: il path '{path}' scende dentro un valore che non e' un "
+                "dict.",
+                key=(BLOCK,),
+            )
+        rest = parts[i:]
+        spans = [j for j in range(1, len(rest) + 1) if ".".join(rest[:j]) in node]
+        if len(spans) > 1:
+            nomi = " o ".join(repr(".".join(rest[:j])) for j in spans)
+            dove = f"sotto '{'.'.join(parts[:i])}'" if i else "alla radice"
+            raise ctx.err(
+                f"{BLOCK}: il path '{path}' e' ambiguo: {dove} la chiave puo' "
+                f"essere {nomi}.",
+                key=(BLOCK,),
+                hint="rinomina una delle due chiavi, o assegna l'intero "
+                     "sotto-albero dal livello sopra.",
+            )
+        if not spans:
+            if len(rest) == 1:
+                node[rest[0]] = value
+                return
+            raise ctx.err(
+                f"{BLOCK}: il path '{path}' non esiste nel documento "
+                f"('{'.'.join(parts[:i + 1])}' non c'e').",
+                key=(BLOCK,),
+                hint="il path e' quello dello study.yml: 'base.distribution', "
+                     "'axes.grain.duration.values', 'stack.seed'.",
+            )
+        chiave = ".".join(rest[:spans[0]])
+        if i + spans[0] == len(parts):
+            _reject_sezione_sostituita(node, chiave, path, value, i, ctx)
+            node[chiave] = value
+            return
+        node = node[chiave]
+        i += spans[0]
+
+
+# --- nomi ------------------------------------------------------------------
+
+def _is_scalar(v: Any) -> bool:
+    return isinstance(v, (int, float, str, bool)) or v is None
+
+
+def _short(path: str) -> str:
+    """``base.grain.duration`` -> ``grain.duration``; ``axes.fill_factor.values``
+    -> ``fill_factor``. Toglie il prefisso di sezione e il nome del generatore:
+    nel nome della cartella sono rumore, la chiave e' cio' che si muove."""
+    for pre in ("base.", "axes."):
+        if path.startswith(pre):
+            path = path[len(pre):]
+            break
+    for gen in (".values", ".ramp", ".band"):
+        if path.endswith(gen):
+            path = path[: -len(gen)]
+            break
+    return _slug(path)
+
+
+def _slug(s: str) -> str:
+    """Il pezzo di un nome di cartella: ogni corsa di caratteri fuori da
+    ``[A-Za-z0-9.-]`` diventa un ``_`` solo, e i ``_`` in testa e in coda
+    cadono.
+
+    Il ``_`` e' nella corsa di proposito: ``__`` separa gli assi nella label
+    e ``COMBO`` la spezza li', quindi nessun segmento puo' contenerlo
+    (``brano__s1.wav``, il nome di uno stem del motore) ne' formarlo col
+    separatore (un valore che finisce con ``_``). Senza, ``COMBO=g=a``
+    prendeva anche lo stato ``a__b``.
+    """
+    return re.sub(r"[^A-Za-z0-9.-]+", "_", s).strip("_")

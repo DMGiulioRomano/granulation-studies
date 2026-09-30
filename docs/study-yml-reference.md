@@ -137,6 +137,15 @@ percorso:
   duration: 1.3                   # traiettoria riservata, unit factor (default) | s
   w: {base: [0, 1], range: .1}    # traiettoria -> iniettata nei let che la nominano
 
+# Asse esterno (opzionale): ogni combinazione e' una patch sul documento e un
+# render intero a se', in generated/<study_id>/<label>/. Moltiplica i file,
+# non i gradini. Vedi la sezione "Il blocco for_each" sotto.
+for_each:
+  base.distribution: {values: [0, 0.5, 1]}         # manopola singola: la chiave e' il path
+  griglia:                                          # stati nominati: per valori non scalari
+    fitta: {axes.density.values: [5, 10, 20, 50]}
+    rada:  {axes.density.values: [5, 50]}
+
 # Processo stack (attivo per presenza del blocco): tutti gli stream sommati in
 # UN documento multi-stream. Vedi la sezione "Il blocco stack" sotto.
 stack:
@@ -1696,6 +1705,166 @@ deterministico tra run, path e variabili diversi decorrelati da soli. I generati
 hanno poi ciascuno il proprio `stream_id`, quindi i seed Y/X per-stream si
 auto-decorrelano col meccanismo esistente.
 
+## Il blocco `for_each:` — l'asse esterno
+
+Gli `axes:` sono assi **interni**: scorrono nel tempo dentro lo stesso file.
+`for_each:` è l'asse **esterno**: ogni combinazione dei suoi valori è una
+**patch sullo `study.yml`** e produce un render intero a sé, in
+`generated/<study_id>/<label>/`. Non moltiplica i gradini, moltiplica i file.
+
+> Interno se il confronto sta nella **giustapposizione** (lo senti cambiare
+> mentre suona). Esterno se sta nel **riascolto** (devi risentire la stessa
+> cosa da capo per confrontare), o se la chiave definisce il file stesso —
+> `seed`, `sample`, `arco`, la durata.
+
+```yaml
+for_each:
+  base.distribution: {values: [0, 0.5, 1]}   # asse a manopola singola
+  griglia:                                    # asse a stati nominati
+    fitta: {axes.grain.duration.values: [0.001, 0.002, 0.005, 0.01]}
+    rada:  {axes.grain.duration.values: [0.001, 0.01]}
+```
+
+3 × 2 = 6 render, in `generated/<study_id>/distribution=0.5__griglia=rada/` e
+compagnia. Il blocco **assente** è la combinazione vuota —
+`generated/<study_id>/` piatto, come uno studio senza assi esterni: è il caso
+degenere, non un ramo speciale.
+
+- Ogni chiave del blocco è un **asse ortogonale**; più assi danno il **prodotto
+  cartesiano lessicografico** nell'ordine di dichiarazione (il primo asse è il
+  più esterno), come gli `orderings` dello sweep e gli assi di `versions:`.
+- **Forma 1 — manopola singola.** La chiave dell'asse *è* il path da patchare,
+  il valore un generatore di sequenza (`values`/`ramp`/banda) o una lista nuda.
+  I valori devono essere **scalari**: sono loro a nominare la cartella.
+- **Forma 2 — stati nominati.** La chiave è un nome libero, ogni entry uno
+  **stato**: un bundle di override `{path puntato: valore}`. È l'unica forma
+  ammessa per gli override non scalari — un nome di cartella che non dice cosa
+  contiene non serve a niente, quindi lo dà l'utente. Un bundle vuoto (`{}`) è
+  lecito: è lo stato che non tocca niente. Nessuno stato può chiamarsi come una
+  chiave di generatore (`values`, `ramp`, `base`): l'asse verrebbe letto come
+  Forma 1, ed è un errore — anche quando è l'unico stato dell'asse. I wrapper
+  **morti** del vocabolario dei generatori (`rand:`, `linear_env:`) non sono
+  riservati, perché il nome di uno stato resta libero: `{base.volume: {rand:
+  {…}}}` è un asse con un solo stato chiamato `rand`, e i path sono le chiavi
+  del wrapper. Con `base`/`range` dentro — la forma di una banda vera — li
+  ferma la regola sulle sezioni qui sotto; con solo `n` scrive una chiave nuova
+  alla radice e passa, come il refuso sull'ultimo segmento. Dentro `axes:` gli
+  stessi due nomi hanno il loro errore dedicato.
+- **I path sono su tutto il documento**, non solo su `base:`:
+  `axes.grain.duration.values`, `stack.seed`, `percorso.arco`,
+  `streams.x.volume`. Il valore viene **assegnato** al path, non fuso:
+  `base.grain: {...}` sostituisce l'intero sotto-albero. Creare una chiave nuova
+  è lecito (`base.pan_range` su un `base:` che non ce l'ha), creare una
+  **sezione** no (`bse.pan_range` è un errore, non un refuso silenzioso).
+  Nominare una sezione che *esiste* per assegnarle un **non-dict** è errore a
+  sua volta — `base: 0` dove si voleva `base.volume: 0`, un suffisso
+  dimenticato: la patch la sostituirebbe, e il parse dà le sezioni per dict,
+  quindi un valore falsy la svuoterebbe in silenzio (l'audio dai default del
+  motore) e uno truthy uscirebbe come traceback. Sostituirla con un dict resta
+  lecito: è la Forma 2. La regola vale **alla radice**, dove le chiavi che
+  tengono un dict sono tutte e sole le sezioni e quelle scalari (`seed`,
+  `study_id`, `samples_dir`, `title`) restano manopole; più in giù
+  (`base.grain: hanning`) servirebbe sapere se un parametro può essere un Env,
+  cioè il vocabolario che sta nel language server, e lì il refuso passa.
+  Passa anche quello sull'**ultimo** segmento (`base.pan_rang`, o `sed` alla
+  radice): crea una chiave che nessuno legge, perché il parse dello studio le
+  chiavi sconosciute non le rifiuta, e le combinazioni escono identiche.
+  Un path è una **stringa** senza segmenti vuoti: `base.` o `base..volume` (un
+  punto di troppo) sono errore, e un nome d'asse o un path che YAML legge come
+  numero o booleano (`2024:`, `on:`) va fra virgolette. Il nome di uno stato
+  invece è libero: `griglia: {1: {...}}` dà `griglia=1`.
+- **Nomi d'asse dotted.** Il path non si spezza su ogni punto: a ogni livello
+  vale la chiave che il documento ha davvero. `axes.grain.duration.values`
+  raggiunge l'asse `grain.duration` (una chiave sola, col punto dentro), e
+  `axes.grain.duration.baseline` ci crea il `baseline` se manca. Se due chiavi
+  concorrono — assi `grain` e `grain.duration` dichiarati insieme — il path è
+  ambiguo ed è un errore, come per le chiavi puntate di `streams:`. La patch
+  tocca solo la chiave che nomina: `axes.grain.duration.values` su un asse
+  scritto a banda (`base`/`range`/`n`) gli affianca un secondo generatore, e il
+  parse lo rifiuta; per cambiare forma all'asse si assegna l'asse intero,
+  `axes.grain.duration: {values: [...]}`.
+- **Etichette.** `chiave=valore` per la Forma 1 (`base.` e `axes.`, e il nome
+  del generatore in coda, vengono tolti: `axes.grain.duration.values` →
+  `grain.duration`), `asse=stato` per la Forma 2. Nel nome della cartella ogni
+  corsa di caratteri fuori da `[A-Za-z0-9.-]`, `_` compreso, diventa un `_`
+  solo, e i `_` in testa e in coda cadono: `__` separa gli assi, quindi nessun
+  segmento lo contiene (`brano__s1.wav` → `sample=brano_s1.wav`). Due assi che
+  danno la stessa etichetta sono errore; così due assi che toccano lo stesso
+  path, o due path uno dentro l'altro (`base.grain` e `base.grain.duration`):
+  il valore si assegna, quindi quello finale dipenderebbe dall'ordine di
+  dichiarazione.
+  Dentro un asse, due valori o due stati con la stessa etichetta (un doppione,
+  `1` e `1.0`, due nomi che nel nome della cartella si scrivono uguali:
+  `voce 1.wav` e `voce_1.wav`) sono errore: finirebbero nella stessa cartella.
+  Anche a meno delle maiuscole (`Rada` e `rada`): sul filesystem di default di
+  macOS sono una cartella sola.
+- Ogni combinazione ha il **suo albero completo** (`yaml/`, `audio/`, `sv/`,
+  `cache/`, `score/`) più uno snapshot `study.yml` — il documento **patchato**,
+  riscritto a ogni render, che dice da sé i valori di quella combinazione.
+  Anche una cache stem esplicita (`make render CACHE_DIR=...`) si divide in una
+  sotto-cartella per combinazione: i manifest si chiamano come lo YAML, e
+  condivisi una combinazione leggerebbe i fingerprint di un'altra.
+  I `.sv` portano la label nel basename
+  (`<study_id>_<stream_id>_e1__grain.duration__distribution=0.5.sv`): Sonic
+  Visualiser identifica la sessione dal nome, e con due `.sv` omonimi la seconda
+  non si apre — proprio il confronto per cui gli assi esterni esistono.
+- Ogni comando (`sweep`, `stack`, `versions`, `percorso`, `render`, `sv`, …)
+  gira una volta per combinazione e lo dice (`[for_each] distribution=0.5
+  (2/3)`). Il documento patchato è quello che tutti leggono, quindi nessun
+  processo sa che gli assi esterni esistono; le posizioni negli errori restano
+  quelle dello `study.yml`.
+
+### Perché serve a tutti i processi
+
+Ci sono chiavi che non possono essere assi interni, per costruzione:
+
+| Processo | Cosa diventa esterno |
+|---|---|
+| `sweep` | il parametro di contorno: lo stesso sweep dei due assi, rifatto con `distribution` diversa, invece di un file tre volte più lungo |
+| `stack` | le camminate-X sono stocastiche: ascoltare cinque realizzazioni dello stesso impasto è cinque file, mai uno (`for_each: {stack.seed: [1, 2, 3, 4, 5]}`) |
+| `versions` | la valvola di sfogo del cartesiano interno: `grana × densita` = 16 versioni concatenate, una terza variabile porta a 48 e il file diventa inascoltabile |
+| `percorso` | la timeline *è* il file: «la stessa legge distesa su 90, 180, 360 secondi» esiste solo come asse esterno (`percorso.arco`) |
+
+### Il filtro `COMBO`
+
+`COMBO` restringe ogni comando a una **fetta** dello spazio: i vincoli sono
+segmenti di label (`griglia=rada`, `distribution=0.5`), separati da `__` e in
+**and** fra loro, in qualunque ordine. Passa chi li contiene tutti, quindi un
+vincolo solo seleziona tutte le combinazioni che lo hanno, e la label intera ne
+seleziona una. Il match è per segmento intero: `distribution=0` non prende
+`distribution=0.5`. È un filtro di sessione, non un interruttore di modalità:
+senza, si fa tutto — e con più assi esterni «tutto» sono decine di render,
+quindi la fetta è la norma. Un filtro che non seleziona niente è un errore che
+elenca le combinazioni dichiarate.
+
+```zsh
+make where STUDY=<id>                                 # una root per combinazione
+COMBO=distribution=1 study <id>                       # tutte le combinazioni a distribution 1
+COMBO=griglia=rada__distribution=0.5 study <id>       # la loro intersezione
+```
+
+`make where` è l'unica fonte di verità su dove si scrive: la funzione zsh
+`study` lo interroga invece di ricostruirsi i path, e apre i `.sv` di tutte le
+root che stampa.
+
+### Combinazioni orfane
+
+Togliere un valore da `for_each:` lascia la sua cartella con dentro l'audio
+vecchio. Come per le varianti orfane dello sweep: **avviso, nessuna
+cancellazione**. Una combinazione orfana è spesso proprio quella che si vuole
+tenere — il «prima» da riascoltare. L'avviso arriva una volta per `render`, su
+stderr, e confronta le cartelle con **tutte** le combinazioni dichiarate: quelle
+lasciate fuori da `COMBO` non sono orfane. Il confronto è per cartella, non per
+nome: rinominare uno stato solo nelle maiuscole (`Rada` → `rada`) su macOS
+lascia la stessa cartella, e non la segnala. Vale anche per l'albero piatto di uno
+studio a cui si aggiunge `for_each:` (`yaml/`, `audio/` e compagnia direttamente
+sotto `generated/<study_id>/`, più lo snapshot): `study` non lo apre più, e
+l'avviso lo nomina. Di quell'orfana elenca le **cartelle**, non
+`generated/<study_id>/` che le contiene: quella è anche la radice delle
+combinazioni vive, e «rimuovile a mano» dato su di lei cancellerebbe l'audio
+appena renderizzato. Ogni riga dell'elenco è un path che si può togliere
+davvero.
+
 ## Layout di `generated/`
 
 Primo livello = tipo di artefatto, secondo livello = **processo** (`sweep` /
@@ -1712,6 +1881,7 @@ generated/<study_id>/
   yaml/versions/versions.yml     # solo per studi con blocco versions
   yaml/percorso/percorso.yml     # solo per studi con blocco percorso
   yaml/streams_expanded.yml      # solo per studi con spread: il dict streams espanso
+  yaml/<processo>/.sorgente      # impronta del documento che ha generato quegli YAML
   audio/sweep/envelope/<stream_id>/<study_id>_<stream_id>_e1__density.aif
   audio/stack/stack.aif
   audio/versions/versions.aif
@@ -1722,9 +1892,40 @@ generated/<study_id>/
 `generated/` è rigenerabile: dopo un aggiornamento basta rilanciare
 `make sweep` / `make stack` / `make versions` / `make percorso`.
 
+Il render scrive accanto all'albero uno `study.yml`: lo snapshot del documento
+**letto all'inizio di quel render**, riscritto a ogni render. Non «il documento
+che ha prodotto quell'audio»: l'audio viene dagli YAML delle varianti, scritti
+da `sweep`/`stack`/`versions`/`percorso`, che possono essere più vecchi del
+documento — si modifica lo `study.yml` e si lancia solo `make render`, e l'audio
+resta quello di prima. Quando succede il render lo dichiara su stderr
+(«N varianti vengono da un altro study.yml», con i processi da rigenerare),
+così lo snapshot non copre l'audio stale invece di denunciarlo.
+
+La domanda è **da quale documento** vengono le varianti, non quale file è più
+recente: `_dump` non riscrive una variante identica — l'mtime fermo è il segnale
+con cui il render salta i già fatti — quindi a mtime una variante che
+`make all-study` aveva appena confermato uguale restava «più vecchia dello
+study.yml» per sempre, e l'avviso gridava a ogni render con un rimedio che non
+poteva spegnerlo. Ogni processo registra invece accanto ai propri YAML
+(`yaml/<processo>/.sorgente`) l'impronta del documento **patchato** da cui
+vengono, e il render la confronta con quella di adesso: dopo `all-study`
+l'avviso tace anche se nessuna variante è stata riscritta, e toccare il blocco
+`for_each:` non fa gridare le combinazioni che non muove (`apply` lo toglie
+prima del parse, quindi il loro documento patchato è lo stesso). Un processo
+senza marcatore — albero generato prima che esistesse, o `sweep STREAM=…`, che
+riscrive una stream sola — non dice niente: «non lo so» non è «è diverso».
+
+Con un blocco `for_each:`
+lo stesso albero, identico in ogni sotto-cartella, scende di un livello —
+`generated/<study_id>/<label>/` — e lo snapshot è il documento **patchato**.
+Là i `.sv` prendono la label in coda al basename
+(`<study_id>_<stream_id>_e1__grain.duration__distribution=0.5.sv`): l'audio no,
+il suo nome lo cerca `cmd_sv` ed è già unico dentro la sua cartella.
+
 ## Comandi Make
 
 ```bash
+make where  STUDY=<id>                    # cartelle di output correnti (una per combinazione)
 make sweep  STUDY=<id>                    # genera tutte le stream
 make sweep  STUDY=<id> STREAM=nome        # genera solo quella stream
 make stack  STUDY=<id>                    # genera il documento multi-stream (stack, puro)
@@ -1735,7 +1936,11 @@ make render STUDY=<id> FORCE=1            # rirenderizza tutto (es. dopo update 
 make render STUDY=<id> JOBS=4             # budget di processi tra varianti ed engine (default: tutti i core)
 make sv     STUDY=<id>                    # genera .sv per tutte le stream
 make sv     STUDY=<id> STREAM=nome        # genera .sv per una stream
+COMBO=griglia=rada make render STUDY=<id> # ogni target, ristretto a una fetta di for_each:
 ```
+
+`make sv` non rifà il render: lo presuppone (`all-study`, o `study`, lo hanno
+già fatto). Se l'audio manca, lo dice variante per variante.
 
 ### Flag del comando `sv`
 
