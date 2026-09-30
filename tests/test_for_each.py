@@ -706,6 +706,54 @@ def test_l_albero_piatto_di_prima_e_orfano_sotto_for_each(tmp_path, monkeypatch,
     assert (tmp_path / "generated" / "s_fe" / "yaml").is_dir()
 
 
+def test_l_avviso_sull_albero_piatto_nomina_le_sue_cartelle_non_la_radice(
+        tmp_path, monkeypatch, capsys):
+    # La radice `generated/<study>/` e' l'albero piatto, ma da quando c'e'
+    # for_each: tiene anche le combinazioni vive. Nominarla fra le orfane e
+    # chiudere con «rimuovile a mano» era un consiglio che cancellava l'audio
+    # appena renderizzato: l'avviso nomina le cartelle dell'albero piatto, che
+    # si possono togliere davvero.
+    doc = {k: v for k, v in _DOC.items() if k != "for_each"}
+    sdir = _studio(tmp_path, monkeypatch, doc)
+    _fake_engine(monkeypatch)
+    assert cli.main(["sweep", "s_fe"]) == 0
+    assert cli.main(["render", "s_fe", "--no-score"]) == 0
+    (sdir / "study.yml").write_text(yaml.safe_dump(_DOC, sort_keys=False))
+    capsys.readouterr()
+
+    assert cli.main(["sweep", "s_fe"]) == 0
+    assert cli.main(["render", "s_fe", "--no-score"]) == 0
+    err = capsys.readouterr().err
+    g = tmp_path / "generated" / "s_fe"
+    # le righe indentate sono l'elenco: la prosa resta una frase, non un path
+    indicati = {riga.strip() for riga in err.splitlines() if riga[:1].isspace()}
+    assert str(g) not in indicati, err
+    assert {str(g / "yaml"), str(g / "audio"), str(g / "study.yml")} <= indicati, err
+    # e cio' che la radice tiene e' vivo: e' l'audio di questo render
+    assert (g / "volume=0" / "audio").is_dir() and (g / "volume=6" / "audio").is_dir()
+
+
+def test_una_cache_dir_esplicita_alla_radice_non_e_un_albero_piatto(
+        tmp_path, monkeypatch, capsys):
+    # L'elenco dell'albero piatto nomina anche `cache/`, ma il *segnale* che
+    # l'albero c'e' restano `yaml/` e `audio/`: con `CACHE_DIR` puntata alla
+    # radice, la cache divisa per combinazione crea `generated/<study>/cache`
+    # senza che di albero piatto ce ne sia uno. Un avviso che grida dove non
+    # c'e' niente e' il primo che si impara a saltare.
+    _studio(tmp_path, monkeypatch)
+    _fake_engine(monkeypatch)
+    assert cli.main(["sweep", "s_fe"]) == 0
+    g = tmp_path / "generated" / "s_fe"
+    cdir = g / "cache"
+    # i manifest li scrive l'engine, che qui e' finto: la cartella per
+    # combinazione e' quella che `cmd_render` gli passa (vedi il test sopra).
+    (cdir / "volume=0").mkdir(parents=True)
+    capsys.readouterr()
+
+    assert cli.main(["render", "s_fe", "--no-score", "--cache-dir", str(cdir)]) == 0
+    assert "orfan" not in capsys.readouterr().err
+
+
 def test_la_cartella_di_una_combinazione_dichiarata_non_e_orfana_con_un_altro_nome(
         tmp_path, monkeypatch, capsys):
     # Sul filesystem di default di macOS `griglia=Rada` e `griglia=rada` sono

@@ -69,6 +69,18 @@ def gen_dir(study: str) -> str:
     return os.path.join(*parts)
 
 
+# Cio' che ``gen_dir`` tiene: le cartelle di processo piu' lo snapshot che
+# ``cmd_render`` scrive accanto. Sotto ``generated/<study>/`` sono l'albero
+# piatto, cioe' la combinazione vuota; sotto una label sono la combinazione.
+_ALBERO_DI_COMBINAZIONE = ("yaml", "audio", "sv", "score", "cache", "study.yml")
+
+# Le due voci che ogni giro scrive: sono il segnale che l'albero piatto c'e'.
+# Le altre lo accompagnano ma da sole non lo dicono — una ``cache/`` alla
+# radice puo' essere la ``CACHE_DIR`` esplicita divisa per combinazione, e un
+# avviso che grida dove non c'e' niente e' il primo che si impara a saltare.
+_SEGNALE_ALBERO_PIATTO = ("yaml", "audio")
+
+
 def samples_dir(spec_samples: str | None) -> str:
     if spec_samples:
         return spec_samples if os.path.isabs(spec_samples) else os.path.join(REPO_ROOT, spec_samples)
@@ -790,11 +802,18 @@ def _warn_orphan_combos(study: str) -> None:
 
     Le cartelle di combinazione si riconoscono dall'``=`` che ogni label ha
     (``chiave=valore``, ``asse=stato``) e che nessun'altra voce di
-    ``generated/<study>/`` porta. L'albero piatto (``yaml/``, ``audio/``
-    direttamente sotto lo studio) e' a sua volta la combinazione vuota: orfano
-    quando lo studio ha assi esterni, perche' ``study`` non lo apre piu'.
+    ``generated/<study>/`` porta. L'albero piatto (``yaml/``, ``audio/`` e
+    compagnia direttamente sotto lo studio, piu' lo snapshot) e' a sua volta la
+    combinazione vuota: orfano quando lo studio ha assi esterni, perche'
+    ``study`` non lo apre piu'.
     Va chiamata fuori dal loop, a combinazione vuota: ``gen_dir`` e' la
     radice dello studio.
+
+    Di quell'orfana si nominano le **cartelle**, non la radice che le contiene:
+    la radice e' anche quella delle combinazioni vive, e l'avviso chiude con
+    «rimuovile a mano» — un consiglio che, dato sulla radice, cancellava
+    l'audio appena renderizzato insieme all'albero di prima. Ogni riga
+    dell'elenco resta quindi un path che si puo' togliere davvero.
 
     Il confronto e' per **cartella**, non per nome: sul filesystem di default
     di macOS ``griglia=Rada`` e ``griglia=rada`` sono una cartella sola, e
@@ -821,14 +840,22 @@ def _warn_orphan_combos(study: str) -> None:
         and identita(os.path.join(root, nome)) not in vive
     )
     piatto = "" not in dichiarate and any(
-        os.path.isdir(os.path.join(root, d)) for d in ("yaml", "audio"))
+        os.path.isdir(os.path.join(root, d)) for d in _SEGNALE_ALBERO_PIATTO)
+    # Il segnale dice *se* l'albero piatto c'e'; l'elenco dice cosa togliere.
+    piatte = [p for p in (os.path.join(root, nome)
+                          for nome in _ALBERO_DI_COMBINAZIONE)
+              if os.path.exists(p)] if piatto else []
     if not (orfane or piatto):
         return
     n = len(orfane) + int(piatto)
     print(f"[for_each] ATTENZIONE: {n} combinazioni orfane "
           "(non piu' dichiarate in for_each:):", file=sys.stderr)
-    if piatto:
-        print(f"  {root}  (albero piatto, da prima di for_each:)", file=sys.stderr)
+    if piatte:
+        print(f"  albero piatto, da prima di for_each: (non {root}, che ora "
+              "tiene le combinazioni vive — solo cio' che sta qui sotto):",
+              file=sys.stderr)
+        for p in piatte:
+            print(f"    {p}", file=sys.stderr)
     for p in orfane:
         print(f"  {p}", file=sys.stderr)
     print("  Rimuovile a mano se non servono piu': restano li' con l'audio gia' "

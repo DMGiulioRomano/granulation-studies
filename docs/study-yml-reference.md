@@ -1840,8 +1840,13 @@ stderr, e confronta le cartelle con **tutte** le combinazioni dichiarate: quelle
 lasciate fuori da `COMBO` non sono orfane. Il confronto è per cartella, non per
 nome: rinominare uno stato solo nelle maiuscole (`Rada` → `rada`) su macOS
 lascia la stessa cartella, e non la segnala. Vale anche per l'albero piatto di uno
-studio a cui si aggiunge `for_each:` (`yaml/`, `audio/` direttamente sotto
-`generated/<study_id>/`): `study` non lo apre più, e l'avviso lo nomina.
+studio a cui si aggiunge `for_each:` (`yaml/`, `audio/` e compagnia direttamente
+sotto `generated/<study_id>/`, più lo snapshot): `study` non lo apre più, e
+l'avviso lo nomina. Di quell'orfana elenca le **cartelle**, non
+`generated/<study_id>/` che le contiene: quella è anche la radice delle
+combinazioni vive, e «rimuovile a mano» dato su di lei cancellerebbe l'audio
+appena renderizzato. Ogni riga dell'elenco è un path che si può togliere
+davvero.
 
 ## Layout di `generated/`
 
