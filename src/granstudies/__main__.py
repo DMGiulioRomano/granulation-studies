@@ -9,6 +9,7 @@
     granstudies matrix   STUDY      costruisce kinship.json
     granstudies compose  STUDY      genera final.yml dal percorso/grafo
     granstudies render-final STUDY  renderizza il brano finale
+    granstudies prune    STUDY      elenca (--apply: cancella) lo sweep che lo studio non genera piu'
     granstudies where    STUDY      stampa le cartelle di output correnti
 
 STUDY e' il nome della cartella sotto ``studies/`` (es. base).
@@ -319,7 +320,8 @@ def _warn_orphans(variants_dir: str, written: set[str], scoped: bool) -> None:
         for path in sorted(orphans):
             print(f"  {path}", file=sys.stderr)
         print(
-            "  Rimuovile a mano (con i relativi audio) se non servono piu'.",
+            "  Finche' restano, il render le tratta come varianti vive. "
+            "'make prune STUDY=...' le elenca con il loro audio, APPLY=1 le cancella.",
             file=sys.stderr,
         )
 
@@ -713,6 +715,114 @@ def cmd_render_final(study: str) -> int:
     return 0
 
 
+def _identita(p: str) -> tuple | None:
+    """``(dispositivo, inode)`` di un path, ``None`` se non esiste.
+
+    Dove la domanda e' "e' lo stesso file?" il nome non basta: sul filesystem
+    di default di macOS ``a=Uno`` e ``a=uno`` sono un file solo, e ``listdir``
+    restituisce il nome con cui e' stato creato, non quello con cui lo si
+    cerca adesso.
+    """
+    try:
+        st = os.stat(p)
+    except OSError:
+        return None
+    return st.st_dev, st.st_ino
+
+
+def cmd_prune(study: str, apply: bool = False, stems: bool = False) -> int:
+    """Elenca (e con ``--apply`` cancella) i residui di una versione precedente.
+
+    Serve quando un valore di un asse **cambia** invece di essere aggiunto:
+    ``fill_factor=0.7`` che diventa ``0.75`` non rigenera il vecchio file, lo
+    lascia li'. Lo sweep lo segnala ma non lo tocca (``_warn_orphans``), e
+    finche' il vecchio YAML resta il render lo tratta come una variante viva:
+    discende tutto ``yaml/``, non sa quali varianti lo studio genera ancora.
+
+    Il confronto e' con quello che lo ``study.yml`` **genera oggi**, non con
+    cio' che c'e' su disco: si enumerano le varianti dello spec corrente
+    (``render.variant_paths``) e si toglie il resto. Uno studio senza blocco
+    ``sweep:`` oggi non ne genera nessuna, quindi tutto lo sweep su disco e'
+    residuo. Un documento che non si legge e' un errore, mai "non genera
+    niente": l'errore esce prima di aver toccato un file.
+
+    L'audio di una variante e' quello che le da' ``render.audio_for``, la
+    regola con cui il render lo nomina: una seconda copia qui divergerebbe e
+    toglierebbe il mix appena scritto. Il confronto e' per **file**, non per
+    nome (``_identita``). Gli stem (``<mix>__<stream>.aif``) non hanno uno
+    YAML proprio: vivono e muoiono col mix da cui nascono, a meno di
+    ``stems``, che li prende di mira tutti — per le varianti dello sweep, uno
+    stream solo, sono una copia del mix. Con la cache attiva (il default) il
+    render salta la variante il cui mix e' aggiornato, quindi gli stem tolti
+    tornano solo col render che la rifa' (YAML cambiato, o ``FORCE=1``).
+
+    Restano fuori ``stack``/``versions``/``percorso``, che hanno documenti
+    propri, la cache, le partiture e le sessioni ``.sv``. Gira una volta per
+    combinazione di ``for_each:`` come ogni comando (``gen_dir`` e il documento
+    letto sono quelli della combinazione); le combinazioni che il blocco non
+    dichiara piu' le nomina ``_dispatch``, senza entrarci.
+    """
+    from .render import audio_for, variant_paths
+
+    g = gen_dir(study)
+    yaml_root = os.path.join(g, "yaml", "sweep")
+    audio_root = os.path.join(g, "audio", "sweep")
+    if not os.path.isdir(yaml_root) and not os.path.isdir(audio_root):
+        print(f"[prune] nessuno sweep su disco in {g}")
+        return 0
+
+    attesi_yaml: list = []
+    if "sweep" in _load_data(study):
+        for spec in _load_specs(study):
+            attesi_yaml += variant_paths(spec, yaml_root)
+    attesi_audio = [audio_for(p, os.path.join(g, "yaml"), os.path.join(g, "audio"), study)[1]
+                    for p in attesi_yaml]
+    id_yaml = {_identita(p) for p in attesi_yaml} - {None}
+    id_audio = {_identita(p) for p in attesi_audio} - {None}
+    basi = {os.path.splitext(p)[0] for p in attesi_audio}
+
+    def di_un_mix(p: str) -> bool:
+        # ``<mix>__<coda>``: il mix e' una delle teste prima di un ``__``, e i
+        # nomi delle varianti ne contengono gia' parecchi. Per nome (il mix
+        # puo' mancare dal disco) o per file (il mix c'e', col nome di prima).
+        cartella, nome = os.path.split(os.path.splitext(p)[0])
+        i = nome.find("__")
+        while i != -1:
+            testa = os.path.join(cartella, nome[:i])
+            if testa in basi or _identita(testa + ".aif") in id_audio:
+                return True
+            i = nome.find("__", i + 1)
+        return False
+
+    orfani = []
+    for root, _dirs, files in os.walk(yaml_root):
+        for f in files:
+            p = os.path.join(root, f)
+            if (f.endswith((".yml", ".yaml")) and f != "streams_expanded.yml"
+                    and _identita(p) not in id_yaml):
+                orfani.append(p)
+    for root, _dirs, files in os.walk(audio_root):
+        for f in files:
+            p = os.path.join(root, f)
+            if not f.endswith(".aif") or _identita(p) in id_audio:
+                continue
+            if not stems and di_un_mix(p):
+                continue
+            orfani.append(p)
+
+    if not orfani:
+        print(f"[prune] niente da togliere in {g}")
+        return 0
+    peso = sum(os.path.getsize(p) for p in orfani)
+    for p in sorted(orfani):
+        print(("[prune] rimosso " if apply else "[prune] orfano  ") + os.path.relpath(p, g))
+        if apply:
+            os.remove(p)
+    print(f"[prune] {len(orfani)} file, {peso / 2**20:.1f} MB"
+          + ("" if apply else "  — rilancia con APPLY=1 (--apply) per cancellarli"))
+    return 0
+
+
 def cmd_where(study: str) -> int:
     """Stampa la cartella di output della combinazione corrente, nient'altro.
 
@@ -777,6 +887,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     fp = sub.add_parser("render-final", help="renderizza il brano finale")
     fp.add_argument("study")
+
+    prp = sub.add_parser("prune", help="elenca (o cancella) YAML e audio dello sweep "
+                                       "che lo study.yml non genera piu'")
+    prp.add_argument("study")
+    prp.add_argument("--apply", action="store_true",
+                     help="cancella davvero; senza, si limita a elencare")
+    prp.add_argument("--stems", action="store_true",
+                     help="prendi di mira anche gli stem (<mix>__<stream>.aif)")
 
     wp = sub.add_parser("where", help="stampa le cartelle di output correnti "
                                       "(una per combinazione di for_each:)")
@@ -962,17 +1080,12 @@ def _warn_orphan_combos(study: str, dichiarate: list) -> None:
     if not os.path.isdir(root):
         return
     etichette = {c.label for c in dichiarate}
-
-    def identita(p: str) -> tuple:
-        st = os.stat(p)
-        return st.st_dev, st.st_ino
-
-    vive = {identita(os.path.join(root, label)) for label in etichette
+    vive = {_identita(os.path.join(root, label)) for label in etichette
             if label and os.path.isdir(os.path.join(root, label))}
     orfane = sorted(
         os.path.join(root, nome) for nome in os.listdir(root)
         if "=" in nome and os.path.isdir(os.path.join(root, nome))
-        and identita(os.path.join(root, nome)) not in vive
+        and _identita(os.path.join(root, nome)) not in vive
     )
     piatto = "" not in etichette and any(
         os.path.isdir(os.path.join(root, d)) for d in _SEGNALE_ALBERO_PIATTO)
@@ -1022,8 +1135,10 @@ def _dispatch(args) -> int:
         _COMBO = for_each.EMPTY
     # Una volta per giro, non per combinazione, e sul render: e' il passo che
     # c'e' in ogni pipeline (``all-study`` finisce li') e quello che produce
-    # l'audio che resta indietro.
-    if args.command == "render":
+    # l'audio che resta indietro. E su prune, che dentro una combinazione
+    # orfana non entra (gira sulle dichiarate): chi lo lancia per fare
+    # pulizia deve vedere anche i residui che non tocca.
+    if args.command in ("render", "prune"):
         _warn_orphan_combos(args.study, dichiarate)
     return rc
 
@@ -1048,6 +1163,8 @@ def _run(args) -> int:
         return cmd_compose(args.study, args.seed, args.steps, args.start)
     if args.command == "render-final":
         return cmd_render_final(args.study)
+    if args.command == "prune":
+        return cmd_prune(args.study, args.apply, args.stems)
     if args.command == "where":
         return cmd_where(args.study)
     if args.command == "sv":

@@ -92,12 +92,39 @@ for_each:
 
 Dettagli, guardie e forme in `docs/study-yml-reference.md`. Togliere un valore
 dal blocco non cancella la sua cartella: resta lì con l'audio già ascoltato,
-segnalata come orfana dal render.
+segnalata come orfana dal render (e da `make prune`, che non ci entra).
 
 > Dopo un aggiornamento del repo, la funzione `study` già caricata in una shell
 > aperta resta quella vecchia: il precmd di `setup.sh` ricarica
 > `.zsh_completions/` solo al cambio di repo. Per prendere la nuova senza
 > riaprire il terminale: `source .zsh_completions/_study`.
+
+## `make prune` — lo sweep che lo studio non genera più
+
+Il render è **incrementale**, ma rende tutto ciò che trova sotto `yaml/`, e lo
+sweep non cancella. Quando **cambi** il valore di un asse (nelle varianti
+discrete il valore è nel nome del file: `0.7` che diventa `0.75`), o togli un
+asse o una stream, lo sweep scrive le varianti nuove e lascia le vecchie — le
+segnala come orfane, ma non le tocca — e finché il vecchio YAML resta, il
+render lo tratta come una variante viva.
+
+```bash
+make prune STUDY=1-10ms            # elenca YAML e audio dello sweep di prima, con il peso
+make prune STUDY=1-10ms APPLY=1    # li cancella
+```
+
+Il confronto è con ciò che lo `study.yml` **genera oggi**, non con il disco:
+uno studio a cui hai tolto il blocco `sweep:` non ne genera nessuno, quindi
+tutto il suo sweep è residuo. Gli stem (`<mix>__<stream>.aif`) seguono il mix
+da cui nascono; per togliere anche quelli — per le varianti dello sweep, uno
+stream solo, sono una copia del mix — aggiungi `STEMS=1`. Con la cache attiva
+il render non li rifà finché la variante non cambia (o con `FORCE=1`).
+
+Senza `APPLY` non si cancella niente, e `APPLY` si accende solo con `1`,
+`true` o `yes`: `APPLY=0` elenca e basta. Con `for_each:` gira su ogni
+combinazione (`COMBO=` restringe, come per gli altri target) e nomina le
+combinazioni che il blocco non dichiara più, senza entrarci. Restano fuori
+`stack`/`versions`/`percorso`, la cache, le partiture e le sessioni `.sv`.
 
 ## Struttura
 

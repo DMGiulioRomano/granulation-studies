@@ -23,6 +23,20 @@ percorso: _require-study $(MARKER)
 where: _require-study $(MARKER)
 	@$(PY) -m granstudies where $(STUDY)
 
+# YAML e audio dello sweep che lo study.yml non genera piu': succede quando si
+# CAMBIA il valore di un asse invece di aggiungerne uno, e finche' il vecchio
+# YAML resta il render lo tratta come una variante viva. Di default elenca
+# soltanto; APPLY=1 cancella. STEMS=1 aggiunge al bersaglio gli stem
+# (<mix>__<stream>.aif), che altrimenti seguono il mix da cui nascono.
+# Si accendono solo su 1/true/yes: e' un comando che cancella, e con un
+# $(if ...) nudo APPLY=0 avrebbe cancellato.
+PRUNE_ON := 1 true yes
+.PHONY: prune
+prune: _require-study $(MARKER)
+	$(PY) -m granstudies prune $(STUDY) \
+		$(if $(filter $(PRUNE_ON),$(APPLY)),--apply,) \
+		$(if $(filter $(PRUNE_ON),$(STEMS)),--stems,)
+
 .PHONY: describe
 describe: _require-study $(MARKER)
 	$(PY) -m granstudies describe $(STUDY)
