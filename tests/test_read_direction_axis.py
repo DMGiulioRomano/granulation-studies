@@ -98,7 +98,8 @@ def test_un_valore_fuori_dall_insieme_e_errore(bad):
     e = _err(_study({"baseline": 1, "values": [-1, bad]}))
     assert e.key == ("axes", AX, "values")
     assert repr(bad) in e.msg
-    assert "-1, 1" in e.hint
+    # l'insieme si nomina una volta sola: l'hint lo scrive come dominio
+    assert e.hint.count("-1, 1") == 1
 
 
 def test_il_baseline_fuori_dall_insieme_e_errore():

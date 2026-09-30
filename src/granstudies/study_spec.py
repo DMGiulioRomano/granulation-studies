@@ -297,8 +297,7 @@ def _validate(spec: StudySpec, ctx: ErrCtx, *, orders_explicit: bool = False) ->
                         axis=ax.name,
                         hint=f"il dominio e' l'insieme {{{_fmt_domain(discrete)}}}, "
                         "non l'intervallo fra i suoi estremi: un valore che non "
-                        "ne fa parte l'engine lo rifiuta invece di arrotondarlo. "
-                        f"Ammessi: {_fmt_domain(discrete)}.",
+                        "ne fa parte l'engine lo rifiuta invece di arrotondarlo.",
                     )
             continue
         # Sforo bloccante: i bounds engine sono un safety clamp, un valore
