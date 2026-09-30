@@ -139,6 +139,36 @@ def categorical_domain(path: str) -> Optional[frozenset]:
     return getattr(engine_bridge, fn)()
 
 
+# Path il cui dominio e' un insieme finito di *numeri*: i bounds del registry
+# ne sono l'inviluppo, non il dominio. ``grain.read_direction`` (engine #207)
+# ha bounds (-1, 1) ma ammette solo -1 e +1: ``0.3`` non e' un verso e ``0``
+# non ha segno, e l'engine li rifiuta al parse invece di arrotondarli
+# (``pge.parameters.read_direction``). Stessa regola dei categoriali: nessuna
+# tabella copiata qui, l'insieme lo dice l'engine.
+_DISCRETE: Dict[str, str] = {
+    "grain.read_direction": "read_direction_values",
+}
+
+
+def discrete_domain(path: str) -> Optional[frozenset]:
+    """I numeri ammessi per un path a dominio discreto, o ``None`` se il path
+    non lo e'.
+
+    Un asse su un path discreto enumera i suoi valori (``values: [-1, 1]``):
+    ``ramp`` e la banda possono produrre valori fra un elemento e l'altro,
+    dove l'engine non ha niente da renderizzare. ``violation``/``clamp``
+    applicano i bounds come su ogni path, ma sono solo l'inviluppo: un valore
+    dentro i bounds e fuori dall'insieme lo ferma ``study_spec``, contro questo
+    insieme.
+    """
+    fn = _DISCRETE.get(path)
+    if fn is None:
+        return None
+    from . import engine_bridge
+
+    return getattr(engine_bridge, fn)()
+
+
 def bounds_for(
     path: str,
     output_sr: Optional[int] = None,
@@ -298,7 +328,9 @@ def violation(
 ) -> Optional[Tuple[Optional[float], Optional[float]]]:
     """I bounds del path se ``value`` li sfora, altrimenti ``None``.
 
-    Unico punto in cui si decide se un valore e' ammesso: il confronto avviene
+    Unico punto in cui un valore si confronta coi bounds (su un path a dominio
+    discreto sono l'inviluppo dell'insieme: l'ammissione la decide
+    ``discrete_domain``, piu' stretto). Il confronto avviene
     nell'unita' di ``value`` (vedi ``_bounds_in_unit``), il ritorno e' nel
     dominio in cui i bounds sono dichiarati — secondi per ``grain.duration`` —
     perche' e' quello in cui ha senso mostrarli in un errore. Le frazioni del

@@ -95,6 +95,27 @@ axes:                             # * almeno un asse
                                  # quindi un file envelope che lo muove e' errore, e
                                  # in `stack:` tiene un nome per stream.
 
+  grain.read_direction:          # asse DISCRETO: il dominio e' un insieme di numeri,
+                                 # {-1, 1} (READ_DIRECTION_VALUES dell'engine), non
+                                 # l'intervallo fra i due. I bounds (-1, 1) ne sono
+                                 # solo l'inviluppo: 0.3 non e' un verso e 0 non ha
+                                 # segno, e l'engine li rifiuta invece di arrotondarli.
+                                 # Un valore (o il baseline) fuori dall'insieme e'
+                                 # errore di parse. Solo `values`: ramp e banda possono
+                                 # generare valori intermedi (e' rifiutata anche una
+                                 # ramp che cade sull'insieme: il rimedio e' uno).
+    baseline: 1                  # obbligatorio: senza chiave l'engine va in modalita'
+                                 # 'auto', non ha un default numerico
+    values: [-1, 1]
+    interpolation: step          # obbligatorio qui: e' l'unica che l'engine accetta
+                                 # sulla chiave. A differenza del categoriale si muove
+                                 # ovunque: in `sweep.mode: envelope` e in `stack:`
+                                 # diventa `{type: step, points: ...}`, che l'engine legge.
+                                 # In `stack:` pero' la X lineare mette l'ultimo valore
+                                 # su t = 1, dove uno `step` non suona piu': `values:
+                                 # [-1, 1]` legge all'indietro per tutto lo stream. Il
+                                 # verso che cambia a meta' e' `values: [-1, 1, 1]`.
+
 # Configurazione dello sweep (il processo possiede X: timing e durata derivata).
 sweep:
   mode: envelope                 # discrete | envelope | both (default discrete)

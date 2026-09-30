@@ -204,3 +204,64 @@ def test_sweep_con_asse_grain_envelope_genera_e_rende(sweep_repo, tmp_path):
         assert not entry["skipped"], entry["name"]
         for path in _audio_paths(entry):
             _assert_audible(path)
+
+
+# --- asse discreto: il verso di lettura si muove, a gradini ---------------------
+
+def test_sweep_e_stack_con_asse_grain_read_direction_generano_e_rendono(
+    sweep_repo, tmp_path
+):
+    """Un asse ``grain.read_direction`` (dominio ``{-1, 1}``, issue #68) si
+    muove dove il categoriale no: nei file envelope e nello stack diventa
+    ``{type: step, points: ...}``. Accanto c'e' un asse ``linear``, cosi' i
+    file di ordine 2 hanno la griglia a plateau con l'asse step a un punto per
+    plateau (layout C). CLI vera fino al render: la cucitura fra quello che il
+    writer scrive e quello che l'engine accetta non ha altro modo di vedersi.
+    """
+    with open(sweep_repo.fixture("e2e_study.yml"), "r", encoding="utf-8") as fh:
+        data = yaml.safe_load(fh)
+    data["base"]["duration"] = 0.5
+    data["sweep"] = {
+        "mode": "both", "orders": [1, 2], "plateau": 0.2, "transition": 0.1,
+    }
+    data["axes"] = {
+        "grain.duration": {"values": [0.01, 0.05], "interpolation": "linear"},
+        "grain.read_direction": {
+            "baseline": 1, "values": [-1, 1], "interpolation": "step",
+        },
+    }
+    data["stack"] = {}
+    sweep_repo.write_study(data)
+    sweep_repo.run("sweep", sweep_repo.study)
+    sweep_repo.run("stack", sweep_repo.study)
+
+    assert sweep_repo.names("sweep", "envelope") == [
+        "e1__grain.duration",
+        "e1__grain.read_direction",
+        "e2__grain.duration__grain.read_direction",
+    ]
+    documents = sweep_repo.written("sweep") + sweep_repo.written("stack")
+    mossi = 0
+    for path in documents:
+        (stream,) = sweep_repo.load(path)["streams"]
+        raw = stream["grain"]["read_direction"]
+        if isinstance(raw, dict):
+            mossi += 1
+            assert raw["type"] == "step", path
+            assert {p[1] for p in raw["points"]} == {-1, 1}, path
+        else:
+            assert raw in (-1, 1), path
+    # e1 e e2 del verso, piu' lo stack: dove l'asse si muove e' un envelope
+    assert mossi == 3
+
+    manifest = render_variants(
+        variant_dir=sweep_repo.yaml_dir(),
+        audio_dir=str(tmp_path / "audio"),
+        score_dir=None,
+        samples_dir=sweep_repo.samples,
+    )
+    assert len(manifest) == len(documents)
+    for entry in manifest:
+        assert not entry["skipped"], entry["name"]
+        for path in _audio_paths(entry):
+            _assert_audible(path)

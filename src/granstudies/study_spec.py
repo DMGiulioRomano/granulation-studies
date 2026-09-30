@@ -238,8 +238,8 @@ def _validate(spec: StudySpec, ctx: ErrCtx, *, orders_explicit: bool = False) ->
         # non un intervallo. I valori sono stringhe, si validano contro il
         # catalogo dell'engine e saltano il confronto bounds, che qui non ha
         # senso. Che i nomi arrivino da ``values`` e che l'interpolazione sia
-        # ``step`` lo garantisce gia' il parse (``_check_categorical_generator``,
-        # ``_check_categorical_interpolation``): li' si sa da dove viene il
+        # ``step`` lo garantisce gia' il parse (``_check_enumerated_generator``,
+        # ``_check_enumerated_interpolation``): li' si sa da dove viene il
         # generatore e da dove l'interpolazione, qui non piu'.
         domain = bounds_mod.categorical_domain(ax.path)
         if domain is not None:
@@ -276,6 +276,30 @@ def _validate(spec: StudySpec, ctx: ErrCtx, *, orders_explicit: bool = False) ->
                     hint=f"'{slot}' vuole un numero: e' uno slot strutturale "
                     "(conta/enumera i valori), non un ambiente 'expr:'/'let:'.",
                 )
+        # Asse a dominio discreto (``grain.read_direction``, issue #68): i
+        # bounds del registry sono l'inviluppo dell'insieme, non il dominio —
+        # (-1, 1) ammette 0.3, che non e' un verso, e 0, che non ha segno, e
+        # l'engine li rifiuta al parse invece di arrotondarli. L'ammissione la
+        # decide l'insieme; dopo di lui il confronto bounds non ha niente da
+        # aggiungere (ogni elemento sta nell'inviluppo) e parlerebbe una seconda
+        # volta sullo stesso valore. ``values`` e ``step`` li garantisce il parse,
+        # come per i categoriali.
+        discrete = bounds_mod.discrete_domain(ax.path)
+        if discrete is not None:
+            for slot, v in (
+                [("baseline", ax.baseline)] + [("values", x) for x in ax.values]
+            ):
+                if v not in discrete:
+                    raise ctx.err(
+                        f"Asse '{ax.name}': '{slot}' contiene {v!r}, che non e' "
+                        f"un valore ammesso per il path '{ax.path}'.",
+                        key=("axes", ax.name, slot),
+                        axis=ax.name,
+                        hint=f"il dominio e' l'insieme {{{_fmt_domain(discrete)}}}, "
+                        "non l'intervallo fra i suoi estremi: un valore che non "
+                        "ne fa parte l'engine lo rifiuta invece di arrotondarlo.",
+                    )
+            continue
         # Sforo bloccante: i bounds engine sono un safety clamp, un valore
         # fuori range va fermato al parse invece di essere silenziosamente
         # clampato in render. Il confronto lo fa ``bounds.violation`` (unico
@@ -304,22 +328,49 @@ def _validate(spec: StudySpec, ctx: ErrCtx, *, orders_explicit: bool = False) ->
                 )
 
 
-def _check_categorical_generator(
+def _fmt_domain(domain: frozenset) -> str:
+    """Un dominio discreto come si scrive nello YAML: ``-1, 1``."""
+    return ", ".join(f"{v:g}" for v in sorted(domain))
+
+
+def _check_enumerated_generator(
     name: str, path: str, cfg: Dict[str, Any], gen_key: str, ctx: ErrCtx
 ) -> None:
-    """Un asse categoriale enumera i nomi con ``values``: non li genera.
+    """Un asse a dominio enumerato elenca i valori con ``values``: non li genera.
 
-    ``ramp`` e la banda producono numeri. Il controllo sta qui e non in
-    ``_validate`` perche' il parse espande il generatore prima di costruire
-    l'asse: su un path categoriale chi sbaglia generatore ci scrive dei nomi
-    (``ramp: {start: hanning, ...}``), e l'aritmetica di ``ramp``/``band`` su
-    una stringa alzerebbe un ``TypeError`` grezzo, senza path ne' rimedio.
+    Due domini sono enumerati, e la regola e' la stessa per ragioni diverse.
 
-    Lo stesso per ``values`` scritto senza lista (``values: expodec``): il
-    generatore la spezzerebbe in lettere e ``_validate`` accuserebbe la
-    ``'e'``. Su un asse di nomi e' lo sbaglio naturale, perche' in stack ne
-    serve uno per stream.
+    - **Categoriale** (``grain.envelope``): ``ramp`` e la banda producono
+      numeri. Il controllo sta qui e non in ``_validate`` perche' il parse
+      espande il generatore prima di costruire l'asse: su un path categoriale
+      chi sbaglia generatore ci scrive dei nomi (``ramp: {start: hanning,
+      ...}``), e l'aritmetica di ``ramp``/``band`` su una stringa alzerebbe un
+      ``TypeError`` grezzo, senza path ne' rimedio. Lo stesso per ``values``
+      scritto senza lista (``values: expodec``): il generatore la spezzerebbe in
+      lettere e ``_validate`` accuserebbe la ``'e'``. Su un asse di nomi e' lo
+      sbaglio naturale, perche' in stack ne serve uno per stream.
+    - **Discreto** (``grain.read_direction``, issue #68): ``ramp`` e la banda
+      producono numeri, ma anche fra un elemento e l'altro dell'insieme, dove
+      l'engine rifiuta invece di arrotondare. La banda senza ``n`` (quella della
+      camminata-X) si campiona in stack, dopo il parse: la sola difesa che la
+      precede e' questa, sul generatore. Una rampa che cade sull'insieme
+      (``{start: -1, stop: 1, step: 2}``) e' rifiutata anche lei: il rimedio e'
+      uno, e scritto con ``values`` l'asse dice quello che fa.
     """
+    discrete = bounds_mod.discrete_domain(path)
+    if discrete is not None:
+        if gen_key == "values":
+            return
+        valori = _fmt_domain(discrete)
+        raise ctx.err(
+            f"Asse '{name}': '{path}' ha un dominio discreto ({{{valori}}}): "
+            "i valori si enumerano, non si generano.",
+            key=("axes", name),
+            axis=name,
+            hint=f"dichiara i valori con 'values: [{valori}]': 'ramp' e la "
+            "banda possono produrre valori intermedi, che l'engine rifiuta "
+            "invece di arrotondarli.",
+        )
     if bounds_mod.categorical_domain(path) is None:
         return
     if gen_key == "values":
@@ -343,7 +394,7 @@ def _check_categorical_generator(
     )
 
 
-def _check_categorical_interpolation(
+def _check_enumerated_interpolation(
     name: str,
     path: str,
     cfg: Dict[str, Any],
@@ -351,8 +402,13 @@ def _check_categorical_interpolation(
     interpolation: str,
     ctx: ErrCtx,
 ) -> None:
-    """Un asse categoriale vuole ``interpolation: step``: fra due nomi non c'e'
-    rampa da percorrere.
+    """Un asse a dominio enumerato vuole ``interpolation: step``.
+
+    Categoriale: fra due nomi non c'e' rampa da percorrere. Discreto
+    (``grain.read_direction``): la rampa fra -1 e 1 passerebbe per valori che il
+    dominio non ha, e l'engine rifiuta sulla chiave ogni interpolazione che non
+    sia ``step`` — l'envelope che lo stack e lo sweep ``envelope`` scrivono ne
+    porta il ``type``.
 
     L'interpolazione di un asse viene da tre posti: scritta sull'asse,
     ereditata da ``axes.interpolation``, o il default ``linear`` che nessuno
@@ -362,7 +418,20 @@ def _check_categorical_interpolation(
     file che non lo scrive manda a cercare una chiave che non c'e'. Per questo
     il controllo sta qui e non in ``_validate``, dove la provenienza e' persa.
     """
-    if bounds_mod.categorical_domain(path) is None or interpolation == "step":
+    if interpolation == "step":
+        return
+    discrete = bounds_mod.discrete_domain(path)
+    if discrete is not None:
+        cosa = "un asse a dominio discreto"
+        perche = (
+            f"fra gli elementi di {{{_fmt_domain(discrete)}}} una rampa "
+            "passerebbe per valori che il dominio non ha, e l'engine accetta "
+            "solo 'step'"
+        )
+    elif bounds_mod.categorical_domain(path) is not None:
+        cosa = "un asse categoriale"
+        perche = "fra due valori nominali non c'e' rampa da percorrere"
+    else:
         return
     if "interpolation" in cfg:
         key = ("axes", name, "interpolation")
@@ -374,12 +443,11 @@ def _check_categorical_interpolation(
         key = ("axes", name)
         fonte = f"nessuna dichiarata, vale il default {interpolation}"
     raise ctx.err(
-        f"Asse '{name}': un asse categoriale vuole 'interpolation: step' "
-        f"({fonte}).",
+        f"Asse '{name}': {cosa} vuole 'interpolation: step' ({fonte}).",
         key=key,
         axis=name,
-        hint="fra due valori nominali non c'e' rampa da percorrere: scrivi "
-        f"'interpolation: step' sull'asse (axes.{name}.interpolation).",
+        hint=f"{perche}: scrivi 'interpolation: step' sull'asse "
+        f"(axes.{name}.interpolation).",
     )
 
 
@@ -872,9 +940,9 @@ def parse_study_spec(
         # canonica values|ramp|band, con i parametri della banda raccolti piatti.
         with ctx.wrapping(key=("axes", name), axis=name):
             gen_key, gen_params = y_generator(cfg)
-        _check_categorical_generator(name, path, cfg, gen_key, ctx)
+        _check_enumerated_generator(name, path, cfg, gen_key, ctx)
         interpolation = cfg.get("interpolation", study_interpolation)
-        _check_categorical_interpolation(
+        _check_enumerated_interpolation(
             name, path, cfg, axes_raw, interpolation, ctx
         )
         _check_generator_complete(name, gen_key, gen_params, ctx)
@@ -895,12 +963,18 @@ def parse_study_spec(
         else:
             # n-ownership, verso Y: con la camminata-X la Y non puo' contare i valori.
             if x_owns_n(x_cfg):
-                # Su un asse categoriale la banda e' vietata
-                # (``_check_categorical_generator``): il rimedio resta uno.
+                # Su un asse enumerato la banda e' vietata
+                # (``_check_enumerated_generator``): il rimedio resta uno.
                 if bounds_mod.categorical_domain(path) is not None:
                     hint = (
                         f"togli la camminata-X (stack.{name}): un asse "
                         "categoriale tiene un nome per stream, senza tempi."
+                    )
+                elif bounds_mod.discrete_domain(path) is not None:
+                    hint = (
+                        f"togli la camminata-X (stack.{name}): i valori di un "
+                        "asse a dominio discreto si enumerano con 'values', e "
+                        "senza camminata la X li distribuisce nel tempo."
                     )
                 else:
                     hint = (
