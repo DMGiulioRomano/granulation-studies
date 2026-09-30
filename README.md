@@ -99,6 +99,58 @@ segnalata come orfana dal render.
 > `.zsh_completions/` solo al cambio di repo. Per prendere la nuova senza
 > riaprire il terminale: `source .zsh_completions/_study`.
 
+## Il laboratorio del singolo stream (`make serve`)
+
+Lo sweep fa sentire gli assi in fila; il laboratorio fa l'inverso: si compone
+**uno** stream a breakpoint, lo si rende al volo e lo si ascolta e guarda.
+
+```bash
+make serve STUDY=10-50ms            # scrive la pagina, la serve e la apre in Safari
+make serve STUDY=10-50ms PORT=8001  # su un'altra porta
+```
+
+`make serve` scrive `generated/<studio>/graph.html` (`make graph`, una pagina
+per studio anche con `for_each:`) e avvia `granstudies serve` su
+`http://localhost:8000`, solo su `127.0.0.1`. Un server rimasto orfano da una
+sessione precedente si chiude da solo; una porta tenuta da un altro programma
+non si tocca, e il messaggio dice chi la tiene.
+
+- **Parametri.** Le tacche fra cui si sceglie sono i `values:` dello
+  `study.yml` (in `axes:` e in `for_each: base.*`); i sample sono i file della
+  cartella dei sample; volume, pan e `pan_range` si scrivono a mano. Gli assi a
+  `ramp:`/banda e quelli dentro `streams:` non danno ancora tacche (#77).
+- **Breakpoint.** `+ breakpoint` fotografa tutti i parametri a un tempo;
+  interpolazione `linear`/`cubic`/`step` per tutti, per breakpoint o per
+  parametro; `genera breakpoint` ne mette n in un tratto (regolari, casuali o
+  sulle tacche dello `study.yml`); undo/redo, selezione a banda, lucchetto della
+  durata.
+- **Anche:** le voci (`voices:`), `grain.envelope` automatizzato come
+  `{states, curve}`, start e loop del pointer (il loop si disegna sulla forma
+  d'onda del sample).
+- **File.** Il progetto è lo YAML stesso, un documento engine puro: `nuovo`,
+  `apri…`, `apri recente…`, `salva`, `salva con nome…` con i pannelli nativi di
+  macOS, dove si vuole sul disco; l'audio (`.aif`) nasce accanto, con lo stesso
+  nome. Senza un file scelto, tutto va in `generated/<studio>/live/`.
+
+Dopo il render, a destra:
+
+| vista | cosa mostra |
+|---|---|
+| sonogramma | x tempo, y frequenza: STFT propria, scala lin/log, finestra 256…8192 |
+| forma d'onda | picchi min/max per colonna |
+| spectroscope | x frequenza (log), y dinamica, in tempo reale |
+| stereoscope | goniometro L/R |
+| inviluppi | le curve che lo stream ha **davvero** percorso (dall'engine, derivate e offset per-voce compresi) |
+| grani | x tempo, y posizione di lettura nel sample, colore = pitch, opacità = volume; accanto la forma d'onda del sample |
+
+**Barra spaziatrice**: play/pausa (fuori dai campi di testo). Si cerca nel
+file cliccando su sonogramma, forma d'onda, inviluppi o grani.
+
+Vincoli: **solo macOS** (`osascript` per i pannelli, Safari che decodifica
+AIFF). Il documento del laboratorio non porta un `seed`: le curve di una
+strategia stocastica sono un'altra realizzazione rispetto a quella che ha
+suonato. La descrizione completa, pezzo per pezzo, è in `CLAUDE.md`.
+
 ## Struttura
 
 - `src/granstudies/` — il pacchetto (uno stadio per modulo).
