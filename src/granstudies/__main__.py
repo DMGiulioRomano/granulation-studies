@@ -748,9 +748,12 @@ def cmd_graph(study: str) -> int:
         lab = lab_data(yaml.safe_load(fh))
     lab["envelopes"] = _finestre()
     noti = {p["path"] for p in lab["params"]}
-    # Contate adesso, prima di sample e manopole libere: quelle ci sono sempre,
-    # e contarle renderebbe muto l'avviso qui sotto.
-    dallo_studio = len(noti)
+    # Si contano le TACCHE, non i parametri: un asse senza generatore leggibile
+    # e' una manopola a mano come volume e pan (``lab_data``), e contarla
+    # renderebbe muto l'avviso qui sotto proprio sugli studi che lo meritano.
+    # E si contano adesso, prima di sample e manopole libere: quelle ci sono
+    # sempre.
+    con_tacche = sum(1 for p in lab["params"] if p["values"])
     # Il sample e' una manopola fissa come le altre categoriali, ma le sue
     # tacche non stanno nello study.yml: sono i file della cartella dei sample.
     camp = campioni(samples_dir(_load_spec(study).samples_dir))
@@ -769,13 +772,14 @@ def cmd_graph(study: str) -> int:
                               "free": True, "min": lo, "max": hi})
     os.makedirs(gen_root, exist_ok=True)
     n = write_graph(study, out, lab)
-    # Un avviso, non un errore: la pagina si apre lo stesso, con sample,
-    # volume e pan. Fermarsi qui bloccherebbe `make serve`, che viene dopo.
-    if not dallo_studio:
-        print(f"[graph] lo study.yml di {study} non dichiara parametri con "
-              f"`values:` (ne' in `axes:` ne' in `for_each: base.*`): il "
-              f"laboratorio ha solo sample, volume e pan.", file=sys.stderr)
-    print(f"[graph] {out}  ({n} parametri)")
+    # Un avviso, non un errore: la pagina si apre lo stesso, e le manopole si
+    # scrivono a mano. Fermarsi qui bloccherebbe `make serve`, che viene dopo.
+    if not con_tacche:
+        print(f"[graph] lo study.yml di {study} non dichiara assi con valori "
+              f"enumerabili (`values:`, `ramp:` o una banda con `n:`, in "
+              f"`axes:`, in `streams:` o in `for_each: base.*`): le manopole "
+              f"ci sono, senza tacche fra cui scegliere.", file=sys.stderr)
+    print(f"[graph] {out}  ({n} parametri, {con_tacche} con tacche)")
     return 0
 
 

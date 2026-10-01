@@ -97,15 +97,42 @@ def test_graph_scrive_una_pagina_sola_anche_con_for_each(tmp_path, monkeypatch):
         assert params[libero]["free"] is True and params[libero]["values"] == []
 
 
-def test_graph_senza_values_lo_dice_ma_scrive_la_pagina(tmp_path, monkeypatch, capsys):
-    """Sample, volume e pan ci sono sempre: contarli fra le tacche teneva muto
-    l'avviso. E' un avviso e non un errore, perche' `make serve` viene dopo."""
+def test_graph_senza_tacche_lo_dice_ma_scrive_la_pagina(tmp_path, monkeypatch, capsys):
+    """L'avviso guarda le TACCHE, non i parametri. Sample, volume e pan ci sono
+    sempre, e da #77 anche un asse senza generatore leggibile e' una manopola:
+    contarli lo terrebbe muto. E' un avviso e non un errore, perche'
+    `make serve` viene dopo."""
     doc = {k: v for k, v in DOC.items() if k != "for_each"}
-    doc["axes"] = {"density": {"baseline": 20, "ramp": {"start": 1, "stop": 10, "step": 5}}}
+    # Una banda senza `n`: e' la camminata-X dello `stack:` a possedere il
+    # conteggio, quindi i valori emergono all'assemblaggio e qui non si
+    # enumerano. E' la forma degli studi `stack_*`, e il parse la accetta.
+    doc["axes"] = {"density": {"baseline": 20, "base": 10, "range": 5}}
+    doc["stack"] = {"density": {"base": 0.5, "range": 1.5}}
     study = _studio(tmp_path, monkeypatch, doc)
     assert cli.main(["graph", study]) == 0
-    assert "`values:`" in capsys.readouterr().err
-    assert (tmp_path / "generated" / study / "graph.html").exists()
+    out, err = capsys.readouterr()
+    assert "`ramp:`" in err and "`values:`" in err
+    assert "0 con tacche" in out
+    # La manopola c'e' lo stesso: il parametro sotto osservazione si scrive.
+    params = {p["path"]: p for p in
+              _payload((tmp_path / "generated" / study / "graph.html").read_text())["lab"]["params"]}
+    assert params["density"]["values"] == [] and params["density"]["free"] is True
+
+
+def test_graph_legge_le_rampe_e_gli_assi_degli_stream(tmp_path, monkeypatch, capsys):
+    """#77: l'avviso non scatta su una `ramp:`, che adesso da' tacche, e le
+    tacche di uno stream si uniscono a quelle del documento."""
+    doc = {k: v for k, v in DOC.items() if k != "for_each"}
+    doc["axes"] = {"density": {"baseline": 20, "ramp": {"start": 1, "stop": 10, "step": 5}}}
+    doc["streams"] = {"zona": {"axes.density.ramp.step": 3}}
+    study = _studio(tmp_path, monkeypatch, doc)
+    assert cli.main(["graph", study]) == 0
+    out, err = capsys.readouterr()
+    assert "non dichiara" not in err
+    params = {p["path"]: p for p in
+              _payload((tmp_path / "generated" / study / "graph.html").read_text())["lab"]["params"]}
+    assert params["density"]["values"] == [1, 4, 6, 7, 10]
+    assert "con tacche" in out
 
 
 def test_serve_senza_la_pagina_chiede_graph(tmp_path, monkeypatch, capsys):
