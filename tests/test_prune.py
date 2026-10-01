@@ -151,6 +151,32 @@ def test_prune_senza_blocco_sweep_tutto_lo_sweep_e_residuo(tmp_path, monkeypatch
     assert all(os.path.exists(p) for p in fuori)
 
 
+def test_prune_toglie_le_cartelle_che_svuota(tmp_path, monkeypatch, capsys):
+    """Una stream tolta dallo studio ha una cartella sotto ``yaml/`` e una sotto
+    ``audio/``: tolti i file, restava lo scheletro di cio' che lo studio non
+    genera piu'. Se ne vanno solo le cartelle che prune ha svuotato: una gia'
+    vuota prima non e' sua, e le cartelle vive hanno ancora i loro file."""
+    study, buoni, stem, orfani, fuori = _prune_tree(tmp_path, monkeypatch)
+    g = cli.gen_dir(study)
+    tolta_y = os.path.join(g, "yaml", "sweep", "discrete", "tolta", "o1__a=5.yml")
+    tolta_a = os.path.join(g, "audio", "sweep", "discrete", "tolta",
+                           f"{study}_tolta_o1__a=5.aif")
+    for p in (tolta_y, tolta_a, os.path.splitext(tolta_a)[0] + "__tolta.aif"):
+        _touch(p)
+    gia_vuota = os.path.join(g, "audio", "sweep", "discrete", "gia_vuota")
+    os.makedirs(gia_vuota)
+
+    assert cli.cmd_prune(study) == 0          # senza APPLY non si tocca niente
+    assert os.path.isdir(os.path.dirname(tolta_y))
+
+    assert cli.cmd_prune(study, apply=True) == 0
+    assert not os.path.exists(os.path.dirname(tolta_y))
+    assert not os.path.exists(os.path.dirname(tolta_a))
+    assert os.path.isdir(gia_vuota)
+    assert all(os.path.exists(p) for p in buoni + [stem] + fuori)
+    assert "2 cartelle" in capsys.readouterr().out
+
+
 def test_prune_senza_niente_su_disco_non_fa_niente(tmp_path, monkeypatch, capsys):
     study = _studio(tmp_path, monkeypatch)
     assert cli.cmd_prune(study, apply=True) == 0

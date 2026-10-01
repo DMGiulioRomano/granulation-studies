@@ -757,7 +757,10 @@ def cmd_prune(study: str, apply: bool = False, stems: bool = False) -> int:
     tornano solo col render che la rifa' (YAML cambiato, o ``FORCE=1``).
 
     Restano fuori ``stack``/``versions``/``percorso``, che hanno documenti
-    propri, la cache, le partiture e le sessioni ``.sv``. Gira una volta per
+    propri, la cache, le partiture e le sessioni ``.sv`` — quelle delle
+    varianti tolte restano e puntano a un audio che non c'e' piu' (il README
+    lo dice a chi usa ``study``). Le cartelle svuotate se ne vanno con i loro
+    file (``_togli_cartelle_svuotate``). Gira una volta per
     combinazione di ``for_each:`` come ogni comando (``gen_dir`` e il documento
     letto sono quelli della combinazione); le combinazioni che il blocco non
     dichiara piu' le nomina ``_dispatch``, senza entrarci.
@@ -818,9 +821,36 @@ def cmd_prune(study: str, apply: bool = False, stems: bool = False) -> int:
         print(("[prune] rimosso " if apply else "[prune] orfano  ") + os.path.relpath(p, g))
         if apply:
             os.remove(p)
+    vuote = _togli_cartelle_svuotate(orfani, (yaml_root, audio_root)) if apply else 0
     print(f"[prune] {len(orfani)} file, {peso / 2**20:.1f} MB"
+          + (f", {vuote} cartelle rimaste vuote" if vuote else "")
           + ("" if apply else "  — rilancia con APPLY=1 (--apply) per cancellarli"))
     return 0
+
+
+def _togli_cartelle_svuotate(tolti: list, radici: tuple) -> int:
+    """Toglie le cartelle che la rimozione di ``tolti`` ha lasciato vuote.
+
+    Una stream tolta (o un cugino di spread in meno, o una modalita' spenta)
+    ha una cartella sotto ``yaml/sweep`` e una sotto ``audio/sweep``: tolti i
+    file restava lo scheletro di cio' che lo studio non genera piu'. Si
+    risale solo dalle cartelle dei file tolti, quindi una cartella gia' vuota
+    prima non e' affare di prune, e ci si ferma sotto le radici, che possono
+    essere un link verso un altro disco. Ritorna quante ne ha tolte.
+    """
+    candidate = set()
+    for p in tolti:
+        d = os.path.dirname(p)
+        while any(d.startswith(r + os.sep) for r in radici):
+            candidate.add(d)
+            d = os.path.dirname(d)
+    tolte = 0
+    # dalla piu' profonda: una cartella si svuota solo dopo le sue figlie
+    for d in sorted(candidate, key=lambda c: c.count(os.sep), reverse=True):
+        if os.path.isdir(d) and not os.listdir(d):
+            os.rmdir(d)
+            tolte += 1
+    return tolte
 
 
 def cmd_where(study: str) -> int:

@@ -116,15 +116,20 @@ make prune STUDY=1-10ms APPLY=1    # li cancella
 Il confronto è con ciò che lo `study.yml` **genera oggi**, non con il disco:
 uno studio a cui hai tolto il blocco `sweep:` non ne genera nessuno, quindi
 tutto il suo sweep è residuo. Gli stem (`<mix>__<stream>.aif`) seguono il mix
-da cui nascono; per togliere anche quelli — per le varianti dello sweep, uno
-stream solo, sono una copia del mix — aggiungi `STEMS=1`. Con la cache attiva
-il render non li rifà finché la variante non cambia (o con `FORCE=1`).
+da cui nascono: se ne vanno con lui. Per togliere anche quelli delle varianti
+vive — per le varianti dello sweep, uno stream solo, sono una copia del mix —
+aggiungi `STEMS=1`. Con la cache attiva il render non li rifà finché la
+variante non cambia (o con `FORCE=1`). Le cartelle che restano vuote (quelle
+di una stream tolta) se ne vanno con i loro file.
 
 Senza `APPLY` non si cancella niente, e `APPLY` si accende solo con `1`,
 `true` o `yes`: `APPLY=0` elenca e basta. Con `for_each:` gira su ogni
 combinazione (`COMBO=` restringe, come per gli altri target) e nomina le
 combinazioni che il blocco non dichiara più, senza entrarci. Restano fuori
 `stack`/`versions`/`percorso`, la cache, le partiture e le sessioni `.sv`.
+Quelle delle varianti tolte restano in `sv/sweep/` e aprono un audio che non
+c'è più, anche dalla funzione `study`, che apre tutto `sv/sweep/`: vanno
+tolte a mano.
 
 ## Struttura
 
