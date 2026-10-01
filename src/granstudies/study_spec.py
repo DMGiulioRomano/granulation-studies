@@ -639,6 +639,44 @@ def _replace_generators(merged: Dict[str, Any], override: Dict[str, Any]) -> Non
                 ax.pop(k, None)
 
 
+def axis_names(data: Dict[str, Any]) -> frozenset:
+    """I nomi d'asse dichiarati in ``axes:``: le chiavi a valore dict che non
+    sono vocabolario condiviso (``interpolation``, ``seed``).
+
+    E' la regola con cui il parse decide cosa e' un asse, e vive qui perche'
+    la leggono anche ``resolve_streams`` (per il confine dei nomi dotted) e il
+    laboratorio (``graph.lab_data``, che da ogni asse ricava le sue tacche).
+    Una seconda copia altrove sarebbe una lista di chiavi riservate da tenere
+    allineata a mano.
+    """
+    return frozenset(
+        k
+        for k, v in (data.get("axes") or {}).items()
+        if k not in _AXES_RESERVED_KEYS and isinstance(v, dict)
+    )
+
+
+def merge_stream_override(
+    data: Dict[str, Any],
+    override: Dict[str, Any] | None,
+    names: frozenset,
+    ctx: ErrCtx,
+) -> Dict[str, Any]:
+    """Il documento come lo vede uno stream di ``streams:``.
+
+    I tre passi del merge in un posto solo — chiavi puntate espanse in dict
+    annidati, deep-merge sul documento, generatore dell'override che rimpiazza
+    quello ereditato — perche' li fa anche il laboratorio, che degli stream
+    legge gli ``axes:`` senza parsarne lo spec (``graph.lab_data``, issue #77).
+    Due copie di questa sequenza divergono in silenzio: l'override smette di
+    arrivare dove deve e il risultato e' un valore in meno, non un errore.
+    """
+    override = _expand_dotted_keys(override or {}, names, ctx)
+    merged = _deep_merge(data, override)
+    _replace_generators(merged, override)
+    return merged
+
+
 def reject_top_level_duration(
     data: Dict[str, Any], locs: yaml_loc.Locations | None = None
 ) -> None:
@@ -711,11 +749,7 @@ def resolve_streams(
     # Nomi d'asse del documento base: risolvono il confine dei nomi dotted
     # nelle chiavi puntate degli override e nei path di spread.over (vedi
     # ``split_axis_key``).
-    axis_names = frozenset(
-        k
-        for k, v in (data.get("axes") or {}).items()
-        if k not in _AXES_RESERVED_KEYS and isinstance(v, dict)
-    )
+    names = axis_names(data)
     # Manopole di gruppo (`let:` per entry): risolte e iniettate PRIMA
     # dell'espansione, cosi' tutte le voci del gruppo condividono il valore.
     streams = apply_group_let(streams, locs)
@@ -723,7 +757,7 @@ def resolve_streams(
         streams,
         locs,
         pad_n=spread_pad,
-        axis_names=axis_names,
+        axis_names=names,
         global_spread=data.get("spread"),
         base_volume=(data.get("base") or {}).get("volume"),
     )
@@ -731,11 +765,9 @@ def resolve_streams(
     for stream_id, override in streams.items():
         # Le chiavi puntate scritte a mano nell'override (``axes.density.base.expr``)
         # si espandono in dict annidati prima del merge, come in ``spread.over``.
-        override = _expand_dotted_keys(
-            override or {}, axis_names, ErrCtx(locs=locs, stream=stream_id)
+        merged = merge_stream_override(
+            data, override, names, ErrCtx(locs=locs, stream=stream_id)
         )
-        merged = _deep_merge(data, override)
-        _replace_generators(merged, override)
         merged.pop("streams", None)
         merged.setdefault("sweep", {})["stream_id"] = stream_id
         try:
