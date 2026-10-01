@@ -100,10 +100,10 @@ def lab_data(raw: Dict[str, Any] | None) -> Dict[str, Any]:
     l'unione di tutte le sue fonti, documento e stream insieme. Il
     laboratorio compone UNO stream: una lista per stream vorrebbe un
     selettore in pagina, cioe' chiedere "quale zona stai ascoltando" a chi
-    sta componendo un'altra cosa. Le zone d'ombra di ``1-10ms`` scrivono tre
-    rampe di ``density`` sullo stesso asse: insieme sono le density che
-    quello studio ha trovato interessanti, che e' esattamente cio' che un
-    menu di tacche deve offrire.
+    sta componendo un'altra cosa. Le quattro zone d'ombra di ``1-10ms``
+    scrivono quattro rampe di ``density`` sullo stesso asse: insieme sono le
+    density che quello studio ha trovato interessanti, che e' esattamente
+    cio' che un menu di tacche deve offrire.
 
     **Lo stream a riposo e' il ``base:`` del documento**, non quello delle
     entry: con piu' stream e' l'unico che tutti condividono, mentre il
