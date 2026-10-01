@@ -80,9 +80,9 @@ si tocca niente e si dice chi e' (`libera_porta` in `serve.py`, verificata in
 
 `make serve STUDY=<scala>` non e' `http.server`: e' `granstudies serve`, che
 serve la pagina scritta da `make graph` (una per studio, anche con
-`for_each:`: le tacche sono quelle di tutto il documento) e accetta
-`POST /render`. La pagina **è** il laboratorio:
-si compone UN solo stream e lo si sente subito. Ogni `+ breakpoint` salva uno
+`for_each:`: le tacche sono quelle di tutto il documento, `streams:` e assi
+esterni compresi) e accetta `POST /render`. La pagina **è** il laboratorio: si
+compone UN solo stream e lo si sente subito. Ogni `+ breakpoint` salva uno
 snapshot di tutti i parametri a un tempo; i punti si trascinano sulla linea, e
 cliccarne uno riporta i select ai suoi valori. Il documento esce in
 `generated/<study>/live/<nome>.yml` e viene reso accanto in `.aif`. Un
@@ -142,13 +142,91 @@ Il lavoro non salvato sopravvive a un refresh (localStorage, per studio): e'
 una rete di sicurezza, non un salvataggio. La verita' e' il file.
 
 Divisione dei ruoli con PGE-ui: la GUI e' la timeline, dove gli stream si
-sentono insieme; il laboratorio e' il banco del singolo stream. I valori fra
-cui si sceglie sono le tacche gia' dichiarate nello `study.yml` (assi interni
-e `for_each: base.*`), e **per ora solo quelle scritte con `values:`**
-(`graph.lab_data`). Gli assi a `ramp:` o a banda e gli assi dentro `streams:`
-non danno tacche, e la gran parte degli studi di questo repo e' scritta cosi':
-su quelli il laboratorio ha solo sample, volume e pan, e `graph` lo dice.
-Leggerli e' #77.
+sentono insieme; il laboratorio e' il banco del singolo stream.
+
+### Le tacche: cosa legge il laboratorio dello `study.yml`
+
+I valori fra cui si sceglie sono quelli gia' dichiarati nello `study.yml`
+(`graph.lab_data`), e da #77 ogni **generatore di sequenza** passa da
+`value_generators.resolve` — lo stesso che usa `for_each:`. Quindi `ramp:` e
+le bande danno tacche come `values:`, e la lista nuda (`base.distribution:
+[0, 1]`) e' la forma breve che `for_each` gia' accettava. Prima contava solo
+`values:`, che e' come sono scritti gli studi di mare-nostrum da cui il
+laboratorio viene: qui gli assi sono quasi tutti rampe, e su `1-10ms` la
+pagina non aveva **nessuna** manopola.
+
+Le fonti sono tre, e sono la stessa cosa dal punto di vista di uno stream
+solo — valori di quel parametro che vale la pena sentire:
+
+1. gli assi del documento (`axes:`, dove `interpolation` e `seed` sono
+   vocabolario condiviso e non assi: lo decide `study_spec.axis_names`, la
+   regola del parse);
+2. gli assi esterni che patchano lo stream a riposo (`for_each: base.*`);
+   `stack.seed` o `percorso.arco` non sono parametri di uno stream e non
+   entrano;
+3. gli assi scritti dentro `streams:`, col merge del parse
+   (`study_spec.merge_stream_override`) — quindi anche una chiave puntata come
+   `axes.density.ramp.step: 1` arriva dove deve, e un generatore dell'override
+   rimpiazza quello ereditato invece di collidere con esso.
+
+**Unione, non selettore.** Le tacche di un parametro sono l'unione di tutte le
+sue fonti, documento e stream insieme. Il laboratorio compone UNO stream: una
+lista per stream vorrebbe un selettore in pagina, cioe' chiedere "quale zona
+stai ascoltando" a chi sta componendo un'altra cosa. Le quattro zone d'ombra
+di `1-10ms` scrivono quattro rampe di `density` sullo stesso asse: insieme
+sono le density che quello studio ha trovato interessanti, che e' esattamente
+cio' che un menu di tacche deve offrire. In piu' cosi' la pagina non cambia, e
+`graph_page.html` resta identica a mare-nostrum (vedi "Da dove viene").
+
+**L'ordine e' quello di un menu, non di una sequenza.** Nello `study.yml`
+`values:` e' una sequenza da percorrere e puo' tornare sui suoi passi
+(`distribution: [0, .25, 0, 1, 0, .75]`); fra le tacche un valore sta una
+volta sola, e i numeri sono ordinati — senza un ordine canonico l'unione fra
+documento e stream non ne avrebbe nessuno. Le tacche categoriali tengono
+l'ordine in cui sono scritte: un nome non si ordina.
+
+**Lo stream a riposo e' il `base:` del documento**, non quello delle entry.
+Con piu' stream e' l'unico che tutti condividono, mentre il `base:` di una
+entry differenzia quella voce dalle sorelle (il `pointer.start` di un cugino)
+e fonderli darebbe uno stream che non ha scritto nessuno.
+
+**Un asse senza generatore leggibile resta una manopola**, senza menu
+(`free: true`, come volume e pan). `grain.duration` sotto osservazione in uno
+stack e' il parametro dello studio anche quando le sue tacche non si
+enumerano — una banda senza `n` lascia i valori alla camminata-X dello
+`stack:`, e un asse che prende `base` da un `expr` dipende da un `let:` che
+qui nessuno risolve. Toglierlo lascerebbe fuori dal banco proprio il parametro
+che lo studio sta studiando. Una chiave di `for_each:` illeggibile invece non
+dichiara niente: li' il generatore *e'* la dichiarazione, e `for_each` stesso
+la rifiuta.
+
+**`lab_data` e' totale**: un generatore che non si risolve costa le sue
+tacche, mai la pagina — un `make serve` che non parte su uno studio che
+renderizza benissimo sarebbe il guasto peggiore. Chi sbaglia il generatore lo
+sentono dire `sweep` e `render`, che su quei valori ci devono renderizzare.
+L'insieme di eccezioni e' quello che `for_each._parse_axis` gia' riconosce,
+piu' `RuntimeError`: espandere una chiave puntata che introduce un asse dotted
+nuovo chiede il registro dell'engine, che senza il submodule non c'e'.
+Due canarini sul corpus vero (`tests/test_studies_corpus.py`) tengono le due
+meta' — il laboratorio si apre su ogni studio, e ogni asse dichiarato e' una
+manopola.
+
+L'avviso di `graph` conta le **tacche**, non i parametri: da #77 un asse senza
+generatore leggibile e' una manopola, e contarla terrebbe muto l'avviso
+proprio sugli studi che lo meritano. La riga finale dice quante sono
+(`5 parametri, 2 con tacche`).
+
+**`make serve` vale anche sugli studi senza sweep.** Il laboratorio non
+dipende dal processo sweep: compone da zero e rende con `POST /render`, e le
+tacche sono una comodita'. Su `stack_*` e `brano*` mancano (bande senza `n`,
+`base` da `let:`) e le manopole no — e' il banco del singolo stream come
+altrove.
+
+Cosa **non** da' tacche, dichiarato: il blocco `spread:`, che patcha per
+indice (`base.pointer.start`, `base.pan`) con una grammatica di path sua e non
+dichiara assi; i `let:` di documento e di gruppo, quindi gli `expr` che li
+leggono restano illeggibili qui; e `versions:`, che muove le manopole del
+riposo e non i valori di un parametro.
 
 **Interpolazione.** Tre livelli, dal piu' largo al piu' stretto:
 
@@ -339,7 +417,8 @@ nell'ordine della lista, a partire dalla prima che non sta sotto `min`.
 Dove si arriva lo dice `quanti`, non un `max`: finite le tacche, i punti che
 avanzano tengono l'ultima. Il `passo` li' e' un salto sull'indice della
 lista (2 = una tacca si' e una no; vuoto = 1). `max` e `ratio` si spengono, e sui
-parametri senza tacche (volume, pan) il modo non c'e'. Verificato in
+parametri senza tacche (volume, pan, e gli assi che non si enumerano) il modo
+non c'e'. Verificato in
 `tests/test_graph_js.py` (`tacche()`).
 Un parametro senza regola prende il valore che ha a schermo, come `+ breakpoint`.
 I punti generati si aggiungono a quelli che ci sono (non li sostituiscono) e
@@ -356,9 +435,10 @@ quello scritto. Nel campo si puo' digitare anche un valore che fra le tacche
 non c'e'; la virgola vale il punto, e un campo vuoto o illeggibile tiene il
 valore del breakpoint invece di scrivere NaN (`tests/test_graph_js.py`).
 I limiti di `bounds_for` non bloccano il campo, restano come tooltip.
-**Volume, pan e pan_range** sono i tre senza menu (`free: true`): non hanno
-tacche, sono aggiustamenti continui. I categoriali (sample, finestre) restano
-menu chiusi.
+**Volume, pan e pan_range** sono senza menu (`free: true`): non hanno tacche,
+sono aggiustamenti continui. Da #77 porta quel marcatore anche un asse il cui
+generatore non si enumera (una banda senza `n`): il campo c'e', il menu no.
+I categoriali (sample, finestre) restano menu chiusi.
 
 ## Le voci nel laboratorio
 

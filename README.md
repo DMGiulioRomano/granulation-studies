@@ -115,10 +115,15 @@ per studio anche con `for_each:`) e avvia `granstudies serve` su
 sessione precedente si chiude da solo; una porta tenuta da un altro programma
 non si tocca, e il messaggio dice chi la tiene.
 
-- **Parametri.** Le tacche fra cui si sceglie sono i `values:` dello
-  `study.yml` (in `axes:` e in `for_each: base.*`); i sample sono i file della
-  cartella dei sample; volume, pan e `pan_range` si scrivono a mano. Gli assi a
-  `ramp:`/banda e quelli dentro `streams:` non danno ancora tacche (#77).
+- **Parametri.** Le tacche fra cui si sceglie sono quelle dello `study.yml`:
+  gli assi del documento, quelli dentro `streams:` e gli assi esterni
+  `for_each: base.*`, con i generatori risolti come li risolve il sweep
+  (`values:`, `ramp:`, bande). Di un parametro sono l'**unione** delle sue
+  fonti — il laboratorio compone uno stream solo, non una griglia — senza
+  doppioni e, se numeriche, ordinate. Un asse i cui valori non si enumerano
+  (una banda senza `n`, un `base` che viene da un `let:`) resta una manopola
+  da scrivere a mano, come volume, pan e `pan_range`; i sample sono i file
+  della cartella dei sample. Lo stream a riposo e' il `base:` del documento.
 - **Breakpoint.** `+ breakpoint` fotografa tutti i parametri a un tempo;
   interpolazione `linear`/`cubic`/`step` per tutti, per breakpoint o per
   parametro; `genera breakpoint` ne mette n in un tratto (regolari, casuali o
@@ -145,6 +150,10 @@ Dopo il render, a destra:
 
 **Barra spaziatrice**: play/pausa (fuori dai campi di testo). Si cerca nel
 file cliccando su sonogramma, forma d'onda, inviluppi o grani.
+
+`make serve` vale anche sugli studi senza sweep (`stack_*`, `brano*`): il
+laboratorio non dipende da quel processo, compone da zero e rende per conto
+suo — li' mancano le tacche, non le manopole.
 
 Vincoli: **solo macOS** (`osascript` per i pannelli, Safari che decodifica
 AIFF). Il documento del laboratorio non porta un `seed`: le curve di una
