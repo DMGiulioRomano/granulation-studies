@@ -431,8 +431,8 @@ giro. La legenda sotto dice il colore, il nome e l'escursione vera
 (`10.0ms … 200ms`), che e' l'unica cosa che una curva normalizzata non puo'
 mostrare da se'.
 
-Il conto lo fa il server dopo il render (`engine_bridge.stream_envelopes`,
-chiamato da `_inviluppi` in `serve.py`) ricaricando lo YAML appena scritto, e
+Il conto lo fa il server dopo il render (`engine_bridge.stream_analysis`,
+chiamato da `_analisi` in `serve.py`) ricaricando lo YAML appena scritto, e
 le curve tornano nella risposta di `POST /render` gia' campionate e
 normalizzate: la pagina tira una linea e basta. Le **costanti restano fuori**
 (`show_static=False`), come nella partitura: qui si guarda cio' che si muove.
