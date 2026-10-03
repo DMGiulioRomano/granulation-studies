@@ -17,6 +17,7 @@ import json
 import os
 from typing import Any, Dict, Iterator, List, Tuple
 
+from .bounds import declared_unit
 from .errors import ErrCtx
 from .study_spec import (
     axis_names,
@@ -43,6 +44,21 @@ _ILLEGGIBILE = (ValueError, TypeError, LookupError, RuntimeError, ArithmeticErro
 
 # Il prefisso che, in ``for_each:``, marca una patch sullo stream a riposo.
 _BASE = "base."
+
+# Le unita' (``bounds.declared_unit``) in cui un valore e' in secondi: assente,
+# ``seconds``, o ``absolute`` per le posizioni del pointer. I ``DEFAULTS`` della
+# pagina (la grana media 0.064) sono scritti cosi'.
+_IN_SECONDI = (None, "seconds", "absolute")
+
+
+def _baseline(cfg: Dict[str, Any]) -> float | None:
+    """Il ``baseline`` di un asse se e' un numero scritto, altrimenti ``None``.
+
+    Omesso, il parse lo risolve dal default dell'engine; qui non si chiede
+    all'engine (``lab_data`` non ne dipende), e la pagina tiene la sua catena.
+    """
+    b = cfg.get("baseline")
+    return b if isinstance(b, (int, float)) and not isinstance(b, bool) else None
 
 
 def _tacche_for_each(cfg: Any) -> List[Any] | None:
@@ -178,15 +194,20 @@ def lab_data(raw: Dict[str, Any] | None, study_id: str | None = None) -> Dict[st
     )
     ordine: List[str] = []
     grezze: Dict[str, List[Any]] = {}
+    riposi: Dict[str, float] = {}
 
-    def aggiungi(path: str, valori: List[Any]) -> None:
+    def aggiungi(path: str, valori: List[Any], riposo: float | None = None) -> None:
         if path not in grezze:
             ordine.append(path)
             grezze[path] = []
         grezze[path].extend(valori)
+        # Il primo baseline che si incontra: quello del documento, se c'e',
+        # come il ``base:`` del documento e' lo stream a riposo.
+        if riposo is not None:
+            riposi.setdefault(path, riposo)
 
     for path, cfg in _assi(raw):
-        aggiungi(path, _tacche_asse(cfg, raw, doc_key) or [])
+        aggiungi(path, _tacche_asse(cfg, raw, doc_key) or [], _baseline(cfg))
     for key, cfg in (raw.get("for_each") or {}).items():
         # Solo le patch su `base.`: `stack.seed` o `percorso.arco` non sono
         # parametri di uno stream e nel laboratorio non hanno posto.
@@ -212,8 +233,9 @@ def lab_data(raw: Dict[str, Any] | None, study_id: str | None = None) -> Dict[st
         for path, cfg in _assi(merged):
             # L'id dello stream e' la chiave del suo seed, come dopo il merge
             # di ``resolve_streams`` (``sweep.stream_id``).
-            aggiungi(path, _tacche_asse(cfg, merged, str(sid)) or [])
+            aggiungi(path, _tacche_asse(cfg, merged, str(sid)) or [], _baseline(cfg))
 
+    base = raw.get("base") if isinstance(raw.get("base"), dict) else {}
     params: List[Dict[str, Any]] = []
     for path in ordine:
         valori = _uniche(grezze[path])
@@ -223,7 +245,13 @@ def lab_data(raw: Dict[str, Any] | None, study_id: str | None = None) -> Dict[st
             # ``values:``, che si risolve sempre: senza tacche restano le
             # rampe e le bande, cioe' numeri. ``free`` e' lo stesso marcatore
             # di volume e pan — campo senza menu.
-            params.append({"path": path, "values": [], "kind": "num", "free": True})
+            p: Dict[str, Any] = {"path": path, "values": [], "kind": "num", "free": True}
+            # Senza tacche la pagina ripiega su 0 (``iniziale``), che per
+            # ``density`` e' fuori dai bounds: il primo render moriva. Il
+            # baseline e' il numero che lo studio scrive per quel parametro.
+            if path in riposi:
+                p["def"] = riposi[path]
+            params.append(p)
             continue
         # Categoriale = il valore e' un nome, non un numero. Restano manopole
         # fisse per lo stream, con un'eccezione: `grain.envelope`, che la
@@ -235,7 +263,16 @@ def lab_data(raw: Dict[str, Any] | None, study_id: str | None = None) -> Dict[st
             # puo' tornare sui suoi passi; qui e' un menu, dove un valore sta
             # una volta sola e in ordine. Senza un ordine canonico l'unione
             # fra documento e stream non ne avrebbe nessuno.
-            params.append({"path": path, "values": sorted(valori), "kind": "num"})
+            p = {"path": path, "values": sorted(valori), "kind": "num"}
+            # Con le tacche la catena della pagina regge (``DEFAULTS``, poi
+            # ``base:``, poi la prima tacca), ma i ``DEFAULTS`` sono in secondi:
+            # in un'unita' dichiarata dal ``base:`` (``grain.duration_unit:
+            # samples``) lo 0.064 della grana media e' 0.064 campioni, e
+            # l'engine lo rifiuta. Li' parte dal baseline, o dalla tacca piu'
+            # piccola.
+            if declared_unit(path, base) not in _IN_SECONDI:
+                p["def"] = riposi.get(path, p["values"][0])
+            params.append(p)
         else:
             params.append({"path": path, "values": valori, "kind": "cat"})
     return {"base": raw.get("base") or {}, "params": params}

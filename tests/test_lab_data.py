@@ -278,6 +278,55 @@ def test_un_for_each_illeggibile_non_diventa_una_manopola():
     assert lab_data({"for_each": {"base.distribution": {"ramp": {"step": 1}}}})["params"] == []
 
 
+# --- da dove parte una manopola nata da un asse ----------------------------
+#
+# La pagina parte da ``def``, poi dai suoi ``DEFAULTS`` (in secondi), poi dal
+# ``base:``, poi dalla prima tacca, e senza nessuno di questi da 0
+# (``iniziale``). Il ``baseline`` dell'asse e' il numero che lo studio scrive
+# per quel parametro: ``def`` lo porta dove la catena della pagina cadrebbe su
+# un valore che l'engine rifiuta.
+
+def test_un_asse_senza_tacche_parte_dal_suo_baseline():
+    """Senza tacche la pagina ripiegava su 0: ``density: 0`` e' fuori dai
+    bounds dell'engine, e il primo render dello stream moriva."""
+    p = _params({"axes": {"density": {"baseline": 10, "drift": {"step": 0.1}}}})["density"]
+    assert p["free"] is True and p["def"] == 10
+
+
+def test_il_baseline_viene_anche_da_uno_stream():
+    doc = {"streams": {"a": {"axes": {"density": {"baseline": 7, "base": 1}}}}}
+    assert _params(doc)["density"]["def"] == 7
+
+
+def test_con_le_tacche_in_secondi_valgono_i_default_della_pagina():
+    """La grana media dei ``DEFAULTS`` e' una scelta della pagina (#76) e in
+    secondi e' un valore valido: li' ``def`` non c'e'."""
+    p = _params({"axes": {"grain.duration": {"baseline": 0.005,
+                                             "values": [0.001, 0.01]}}})["grain.duration"]
+    assert "def" not in p
+
+
+def test_in_un_unita_dichiarata_parte_dal_baseline_anche_con_le_tacche():
+    """I ``DEFAULTS`` della pagina sono in secondi: con
+    ``grain.duration_unit: samples`` lo 0.064 diventava 0.064 campioni, e
+    l'engine lo rifiuta. Li' vale il baseline, che e' nell'unita' del file."""
+    doc = {"base": {"grain": {"duration_unit": "samples"}},
+           "axes": {"grain.duration": {"baseline": 4,
+                                       "ramp": {"start": 4, "stop": 8, "step": 2}}}}
+    assert _params(doc)["grain.duration"]["def"] == 4
+
+
+def test_in_un_unita_dichiarata_senza_baseline_parte_dalla_prima_tacca():
+    doc = {"base": {"grain": {"duration_unit": "milliseconds"}},
+           "for_each": {"base.grain.duration": {"values": [20, 5]}}}
+    assert _params(doc)["grain.duration"]["def"] == 5
+
+
+def test_un_baseline_che_non_e_un_numero_non_diventa_un_default():
+    p = _params({"axes": {"density": {"baseline": {"expr": "x"}}}})["density"]
+    assert "def" not in p
+
+
 # --- lo stream a riposo ----------------------------------------------------
 
 def test_il_base_e_quello_del_documento_non_quello_degli_stream():

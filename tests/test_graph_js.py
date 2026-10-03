@@ -972,3 +972,50 @@ def test_senza_normalized_i_tempi_vanno_in_secondi(tmp_path):
     assert [p[0] for p in prog] == [0, 15]
     assert vr == [[0, 0], [10, 3]]                   # del base:, gia' secondi
     assert back == [[0, 10, "step"], [0.5, 80], [1, 20]]
+
+
+# --- il corpus: da dove partono le manopole --------------------------------
+
+_STUDIES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "studies")
+_CORPUS = sorted(
+    d for d in os.listdir(_STUDIES) if os.path.isfile(os.path.join(_STUDIES, d, "study.yml"))
+)
+
+
+@node
+@pytest.mark.parametrize("study", _CORPUS)
+def test_ogni_manopola_dello_studio_parte_da_un_valore_che_l_engine_accetta(study, tmp_path):
+    """Il primo `+ breakpoint` scrive nel documento il valore da cui la
+    manopola parte, e il primo render lo manda all'engine. Partire da un
+    valore che l'engine rifiuta (`density: 0`, `grain.duration` 0.064 in
+    campioni) e' un laboratorio che non suona al primo tentativo. Il valore lo
+    calcola la `iniziale()` vera della pagina sul payload vero di `lab_data`;
+    il giudizio e' dell'engine (`bounds.violation`, nell'unita' del `base:`).
+
+    Canarino nello spirito di `test_studies_corpus.py`: non le tacche di uno
+    studio, ma «nessuno studio parte fuori dai bounds»."""
+    import yaml
+
+    from granstudies import bounds, engine_bridge
+    from granstudies.graph import lab_data
+
+    if not os.path.isdir(engine_bridge.ENGINE_SRC):
+        pytest.skip("submodule engine non inizializzato")
+    with open(os.path.join(_STUDIES, study, "study.yml"), encoding="utf-8") as fh:
+        lab = lab_data(yaml.safe_load(fh), study)
+    js = _script()
+    p = tmp_path / "i.js"
+    p.write_text(
+        "const L = " + json.dumps(lab) + ";\n"
+        + js[js.index("const DEFAULTS"):js.index("function iniziale")]
+        + _fn(js, "iniziale") + _fn(js, "leggiPath")
+        + "console.log(JSON.stringify(L.params.map(p => [p.path, iniziale(p)])));"
+    )
+    out = subprocess.run(["node", str(p)], capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr
+    for path, v in json.loads(out.stdout):
+        if not isinstance(v, (int, float)):
+            continue
+        unit = bounds.declared_unit(path, lab["base"])
+        assert bounds.violation(path, v, unit=unit) is None, (
+            f"{study}: {path} parte da {v} ({unit or 'secondi'}), fuori bounds")

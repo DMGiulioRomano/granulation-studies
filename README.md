@@ -154,7 +154,9 @@ non si tocca, e il messaggio dice chi la tiene.
   fonti — il laboratorio compone uno stream solo, non una griglia — senza
   doppioni e, se numeriche, ordinate. Un asse i cui valori non si enumerano
   (una banda senza `n`, un `base` che viene da un `let:`) resta una manopola
-  da scrivere a mano, come volume, pan e `pan_range`; i sample sono i file
+  da scrivere a mano, come volume, pan e `pan_range`, e parte dal `baseline`
+  dell'asse (che e' anche il punto di partenza nelle unita' diverse dai
+  secondi, `samples`/`milliseconds`); i sample sono i file
   della cartella dei sample. Lo stream a riposo e' il `base:` del documento.
 - **Breakpoint.** `+ breakpoint` fotografa tutti i parametri a un tempo;
   interpolazione `linear`/`cubic`/`step` per tutti, per breakpoint o per

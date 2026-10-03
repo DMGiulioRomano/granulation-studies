@@ -229,7 +229,8 @@ stack e' il parametro dello studio anche quando le sue tacche non si
 enumerano — una banda senza `n` lascia i valori alla camminata-X dello
 `stack:`, e un asse che prende `base` da un `expr` dipende da un `let:` che
 qui nessuno risolve. Toglierlo lascerebbe fuori dal banco proprio il parametro
-che lo studio sta studiando. Una chiave di `for_each:` illeggibile invece non
+che lo studio sta studiando. Parte dal `baseline` dell'asse (vedi "Da dove
+parte il laboratorio"). Una chiave di `for_each:` illeggibile invece non
 dichiara niente: li' il generatore *e'* la dichiarazione, e `for_each` stesso
 la rifiuta.
 
@@ -353,6 +354,19 @@ nella pagina: grana media (`grain.duration` 0.064), niente dispersione
 `pointer.speed_ratio` 1, `volume` 0, `grain.envelope` gaussian. Un parametro
 fuori da quella tabella parte da `base:`, e se manca anche li' dalla sua prima
 tacca (`iniziale()`, verificata in `tests/test_graph_js.py`).
+
+Prima di tutto questo viene il `def` del payload, e `lab_data` lo da' alle
+manopole nate da un asse dove quella catena cadrebbe su un valore che l'engine
+rifiuta: un asse **senza tacche** parte dal suo `baseline` (senza, la pagina
+ripiegava su 0, e `density: 0` e' fuori bounds), e un parametro in
+un'**unita' dichiarata** dal `base:` (`grain.duration_unit: samples` o
+`milliseconds`) parte dal `baseline` anche con le tacche, perche' i `DEFAULTS`
+sono in secondi e lo 0.064 diventava 0.064 campioni. Altrove valgono i
+`DEFAULTS`: la grana media in secondi e' una scelta della pagina, e valida.
+Il canarino (`tests/test_graph_js.py`) esegue la `iniziale()` vera sul payload
+di ogni studio del corpus e chiede all'engine (`bounds.violation`) se il
+valore di partenza e' ammesso: prima di questo, il primo render moriva su
+`1-50smp`, `brano01*` e tutti gli `stack_*`.
 
 **Undo/redo.** `cmd+Z` annulla, `cmd+shift+Z` rifa (`ctrl` fuori da macOS).
 Lo stato che si annulla e' tutto il lavoro: i breakpoint, il loop, il punto
