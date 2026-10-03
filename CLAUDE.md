@@ -91,8 +91,9 @@ non si muove mai resta scalare.
 
 **Da dove viene.** Il laboratorio e' nato in mare-nostrum ed e' stato
 portato qui per stato finale (#76), a DMGiulioRomano/mare-nostrum@f7fdb58:
-`graph_page.html` e' identica a quella di mare-nostrum, per poterne riportare
-le modifiche successive con un diff. Non e' stata portata la griglia delle
+`graph_page.html` e' quella di mare-nostrum, per poterne riportare le
+modifiche successive con un diff, con una sola deviazione (i tempi nella
+convenzione del documento, sotto). Non e' stata portata la griglia delle
 varianti discrete (la pagina si chiama `graph` per lei), che mare-nostrum
 aveva gia' tolto, ne' `make explore`, che serviva a lei.
 
@@ -264,6 +265,19 @@ lavoro come gli altri. Si registra in `labInfo`, dove ogni modifica va a
 finire, tranne durante un gesto (`GESTO`): un trascinamento e' un passo solo,
 non cento. Dentro un campo di testo `cmd+Z` resta l'undo del testo. Aprire un
 file o fare `nuovo` azzera la storia.
+
+**I tempi sul documento seguono il suo `time_mode`.** Nella pagina i tempi
+dei breakpoint sono frazioni dello stream, ma l'engine li legge cosi' solo con
+`time_mode: normalized`; senza, sono secondi. Il documento parte dal `base:`
+dello studio, ed e' lui a decidere: con `normalized` i tempi escono frazioni,
+altrimenti `labDoc` li scrive in secondi (`scalaTempi`, `inSecondi`), e
+riaprendo `carica` li riporta a frazioni (`tempiFrazione`). Cosi' gli
+inviluppi ereditati dal `base:` restano nella loro convenzione. Vale per tutto
+cio' che sta sui breakpoint: numerici, voci, loop, la `curve` di
+`grain.envelope`, la progressione. Prima la pagina contava sul
+`time_mode: normalized` del `base:`, che oggi tutti gli studi dichiarano: su
+uno studio senza, una rampa di 30 s si schiacciava nel primo secondo.
+Deviazione da mare-nostrum, verificata in `tests/test_graph_js.py`.
 
 **Il tempo di un breakpoint si scrive.** La riga `tempo (0-1)` in cima ai
 parametri mostra la x normalizzata del punto selezionato e la accetta digitata:
