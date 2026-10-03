@@ -297,10 +297,12 @@ def cmd_sweep(study: str, stream: str | None = None) -> int:
 def _warn_orphans(variants_dir: str, written: set[str], scoped: bool) -> None:
     """Segnala gli YAML in ``variants_dir`` non prodotti da questo sweep.
 
-    Sono varianti di assi/stream rimossi da study.yml: senza avviso resterebbero
-    li' per sempre (il render incrementale le salta e basta). Con ``scoped``
-    (sweep di una sola stream) il controllo resta nelle cartelle toccate, per
-    non flaggare le stream non rigenerate. Solo avviso, nessuna cancellazione.
+    Sono varianti di assi/stream rimossi da study.yml, o di un valore cambiato:
+    senza avviso resterebbero li' per sempre, e il render, che discende tutto
+    ``yaml/``, le tratta come varianti vive. Con ``scoped`` (sweep di una sola
+    stream) il controllo resta nelle cartelle toccate, per non flaggare le
+    stream non rigenerate. Solo avviso, nessuna cancellazione: a toglierle e'
+    ``prune`` (``cmd_prune``).
     """
     if scoped:
         candidates = {os.path.dirname(p) for p in written}
@@ -826,7 +828,7 @@ def cmd_prune(study: str, apply: bool = False, stems: bool = False) -> int:
             os.remove(p)
     vuote = _togli_cartelle_svuotate(orfani, (yaml_root, audio_root)) if apply else 0
     print(f"[prune] {len(orfani)} file, {peso / 2**20:.1f} MB"
-          + (f", {vuote} cartelle rimaste vuote" if vuote else "")
+          + (f", tolte {vuote} cartelle rimaste vuote" if vuote else "")
           + ("" if apply else "  — rilancia con APPLY=1 (--apply) per cancellarli"))
     return 0
 

@@ -174,10 +174,11 @@ def test_prune_toglie_le_cartelle_che_svuota(tmp_path, monkeypatch, capsys):
     assert not os.path.exists(os.path.dirname(tolta_a))
     assert os.path.isdir(gia_vuota)
     assert all(os.path.exists(p) for p in buoni + [stem] + fuori)
-    assert "2 cartelle" in capsys.readouterr().out
+    # il riepilogo dice che le ha tolte, non che sono rimaste li' vuote
+    assert "tolte 2 cartelle" in capsys.readouterr().out
 
 
-def test_prune_senza_niente_su_disco_non_fa_niente(tmp_path, monkeypatch, capsys):
+def test_prune_senza_niente_su_disco_non_fa_niente(tmp_path, monkeypatch):
     study = _studio(tmp_path, monkeypatch)
     assert cli.cmd_prune(study, apply=True) == 0
     assert not os.path.exists(cli.gen_dir(study))
