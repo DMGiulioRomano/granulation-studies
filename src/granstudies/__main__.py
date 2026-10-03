@@ -10,6 +10,8 @@
     granstudies compose  STUDY      genera final.yml dal percorso/grafo
     granstudies render-final STUDY  renderizza il brano finale
     granstudies where    STUDY      stampa le cartelle di output correnti
+    granstudies graph    STUDY      scrive la pagina del laboratorio del singolo stream
+    granstudies serve    STUDY      serve il laboratorio, con il render on demand
 
 STUDY e' il nome della cartella sotto ``studies/`` (es. base).
 
@@ -22,6 +24,7 @@ per sentirne una.
 from __future__ import annotations
 
 import argparse
+import errno
 import glob
 import hashlib
 import json
@@ -725,6 +728,134 @@ def cmd_where(study: str) -> int:
     return 0
 
 
+def cmd_graph(study: str) -> int:
+    """Scrive la pagina del laboratorio: una per studio.
+
+    Gira **una volta sola** e non una per combinazione (vedi ``_dispatch``):
+    le tacche fra cui si sceglie sono quelle di tutto lo ``study.yml``, assi
+    esterni compresi, non quelle di una combinazione sola.
+    """
+    from . import bounds
+    from .graph import campioni, lab_data, write_graph
+
+    gen_root = os.path.join(REPO_ROOT, "generated", study)
+    out = os.path.join(gen_root, "graph.html")
+    # Il documento COSI' COM'E' SCRITTO: `_read_study` applica la combinazione
+    # e con essa consuma il blocco `for_each:`, che invece al laboratorio
+    # serve tutto — sono le tacche di ogni parametro, non i valori di una
+    # combinazione sola.
+    with open(os.path.join(study_dir(study), "study.yml")) as fh:
+        lab = lab_data(yaml.safe_load(fh))
+    lab["envelopes"] = _finestre()
+    noti = {p["path"] for p in lab["params"]}
+    # Contate adesso, prima di sample e manopole libere: quelle ci sono sempre,
+    # e contarle renderebbe muto l'avviso qui sotto.
+    dallo_studio = len(noti)
+    # Il sample e' una manopola fissa come le altre categoriali, ma le sue
+    # tacche non stanno nello study.yml: sono i file della cartella dei sample.
+    camp = campioni(samples_dir(_load_spec(study).samples_dir))
+    if camp and "sample" not in noti:
+        lab["params"].append({"path": "sample", "values": camp, "kind": "cat"})
+    # Volume, pan e pan_range non hanno tacche: sono aggiustamenti continui e
+    # si scrivono a mano. `pan` serve anche come punto da cui partono gli
+    # offset delle voci (voice 0 sta li'), `pan_range` come dispersione del
+    # singolo grano. I limiti li sa l'engine (bounds.bounds_for), non li
+    # riscriviamo qui; dove non li conosce (pan_range) restano None.
+    for path in ("volume", "pan", "pan_range"):
+        if path in noti:
+            continue
+        lo, hi = bounds.bounds_for(path) or (None, None)
+        lab["params"].append({"path": path, "values": [], "kind": "num",
+                              "free": True, "min": lo, "max": hi})
+    os.makedirs(gen_root, exist_ok=True)
+    n = write_graph(study, out, lab)
+    # Un avviso, non un errore: la pagina si apre lo stesso, con sample,
+    # volume e pan. Fermarsi qui bloccherebbe `make serve`, che viene dopo.
+    if not dallo_studio:
+        print(f"[graph] lo study.yml di {study} non dichiara parametri con "
+              f"`values:` (ne' in `axes:` ne' in `for_each: base.*`): il "
+              f"laboratorio ha solo sample, volume e pan.", file=sys.stderr)
+    print(f"[graph] {out}  ({n} parametri)")
+    return 0
+
+
+# Quanti punti per disegnare una finestra: sotto i 10 campioni l'engine
+# restituisce una rettangolare (WINDOW_MIN_SHAPE_SAMPLES), e sopra i cinquanta
+# il disegno non guadagna niente ma la pagina si allunga.
+_PUNTI_FINESTRA = 48
+
+
+def _finestre() -> dict:
+    """nome -> profilo della finestra, preso dall'engine, non riscritto qui.
+
+    Il laboratorio offre TUTTE le finestre del catalogo, non solo quelle
+    rimaste nello ``study.yml``: e' una scelta per stream, non un asse, e non
+    c'e' ragione di limitarla a quelle di un esperimento. Il profilo serve a
+    disegnarle accanto al nome — `expodec` e `rexpodec` scendono tutte e due,
+    ma una tiene e poi crolla e l'altra crolla subito.
+
+    Se il submodule non c'e', la pagina resta senza disegni e con i soli nomi
+    dello studio: e' un di piu', non deve far fallire `graph`.
+    """
+    try:
+        from .engine_bridge import _ensure_engine_on_path
+        _ensure_engine_on_path()
+        from pge.controllers.window_registry import WindowRegistry
+        from pge.rendering.numpy_window_registry import NumpyWindowRegistry
+    except (ImportError, RuntimeError):
+        return {}
+    reg = NumpyWindowRegistry()
+    out = {}
+    for name in WindowRegistry.WINDOWS:
+        try:
+            out[name] = [round(float(v), 3) for v in reg.get(name, _PUNTI_FINESTRA)]
+        except Exception:      # noqa: BLE001 — una finestra rotta non ferma la pagina
+            continue
+    return out
+
+
+def cmd_serve(study: str, port: int = 8000) -> int:
+    """Serve la pagina dello studio, con il render on demand del laboratorio.
+
+    ``python -m http.server`` non basta piu': la pagina non si limita a
+    scegliere fra audio gia' pronti, compone uno stream e chiede di renderlo
+    (``POST /render``). Vedi ``granstudies.serve``.
+    """
+    from .serve import crea, libera_porta, porta_occupata
+
+    gen_root = os.path.join(REPO_ROOT, "generated", study)
+    # La pagina la scrive `graph`, non lo sweep: senza, il browser aprirebbe
+    # un 404 su un server partito per niente. (`make serve` la scrive prima.)
+    if not os.path.isfile(os.path.join(gen_root, "graph.html")):
+        print(f"[serve] {gen_root}/graph.html non esiste: esegui prima "
+              f"'graph {study}'.", file=sys.stderr)
+        return 1
+    try:
+        server = crea(gen_root, REPO_ROOT, port)
+    except OSError as e:
+        if e.errno != errno.EADDRINUSE:
+            raise
+        # Un nostro server di prima, rimasto orfano quando si e' chiusa la
+        # pagina: si chiude e si riprova, una volta sola. Se la porta e' di
+        # qualcun altro, `libera_porta` non tocca niente e si dice chi e'.
+        vecchio = libera_porta(port)
+        if vecchio is None:
+            print(f"[serve] {porta_occupata(port)}", file=sys.stderr)
+            return 1
+        print(f"[serve] chiuso il server orfano {vecchio} che teneva la porta {port}")
+        try:
+            server = crea(gen_root, REPO_ROOT, port)
+        except OSError:
+            print(f"[serve] {porta_occupata(port)}", file=sys.stderr)
+            return 1
+    print(f"[serve] http://localhost:{port}/graph.html   (Ctrl-C per fermare)")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="granstudies", description=__doc__)
     sub = p.add_subparsers(dest="command", required=True)
@@ -777,6 +908,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     fp = sub.add_parser("render-final", help="renderizza il brano finale")
     fp.add_argument("study")
+
+    gp = sub.add_parser("graph", help="scrive la pagina del laboratorio del singolo stream (HTML)")
+    gp.add_argument("study")
+
+    sp = sub.add_parser("serve", help="serve il laboratorio (con render on demand)")
+    sp.add_argument("study")
+    sp.add_argument("--port", type=int, default=8000)
 
     wp = sub.add_parser("where", help="stampa le cartelle di output correnti "
                                       "(una per combinazione di for_each:)")
@@ -1007,10 +1145,13 @@ def _dispatch(args) -> int:
     dallo stesso ``study.yml``, non da uno stato per sessione.
     """
     global _COMBO
-    if getattr(args, "study", None):
-        dichiarate, combos = _combos(args.study)
-    else:
+    # Il laboratorio e' uno per studio, non uno per combinazione: le tacche
+    # fra cui si sceglie sono quelle di tutto lo study.yml, assi esterni
+    # compresi. Girarlo per combinazione riscriverebbe la stessa pagina N volte.
+    if args.command in ("graph", "serve") or not getattr(args, "study", None):
         dichiarate = combos = [for_each.EMPTY]
+    else:
+        dichiarate, combos = _combos(args.study)
     rc = 0
     try:
         for i, c in enumerate(combos, 1):
@@ -1050,6 +1191,10 @@ def _run(args) -> int:
         return cmd_render_final(args.study)
     if args.command == "where":
         return cmd_where(args.study)
+    if args.command == "graph":
+        return cmd_graph(args.study)
+    if args.command == "serve":
+        return cmd_serve(args.study, args.port)
     if args.command == "sv":
         return cmd_sv(args.study, args.layout, markers=not args.no_markers, stream=args.stream,
                       markers_scope=args.markers_scope)

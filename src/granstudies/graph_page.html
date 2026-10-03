@@ -1,0 +1,2901 @@
+<!doctype html>
+<meta charset="utf-8"><title>__TITLE__</title>
+<style>
+ :root { color-scheme: light dark; --bg:#fff; --fg:#111; --line:#bbb; --dim:#888; --on:#c33;
+         --panel:#f4f4f4; }
+ @media (prefers-color-scheme: dark) {
+   :root { --bg:#141414; --fg:#eee; --line:#444; --dim:#888; --panel:#1c1c1c; } }
+ body { background:var(--bg); color:var(--fg); font:13px/1.5 ui-monospace,monospace;
+        margin:0; display:flex; align-items:stretch; height:100vh; overflow:hidden; }
+ #left { flex:0 0 auto; width:52%; min-width:220px; padding:22px; overflow:auto; }
+ #right { flex:1 1 0; min-width:260px; padding:22px; overflow:auto; }
+ /* Divisore trascinabile. La larghezza vive in localStorage, cosi' la
+    proporzione fra il laboratorio e l'analisi resta quella scelta. */
+ #gutter { flex:0 0 9px; cursor:col-resize; background:var(--panel);
+           border-left:1px solid var(--line); border-right:1px solid var(--line); }
+ #gutter:hover, #gutter.drag { background:var(--line); }
+ body.dragging { user-select:none; cursor:col-resize; }
+ h1 { font-size:14px; font-weight:600; margin:0 0 14px; color:var(--dim); }
+ #now { margin-top:18px; min-height:3em; }
+ #now .file { color:var(--dim); word-break:break-all; }
+ audio { margin-top:6px; width:340px; display:block; }
+ #transport { margin-top:6px; font-size:12px; color:var(--dim); }
+ #transport label, #transport button { margin-right:14px; cursor:pointer; }
+ #transport input { vertical-align:-1px; margin-right:3px; }
+
+ /* --- pannello di analisi ------------------------------------------------ */
+ .view { position:relative; margin-bottom:10px; background:var(--panel); }
+ .view canvas { display:block; width:100%; }
+ .view .lab { position:absolute; top:3px; left:6px; font-size:10px; color:var(--dim);
+              pointer-events:none; text-shadow:0 0 3px var(--panel); }
+ /* Il cursore e' un semplice div: nessun ridisegno del canvas per muoverlo. */
+ .cur { position:absolute; top:0; bottom:0; width:1px; background:var(--on);
+        pointer-events:none; left:0; }
+ .seek { cursor:col-resize; }
+ /* I breakpoint proiettati sull'audio: giallo, per non confonderli col
+    cursore di riproduzione (rosso). Si vedono solo quando quello che suona
+    e' il render del laboratorio — sull'ascolto di un sample non vorrebbero
+    dire niente. */
+ .bpm { position:absolute; top:0; bottom:0; width:1px; background:#e8c000;
+        opacity:.55; pointer-events:none; }
+ .bpm.on { opacity:1; width:2px; }
+ .bpm i { position:absolute; top:1px; left:2px; font-size:9px; font-style:normal;
+          color:#e8c000; text-shadow:0 0 3px #000; }
+ /* Il loop sul sample: si disegna trascinando sulla forma d'onda, gli estremi
+    si prendono per allargarlo o stringerlo. Doppio click lo toglie. */
+ .loopr { position:absolute; top:0; bottom:0; background:rgba(74,158,255,.18);
+          border-left:2px solid #4a9eff; border-right:2px solid #4a9eff; pointer-events:none; }
+ .loopr b { position:absolute; top:0; bottom:0; width:10px; cursor:ew-resize; pointer-events:auto; }
+ .loopr b.a { left:-6px; } .loopr b.b { right:-6px; }
+ .pair { display:flex; gap:10px; }
+ .pair .view { flex:1 1 0; margin-bottom:0; }
+ .pair .view:last-child { flex:0 0 auto; }
+ #status { color:var(--dim); font-size:11px; min-height:1.4em; }
+ #ctl { margin-bottom:8px; font-size:12px; }
+ #ctl .k { color:var(--dim); margin-right:6px; }
+ #ctl span + span { margin-left:4px; }
+ #ctl button { font:inherit; color:inherit; background:none; border:1px solid var(--line);
+               padding:0 6px; margin-right:3px; cursor:pointer; }
+ #ctl button.on { border-color:var(--fg); background:var(--fg); color:var(--bg); }
+ #ctl #res { margin-right:14px; }
+
+ /* --- laboratorio del singolo stream ------------------------------------- */
+ #lab .row[hidden] { display:none; }
+ #lab .row { display:grid; grid-template-columns:max-content 1fr; gap:4px 10px;
+             align-items:center; margin-bottom:4px; }
+ /* Terza colonna: il tipo di interpolazione, largo uguale per tutti cosi' i
+    menu restano incolonnati riga dopo riga. */
+ #labParams .row, #labParams .row.capo { grid-template-columns:max-content 1fr 7.5em; }
+ #labParams .row.capo select { border-color:var(--fg); }
+ #labParams .capo .k { color:var(--fg); }
+ /* Il livello piu' largo: scrive su tutti i punti, quindi si vede che e'
+    un'altra cosa rispetto ai due sotto. */
+ #labParams .capo2 select { border-color:var(--on); }
+ #labParams .capo2 .k { color:var(--on); }
+ #labParams .capo2 { margin-bottom:8px; }
+ #labFixed .row.audio { grid-template-columns:max-content 1fr max-content; }
+ #labFixed .row.audio button { font:inherit; color:inherit; background:none;
+                               border:1px solid var(--line); padding:1px 8px;
+                               margin-left:6px; cursor:pointer; }
+ #labFixed .row.audio button:hover { border-color:var(--fg); }
+ /* Il lucchetto chiuso: acceso come il punto corrente, e' uno stato che
+    cambia cosa succede al prossimo cambio di durata. */
+ #labFixed .row.audio button.on { border-color:var(--on); color:var(--on); }
+ #lab .row .k { color:var(--dim); text-align:right; white-space:nowrap; }
+ #lab select, #lab input { font:inherit; color:inherit; background:var(--panel);
+                           border:1px solid var(--line); padding:1px 4px; }
+ #lab input[type=text], #lab input[type=number] { width:9em; }
+ /* campo scrivibile + menu delle tacche, sulla stessa riga */
+ #lab .campo { display:flex; gap:4px; align-items:center; }
+ #lab .campo input { flex:1; width:auto; min-width:0; }
+ #lab .campo select.tacche { width:4.2em; }
+ #lab h2 { font-size:12px; font-weight:600; color:var(--dim); margin:16px 0 6px;
+           text-transform:lowercase; }
+ #lab .bar { margin:10px 0; }
+ #lab #fBar { margin:0 0 14px; padding-bottom:10px; border-bottom:1px solid var(--line); }
+ #lab .bar button { font:inherit; color:inherit; background:none;
+                    border:1px solid var(--line); padding:2px 10px; margin-right:6px;
+                    cursor:pointer; }
+ #lab .bar button:hover { border-color:var(--fg); }
+ #lab .bar button:disabled { opacity:.35; cursor:default; border-color:var(--line); }
+ /* Le voci: un blocco per asse, chiuso finche' non serve. Le righe dentro
+    restano quelle di sempre, stessa griglia a tre colonne. */
+ #labParams details.voce { margin:4px 0 6px; }
+ #labParams details.voce > summary { cursor:pointer; color:var(--dim); }
+ #labParams details.voce > summary b { color:var(--on); font-weight:normal; }
+ #labParams details.voce[open] > summary { margin-bottom:6px; }
+ /* Generare breakpoint a mucchio: chiuso finche' non serve. */
+ #gen { margin:10px 0; }
+ #gen summary { cursor:pointer; color:var(--dim); }
+ #gen .tre, #gen .rule { display:flex; gap:4px; align-items:center; }
+ #gen .tre input, #gen .rule input { width:5.5em; flex:0 0 auto; }
+ #gen .rule { margin:4px 0; }
+ #gen .rule select { flex:0 0 auto; }
+ #gen .rule button { font:inherit; color:inherit; background:none;
+                     border:1px solid var(--line); padding:1px 6px; cursor:pointer; }
+ /* La linea dei breakpoint: una dimensione sola, il tempo. Il punto si
+    trascina, e cliccandolo i select tornano ai valori di quel preset. */
+ #tl { position:relative; height:38px; margin:14px 0 6px; border-bottom:1px solid var(--line);
+       touch-action:none; }
+ #tl .bp { position:absolute; bottom:-6px; width:11px; height:11px; margin-left:-6px;
+           border:1px solid var(--fg); background:var(--bg); border-radius:50%;
+           cursor:grab; }
+ #tl .bp.on { background:var(--on); border-color:var(--on); }
+ /* Presi con la banda: l'anello attorno, che convive col rosso del corrente. */
+ #tl .bp.sel { box-shadow:0 0 0 2px var(--fg); }
+ #tl .banda { position:absolute; top:0; bottom:0; pointer-events:none;
+              background:rgba(128,128,128,.22); border:1px solid var(--fg); }
+ #tl .bp .t { position:absolute; bottom:14px; left:50%; transform:translateX(-50%);
+              font-size:10px; color:var(--dim); white-space:nowrap; }
+ /* Le finestre: il nome da solo non dice niente, la forma si'. */
+ #envs { display:flex; flex-wrap:wrap; gap:6px; margin:2px 0 4px; }
+ #envs button { font:inherit; color:inherit; background:none; border:1px solid var(--line);
+                padding:3px 5px 1px; cursor:pointer; line-height:1; }
+ #envs button:hover { border-color:var(--fg); }
+ #envs button.on { border-color:var(--on); }
+ #envs button.on svg { stroke:var(--on); }
+ #envs svg { display:block; stroke:var(--fg); fill:none; stroke-width:1.2; }
+ #envs .n { font-size:9px; color:var(--dim); display:block; margin-top:2px;
+            text-align:center; }
+ #envs button.on .n { color:var(--fg); }
+ #fFile { color:var(--dim); font-size:11px; margin-left:6px; }
+ #fFile.dirty::after { content:" •  modificato"; color:var(--on); }
+ /* La coppia spectroscope/stereoscope non ha margine sotto: lo mette qui
+    chi le sta sotto. */
+ #envView { margin-top:10px; }
+ /* La legenda degli inviluppi: il colore e il nome, e l'escursione vera
+    (min .. max) che la curva ha percorso — senza, una curva normalizzata
+    sulla propria corsia non dice di che numeri parla. */
+ /* I grani e, a sinistra, la forma d'onda del sample: due canvas affiancati
+    invece di uno solo, cosi' il cursore e il seek dei grani restano in
+    percentuale sulla loro sola larghezza. */
+ #graniRow { display:flex; gap:6px; align-items:flex-start; margin-top:10px; }
+ #graniRow .view { flex:1; min-width:0; margin-bottom:0; }
+ #granwWrap { position:relative; flex:0 0 auto; }
+ #granw { display:block; background:var(--panel); }
+ /* Dove il pointer legge ADESSO: la banda e' l'escursione fra i grani vivi
+    in questo istante (l'offset_range, le voci, la dispersione), la riga il
+    loro centro. Perpendicolari al cursore rosso, e dello stesso colore:
+    sono lo stesso istante, letto sull'altro asse. */
+ #letturaB { position:absolute; left:0; right:0; background:var(--on);
+             opacity:.2; pointer-events:none; }
+ #letturaL { position:absolute; left:0; right:0; height:1px;
+             background:var(--on); pointer-events:none; }
+ #envLeg, #graniLeg { display:flex; flex-wrap:wrap; gap:2px 12px; font-size:10px;
+           color:var(--dim); margin:4px 0 2px; }
+ #graniLeg { color:var(--dim); }
+ #envLeg i { display:inline-block; width:8px; height:2px; margin-right:4px;
+             vertical-align:middle; }
+ #envLeg b { color:var(--fg); font-weight:normal; }
+ #labInfo { color:var(--dim); font-size:11px; min-height:1.4em; margin-top:4px; }
+ #labYaml { white-space:pre; font-size:11px; color:var(--dim); margin-top:10px;
+            max-height:12em; overflow:auto; }
+</style>
+
+<div id="left">
+  <!-- Il laboratorio: si compone UNO stream, breakpoint per breakpoint, e lo
+       si rende al volo. E' il documento che poi va nella timeline di PGE-ui. -->
+  <div id="lab">
+    <h1 id="h"></h1>
+    <div class="bar" id="fBar">
+      <button id="fNew">nuovo</button>
+      <button id="fOpen">apri…</button>
+      <select id="fRecent" hidden></select>
+      <button id="fSave">salva</button>
+      <button id="fSaveAs">salva con nome…</button>
+      <span id="fFile"></span>
+    </div>
+    <div id="labFixed"></div>
+    <h2>parametri</h2>
+    <div id="labParams"></div>
+    <div class="bar">
+      <button id="bpAdd">+ breakpoint</button>
+      <button id="bpSave">salva modifica</button>
+      <button id="bpAll" title="scrive i soli valori che hai appena cambiato su tutti i breakpoint">applica a tutti</button>
+      <button id="bpDel" title="delete — i selezionati se c'e' una banda, se no il punto corrente">togli ⌫</button>
+      <button id="labRender">rendi e ascolta</button>
+    </div>
+    <details id="gen">
+      <summary>genera breakpoint</summary>
+      <div id="genBox"></div>
+    </details>
+    <div id="tl"></div>
+    <div id="labInfo"></div>
+    <div id="labYaml"></div>
+  </div>
+
+  <div id="now"></div>
+  <audio id="a" controls></audio>
+  <div id="transport">
+    <button id="daCapo" title="riparte dall'inizio (o dall'inizio del loop)">⏮ da capo</button>
+    <label><input type="checkbox" id="loop"> loop</label>
+    <label title="ritardo fra l'audio prodotto e quello che senti: il cursore resta indietro di tanto">latenza <input type="number" id="lat" min="0" max="1000" step="5" style="width:4.5em"> ms</label>
+  </div>
+</div>
+
+<div id="gutter" title="trascina per ridimensionare"></div>
+
+<div id="right">
+  <div id="ctl">
+    <span class="k">scala</span><span id="scale"></span>
+    <span class="k">risoluzione</span><span id="res"></span>
+  </div>
+  <div class="view seek" id="specView">
+    <canvas id="spec" height="320"></canvas>
+    <div class="lab">sonogramma — x tempo, y frequenza (log)</div>
+    <div class="cur" id="curSpec"></div>
+  </div>
+  <div class="view seek" id="waveView">
+    <canvas id="wave" height="180"></canvas>
+    <div class="lab">forma d'onda — sul sample: trascina per il loop, doppio click lo toglie</div>
+    <div class="cur" id="curWave"></div>
+  </div>
+  <div class="pair">
+    <div class="view">
+      <canvas id="scope" height="180"></canvas>
+      <div class="lab">spectroscope — x frequenza (log), y dinamica (dB)</div>
+    </div>
+    <div class="view">
+      <canvas id="stereo" width="180" height="180"></canvas>
+      <div class="lab">stereoscope</div>
+    </div>
+  </div>
+  <!-- Gli inviluppi REALIZZATI dallo stream, come la corsia di uno stream
+       nella partitura: le curve della IR, ognuna scalata sulla propria
+       escursione. Compare solo quando a suonare e' un render del laboratorio. -->
+  <div class="view seek" id="envView" hidden>
+    <canvas id="envc" height="200"></canvas>
+    <div class="lab">inviluppi — le curve dello stream, ognuna sulla propria escursione</div>
+    <div class="cur" id="curEnv"></div>
+  </div>
+  <div id="envLeg"></div>
+  <!-- I GRANI, come nel piano dei grani della partitura: x il tempo d'uscita,
+       y la posizione di lettura nel sample, il colore l'altezza. Compare solo
+       quando a suonare e' un render del laboratorio. -->
+  <div id="graniRow" hidden>
+    <div id="granwWrap">
+      <canvas id="granw" width="90" height="260"
+              title="forma d'onda del sample — y il tempo nel file, lo stesso asse dei grani accanto"></canvas>
+      <div id="letturaB" hidden></div>
+      <div id="letturaL" hidden></div>
+    </div>
+    <div class="view seek" id="graniView">
+      <canvas id="granic" height="260"></canvas>
+      <div class="lab">grani — x tempo, y posizione di lettura nel sample</div>
+      <div class="cur" id="curGrani"></div>
+    </div>
+  </div>
+  <div id="graniLeg"></div>
+  <div id="status"></div>
+</div>
+
+<script>
+const D = __DATA__;
+// Vero quando l'audio caricato e' il render del laboratorio: solo allora i
+// breakpoint e gli inviluppi si possono proiettare sul suono (`marcaAudio`).
+let LAB_AUDIO = false;
+// Vero quando suona un sample (`ascolta`): solo li' la forma d'onda e' il
+// sample stesso, e una regione disegnata sopra e' un loop_start/loop_end.
+let SAMPLE_AUDIO = false;
+// Etichette: cinque decimali, senza zeri di coda. `0.000020833333333333333`
+// diventa `0.00002` — il valore esatto resta nel nome del file, che e' la
+// fonte di verita'. Sotto i cinque decimali si passa all'esponenziale invece
+// di mostrare uno zero che sarebbe falso.
+function fmt(v) {
+  if (typeof v === "string") return v;   // asse categoriale (grain.envelope)
+  if (v === 0) return "0";
+  const r = Number(v.toFixed(5));
+  return r === 0 ? v.toExponential(1) : String(r);
+}
+
+const audio = document.getElementById("a");
+const status = document.getElementById("status");
+
+// Dove si sta scrivendo, la tastiera e' di chi scrive: le frecce muovono il
+// cursore, shift+frecce selezionano, la barra spaziatrice fa uno spazio e
+// backspace cancella una cifra. Gli scorciatoi della pagina — trasporto,
+// undo, delete — si fanno da parte.
+function inCampo(t) {
+  return /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable;
+}
+
+addEventListener("keydown", e => {
+  if (inCampo(e.target)) return;
+  // I bottoni tengono il focus dopo un click, e col focus la barra spaziatrice
+  // li ripremerebbe invece di comandare il trasporto.
+  if (e.target.tagName === "BUTTON") e.target.blur();
+  if (e.key === " ") {
+    e.preventDefault();
+    if (audio.paused) audio.play(); else audio.pause();
+  }
+});
+
+
+// ===========================================================================
+// Laboratorio: si compone UNO stream e lo si sente.
+// Ogni breakpoint e' uno snapshot di tutti i parametri a un tempo;
+// il documento YAML lo ricava da se', mettendo una lista di punti solo dove
+// il valore cambia davvero (vedi `serie`).
+const L = D.lab || {base:{}, params:[]};
+// I tre tipi che l'engine conosce (InterpolationStrategyFactory). Il tipo sta
+// sul punto e vale per il segmento che PARTE da li'; l'ultimo non ne ha uno.
+const INTERP = ["linear", "cubic", "step"];
+// `grain.envelope` si automatizza come gli altri, ma il suo valore e' un nome
+// e non un numero: l'engine non interpola fra due finestre, le sceglie grano
+// per grano. Sul documento diventa {states, curve} — la MultiStateWindowStrategy
+// che l'engine gia' conosce — dove `step` da' il cambio netto e `linear` il
+// morphing progressivo. Gli altri categoriali restano fissi per lo stream.
+const EP = "grain.envelope";
+
+// --- le voci ---------------------------------------------------------------
+// Il blocco `voices:` dell'engine: quattro assi ortogonali — pitch, onset,
+// pointer, pan — ognuno con la sua strategia, e la voce 0 sempre riferimento
+// (offset zero su ogni asse). Strategie e parametri sono quelli che PGE-ui
+// tiene in `src/components/VoicesSection.jsx`; qui non c'e' un pannello a
+// parte, sono righe del laboratorio come tutte le altre.
+//
+// Cosa sta sui breakpoint e cosa no lo decide l'engine, non l'estetica:
+// `_parse_strategy_kwarg` (core/stream.py) fa diventare Envelope qualunque
+// kwarg envelope-like, quindi step / pitch_range / max_offset / base /
+// pointer_range / spread — piu' num_voices e scatter — si automatizzano.
+// strategy, unit, chord, max_partial e il flag normalized sono struttura e
+// restano fissi per lo stream. L'eccezione e' `chord_progression`: li'
+// l'accordo E' funzione del tempo, e lo fa coi breakpoint come `grain.envelope`.
+const STRAT = {
+  pitch: ["step", "range", "chord", "chord_progression", "stochastic", "spectral"],
+  onset_offset: ["linear", "geometric", "stochastic"],
+  pointer: ["linear", "stochastic"],
+  pan: ["range", "stochastic", "step"],
+};
+// Gli accordi (CHORD_INTERVALS dell'engine), raggruppati per numero di note:
+// il gruppo dice quanti rivolti ha l'accordo.
+const CORDE = {
+  "3 voci": ["maj", "min", "dim", "aug", "sus2", "sus4"],
+  "4 voci": ["dom7", "maj7", "min7", "dim7", "minmaj7"],
+  "5 voci": ["dom9", "maj9", "min9", "9sus4"],
+  "6 voci": ["dom9s11", "maj9s11", "min11"],
+  "7 voci": ["dom13", "min13", "maj13s11", "altered"],
+};
+const ACCORDI = [].concat(...Object.values(CORDE));
+const NOTE_DI = {};
+Object.values(CORDE).forEach((cs, i) => cs.forEach(c => { NOTE_DI[c] = i + 3; }));
+// Le unita' di pitch (PITCH_UNIT_PRESETS): `edo` e' l'unica che porta un
+// numero con se' (`unit: {edo: N}`), e ha percio' il suo campo accanto.
+// chord / chord_progression / spectral sono semitone-locked: li' l'unita' non
+// si sceglie, e infatti non compare.
+const UNITA = ["semitones", "cents", "quarter_tone", "eighth_tone", "edo", "ratio"];
+// [asse, chiave, {def, cat: tacche, bp: sta sui breakpoint, str: strategie che la usano}]
+const VOCI_P = [
+  ["", "num_voices", {def: 1, bp: 1, min: 1, max: 256}],
+  ["", "scatter", {def: 0, bp: 1, min: 0, max: 1}],
+
+  ["pitch", "strategy", {cat: STRAT.pitch, def: "off"}],
+  ["pitch", "unit", {cat: UNITA, def: "semitones", str: ["step", "range", "stochastic"]}],
+  ["pitch", "edo", {def: 12, str: ["step", "range", "stochastic"], nome: "edo · divisioni"}],
+  ["pitch", "step", {def: 3, bp: 1, str: ["step"]}],
+  ["pitch", "pitch_range", {def: 12, bp: 1, str: ["range", "stochastic"]}],
+  ["pitch", "chord", {cat: ACCORDI, def: "dom7", str: ["chord"]}],
+  ["pitch", "progression", {cat: ACCORDI, def: "maj7", bp: 1, str: ["chord_progression"],
+                            nome: "accordo · nel tempo"}],
+  ["pitch", "inversion", {def: 0, bp: 1, noint: 1, str: ["chord", "chord_progression"],
+                          nome: "rivolto"}],
+  ["pitch", "voice_leading", {cat: ["nearest", "positional"], def: "nearest",
+                              str: ["chord_progression"]}],
+  ["pitch", "max_partial", {def: 16, str: ["spectral"]}],
+
+  ["onset_offset", "strategy", {cat: STRAT.onset_offset, def: "off"}],
+  ["onset_offset", "step", {def: 0.05, bp: 1, str: ["linear", "geometric"]}],
+  ["onset_offset", "base", {def: 2, bp: 1, str: ["geometric"]}],
+  ["onset_offset", "max_offset", {def: 0.1, bp: 1, str: ["stochastic"]}],
+
+  ["pointer", "strategy", {cat: STRAT.pointer, def: "off"}],
+  ["pointer", "step", {def: 0.1, bp: 1, str: ["linear"]}],
+  ["pointer", "pointer_range", {def: 0.02, bp: 1, str: ["stochastic"]}],
+  ["pointer", "normalized", {cat: ["no", "si"], def: "no", str: STRAT.pointer,
+                             nome: "normalized · frazione del sample"}],
+
+  ["pan", "strategy", {cat: STRAT.pan, def: "off"}],
+  ["pan", "spread", {def: 60, bp: 1, str: ["range", "stochastic"]}],
+  ["pan", "step", {def: 15, bp: 1, str: ["step"]}],
+];
+const VOCI = VOCI_P.map(([dim, k, o]) => ({
+  path: "voices." + (dim ? dim + "." : "") + k,
+  voce: dim || "voci", dim: dim, chiave: k, nome: o.nome || k,
+  kind: o.cat ? "cat" : "num",
+  // `off` non e' una strategia dell'engine: e' l'assenza del blocco, ed e'
+  // `vociDoc` a toglierlo dal documento.
+  values: k === "strategy" ? ["off"].concat(o.cat) : (o.cat || []),
+  bp: !!o.bp, noint: !!o.noint, str: o.str || null,
+  def: o.def, min: o.min, max: o.max,
+}));
+L.params = L.params.concat(VOCI);
+
+// --- il pointer: start e loop ------------------------------------------------
+// Cosa si automatizza l'ha deciso l'engine (pointer_controller.py e
+// POINTER_PARAMETER_SCHEMA): `loop_start` e `loop_end` sono Parameter e
+// reggono un inviluppo — il loop mobile — mentre `start` e' grezzo e un
+// envelope lo rifiuta, e `loop_unit` e' la meta-chiave che dice come leggere
+// tutti e tre. `pointer.loop` non e' dell'engine: e' la presenza delle chiavi,
+// come `off` per le voci, e lo toglie `scriviLoop`.
+// La regione disegnata sulla forma d'onda del sample E' questa coppia di
+// campi: disegnarla li scrive, scriverli la sposta.
+const PUNT = [
+  {path: "pointer.start", kind: "num", free: true, values: [], bp: false, def: 0},
+  {path: "pointer.loop", kind: "cat", values: ["off", "on"], bp: false, def: "off"},
+  {path: "pointer.loop_unit", kind: "cat", values: ["normalized", "seconds"], bp: false,
+   def: "normalized"},
+  {path: "pointer.loop_start", kind: "num", free: true, values: [], def: 0, min: 0},
+  {path: "pointer.loop_end", kind: "num", free: true, values: [], def: 1, min: 0},
+];
+const PUNTI = new Set(PUNT.map(p => p.path));
+L.params = L.params.filter(p => !PUNTI.has(p.path)).concat(PUNT);
+const VOCI_DI = Object.fromEntries(VOCI.map(p => [p.path, p]));
+
+// Dove finisce ogni parametro: sui breakpoint (`bp`) o fisso per lo stream.
+// I numerici dello study.yml ci stanno tutti; fra i categoriali ci arrivano
+// solo i due che l'engine sa far cambiare nel tempo senza interpolare — la
+// finestra e l'accordo della progressione.
+for (const p of L.params) if (p.bp === undefined) p.bp = p.kind === "num" || p.path === EP;
+const NUM = L.params.filter(p => p.bp && p.kind === "num");
+const ENVP = L.params.find(p => p.path === EP && p.kind !== "num") || null;
+const PROG = VOCI_DI["voices.pitch.progression"];
+const CAT = L.params.filter(p => !p.bp);
+// I parametri che stanno sui breakpoint: i numerici, l'envelope, l'accordo.
+const AUT = L.params.filter(p => p.bp);
+
+// Da dove parte il laboratorio. Non sono i valori di `base:` — quello e' lo
+// stream a riposo dello *sweep*, tarato per i render del sweep (volume 12
+// compensa un sample crudo, speed_ratio 0.1 accompagna il passo dello sweep).
+// Qui serve un punto di partenza neutro per l'ascolto: grana media, niente
+// dispersione, niente trasposizione. Un parametro che non e' in questa tabella
+// parte da `base:`, e se manca anche li' dalla sua prima tacca.
+// La durata dello stream composto qui: un default solo, in un posto solo.
+const DUR = 30;
+
+const DEFAULTS = {
+  "grain.duration": 0.064,
+  "grain.duration_range": 0,
+  "grain.envelope": "gaussian",
+  "fill_factor": 2,
+  "pitch.ratio": 1,
+  "pitch.range": 0,
+  "pointer.speed_ratio": 1,
+  "pointer.offset_range": 0,
+  "distribution": 0,
+  "volume": 0,
+  "pan_range": 0,
+};
+
+function iniziale(p) {
+  // I parametri delle voci portano il proprio default nella tabella: non
+  // stanno nello study.yml, e in `base:` non c'e' niente da ereditare.
+  if (p.def !== undefined) return p.def;
+  const d = DEFAULTS[p.path];
+  if (d !== undefined) return d;
+  const b = leggiPath(L.base, p.path);
+  if (b !== undefined && b !== null) return b;
+  return p.values.length ? p.values[0] : (p.free ? 0 : "");
+}
+
+let bps = [];        // [{t, vals:{path: numero}}] — sempre ordinati per t
+// Il loop del pointer sta nei campi `pointer.*` (vedi PUNT). Si parte SEMPRE
+// senza (`pointer.loop: off`): il pointer percorre il file intero. Il loop di
+// `base:` e' una scelta dello sweep, non il punto di partenza di un ascolto.
+
+// Undo/redo. Lo stato che si annulla e' tutto il lavoro: i breakpoint, il
+// loop, il punto selezionato E i valori a schermo — quelli che hai cambiato
+// ma non ancora salvato sul breakpoint sono lavoro come gli altri, e un undo
+// che li lasciasse fermi annullerebbe meta' di quello che vedi.
+// Si registra in `labInfo`, che chiude ogni modifica (drawTl finisce li'),
+// tranne mentre un gesto e' in corso (`GESTO`): un trascinamento e' UN passo,
+// non cento. `istantanea()` e' anche il confronto: se non cambia niente, non
+// si registra niente.
+let STORIA = [], ISTO = -1, GESTO = false;
+
+function istantanea() {
+  // La durata sta qui perche' col lucchetto chiuso decide dove cadono i
+  // punti: riportare indietro i breakpoint senza di lei lascerebbe i tempi
+  // in secondi diversi da quelli che l'undo doveva ripristinare.
+  return JSON.stringify({bps, cur: curBp, dur: durata(), vals: snapshot(),
+                         ints: snapInterp(), cat: snapFissi()});
+}
+
+function storia() {
+  const s = istantanea();
+  if (STORIA[ISTO] === s) return;
+  STORIA.splice(ISTO + 1);        // modificare dopo un undo taglia il redo
+  STORIA.push(s);
+  if (STORIA.length > 200) STORIA.shift();
+  ISTO = STORIA.length - 1;
+}
+
+// Aprire un file, o ricominciare, azzera la storia: l'undo non deve
+// riportare indietro i breakpoint di un altro documento.
+function storiaReset() { STORIA = []; ISTO = -1; }
+
+function vaiStoria(d) {
+  const i = ISTO + d;
+  if (i < 0 || i >= STORIA.length) {
+    document.getElementById("labInfo").textContent =
+      d < 0 ? "niente da annullare" : "niente da rifare";
+    return;
+  }
+  ISTO = i;
+  const s = JSON.parse(STORIA[i]);
+  bps = s.bps; SELEZIONE.clear();
+  for (const [path, v] of Object.entries(s.cat || {})) setSel(path, v);
+  if (s.dur != null) { document.getElementById("labDur").value = s.dur; DURPREC = s.dur; }
+  curBp = Math.min(s.cur, bps.length - 1);
+  // A schermo torna quello che c'era a schermo, non i valori del breakpoint:
+  // e' `bpLoad` che li riallinea, e qui riallinearli cancellerebbe proprio le
+  // modifiche non salvate che l'undo deve riportare indietro.
+  for (const [path, v] of Object.entries(s.vals || {})) setSel(path, v);
+  for (const p of AUT) {
+    const el = document.getElementById("I:" + p.path);
+    if (el) el.value = (s.ints || {})[p.path] || "linear";
+  }
+  // GESTO tiene fermo il registratore: ripristinare non e' una modifica.
+  GESTO = true;
+  drawTl();
+  GESTO = false;
+  document.getElementById("labInfo").textContent =
+    (d < 0 ? "annullato" : "rifatto") + "  (" + (ISTO + 1) + "/" + STORIA.length + ")";
+}
+
+addEventListener("keydown", e => {
+  if (e.key.toLowerCase() !== "z" || !(e.metaKey || e.ctrlKey)) return;
+  // In un campo di testo cmd+Z e' l'undo del testo: non glielo si toglie.
+  if (inCampo(e.target)) return;
+  e.preventDefault();
+  vaiStoria(e.shiftKey ? 1 : -1);
+});
+
+// Il loop come frazioni del sample, [inizio, fine], per disegnarlo e
+// sentirlo: sono i campi a schermo (il breakpoint selezionato). In secondi
+// serve la durata del sample, che si sa solo quando lo si ascolta.
+function loopFrac() {
+  if (valFisso("pointer.loop") !== "on") return null;
+  const n = k => Number(String(valFisso("pointer." + k)).replace(",", "."));
+  let a = n("loop_start"), b = n("loop_end");
+  if (valFisso("pointer.loop_unit") === "seconds") {
+    if (!view || !view.duration) return null;
+    a /= view.duration; b /= view.duration;
+  }
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  return [Math.max(0, Math.min(1, a)), Math.max(0, Math.min(1, b))];
+}
+
+// La regione disegnata (frazioni) scritta nei campi. Un loop fermo resta
+// fermo: si sposta su tutti i breakpoint. Uno che si muove gia' cambia solo
+// sul punto corrente, come un valore salvato li'.
+function loopDisegna(a, b) {
+  const sec = valFisso("pointer.loop_unit") === "seconds" ? view.duration : 1;
+  const r = v => Math.round(v * sec * 1e4) / 1e4;
+  const vals = {"pointer.loop_start": r(a), "pointer.loop_end": r(b)};
+  const fermo = valFisso("pointer.loop") !== "on" ||
+                !Object.keys(vals).some(k => Array.isArray(serie(k)));
+  setSel("pointer.loop", "on");
+  for (const [k, v] of Object.entries(vals)) setSel(k, v);
+  bps.forEach((bp, i) => { if (fermo || i === curBp) Object.assign(bp.vals, vals); });
+  drawTl();
+}
+
+// Sul documento: `pointer.loop` non e' una chiave dell'engine, e spento
+// porta via loop_start/loop_end. `start` a 0 non si scrive: e' il default, e
+// con un loop acceso il pointer parte cosi' da loop_start invece di
+// arrivarci. `loop_unit` resta solo se c'e' qualcosa da leggere con lui.
+// `loop_dur` non ha un campo: quello di `base:` sparisce.
+function scriviLoop(st) {
+  const p = st.pointer = st.pointer || {};
+  const on = p.loop === "on";
+  delete p.loop; delete p.loop_dur;
+  if (!on) { delete p.loop_start; delete p.loop_end; }
+  if (!Number(p.start)) delete p.start;
+  if (!on && p.start === undefined) delete p.loop_unit;
+}
+
+// L'inverso, riaprendo: i campi fissi del pointer dal documento. Senza
+// `loop_unit` l'engine legge in secondi, e cosi' li si mostra.
+// ponytail: un `loop_dur` diventa loop_end = loop_start + loop_dur solo se
+// sono scalari, e oltre la fine del file si taglia; un loop_dur inviluppo
+// si perde. Un campo `loop_dur` se servira' il loop che scavalca la fine.
+function leggiLoop(st) {
+  const p = st.pointer = st.pointer || {};
+  if (p.loop_end == null && typeof p.loop_dur === "number" && typeof p.loop_start === "number")
+    p.loop_end = p.loop_start + p.loop_dur;
+  const on = p.loop_start != null;
+  const scritto = on || Number(p.start || 0) !== 0 || p.loop_unit != null;
+  return {"pointer.loop": on ? "on" : "off", "pointer.start": p.start ?? 0,
+          "pointer.loop_unit": p.loop_unit === "normalized" || !scritto ? "normalized" : "seconds"};
+}
+
+// Le righe di loop_start/loop_end ci sono solo col loop acceso.
+function loopVis() {
+  const on = valFisso("pointer.loop") === "on";
+  for (const k of ["loop_start", "loop_end"]) {
+    const el = document.getElementById("P:pointer." + k);
+    if (el) el.closest(".row").hidden = !on;
+  }
+}
+let curBp = -1;
+
+function labInit() {
+  document.getElementById("h").textContent = D.study;
+  if (!L.params.length) {
+    document.getElementById("lab").innerHTML =
+      "<p>lo study.yml non dichiara parametri con <code>values</code>.</p>";
+    return;
+  }
+  const mk = (p, box) => {
+    const r = document.createElement("div"); r.className = "row";
+    const k = document.createElement("div"); k.className = "k";
+    // Dentro il blocco di un asse delle voci il path per intero sarebbe
+    // ridondante: la linguetta dice gia' di che asse si parla.
+    k.textContent = p.nome || p.path;
+    // Un numerico si sceglie E si scrive: il campo tiene il valore, il menu
+    // accanto offre le tacche dello study.yml. `free` (il volume) e' lo
+    // stesso campo senza menu, perche' tacche non ne ha. Il resto del
+    // laboratorio non se ne accorge: legge `P:<path>`.value come prima.
+    const libero = p.free || p.kind === "num";
+    const s = document.createElement(libero ? "input" : "select");
+    s.id = "P:" + p.path;
+    if (libero) {
+      // type=text e non number: le frecce e il passo di un `number` non
+      // servono a niente su una scala logaritmica. Il valore lo converte
+      // gia' `Number(...)` a valle.
+      s.type = "text";
+      s.inputMode = "decimal";
+      // I limiti dell'engine non bloccano piu' il campo (type=text): restano
+      // come suggerimento sul passaggio del mouse.
+      if (p.min != null || p.max != null) s.title = p.min + " .. " + p.max;
+      s.value = iniziale(p);
+      if (p.values.length) {
+        // Le tacche restano un menu vero accanto al campo: la datalist da
+        // sola, in Safari, non si vede nemmeno. Si sceglie da li' oppure si
+        // scrive nel campo; il menu torna subito al suo `▾` perche' il
+        // valore buono e' uno solo, quello scritto nel campo.
+        const men = document.createElement("select");
+        men.className = "tacche";
+        men.title = "le tacche dello study.yml";
+        men.appendChild(new Option("▾", ""));
+        for (const v of p.values) men.appendChild(new Option(fmt(v), v));
+        men.onchange = () => {
+          if (!men.value) return;
+          s.value = men.value;
+          men.selectedIndex = 0;
+          s.dispatchEvent(new Event("change"));
+        };
+        const campo = document.createElement("div");
+        campo.className = "campo";
+        campo.appendChild(s); campo.appendChild(men);
+        r.appendChild(k); r.appendChild(campo); box.appendChild(r);
+        return;
+      }
+    } else {
+      for (const v of p.values) {
+        const o = document.createElement("option");
+        o.value = v; o.textContent = fmt(v);
+        s.appendChild(o);
+      }
+      s.value = iniziale(p);
+      // Un default che non e' fra le tacche lascerebbe il menu vuoto: li'
+      // vale la prima, che e' cio' che il menu faceva da solo.
+      if (!s.value && p.values.length) s.value = p.values[0];
+    }
+    r.appendChild(k); r.appendChild(s); box.appendChild(r);
+  };
+  const fixed = document.getElementById("labFixed");
+  // `grain.envelope`: tutte le finestre dell'engine, non solo quelle rimaste
+  // nello study.yml — non e' un asse, e' una scelta per stream — e ognuna col
+  // suo profilo disegnato, che e' l'unica cosa che le distingue davvero.
+  const ENV = L.envelopes || {};
+  fixed.innerHTML = "<h2>fissi per lo stream</h2>";
+  for (const p of CAT) if (!p.voce) mk(p, fixed);
+  ascoltoSample(fixed);
+  for (const [id, lab, val, type] of [["labDur", "durata (s)", DUR, "number"],
+                                      ["labName", "nome", NOME0, "text"]]) {
+    const r = document.createElement("div"); r.className = "row";
+    const k = document.createElement("div"); k.className = "k"; k.textContent = lab;
+    const i = document.createElement("input");
+    i.id = id; i.type = type; i.value = val;
+    r.appendChild(k); r.appendChild(i); fixed.appendChild(r);
+  }
+  lucchetto();
+  bottoneSegui();
+  const box = document.getElementById("labParams");
+  // Tre livelli, dal piu' largo al piu' stretto: tutti i breakpoint -> questo
+  // breakpoint -> il singolo parametro. Si decide in blocco e poi si fanno le
+  // eccezioni, che e' l'ordine in cui si lavora davvero.
+  // Il tempo del breakpoint selezionato si scrive, non solo si trascina: a
+  // mano 0.14 e' 0.14, col mouse e' quel che capita. Vale subito, come il
+  // trascinamento — non passa da `salva modifica`, che riguarda i valori.
+  const bpT = document.createElement("input");
+  bpT.id = "bpT"; bpT.type = "text"; bpT.inputMode = "decimal";
+  bpT.onchange = () => {
+    if (curBp < 0) return;
+    const b = bps[curBp];
+    const v = Number(bpT.value.trim().replace(",", "."));
+    if (!Number.isFinite(v)) { bpT.value = b.t.toFixed(3); return; }
+    b.t = Math.min(1, Math.max(0, v));
+    bps.sort((x, y) => x.t - y.t);      // come dopo un trascinamento
+    curBp = bps.indexOf(b);
+    drawTl();
+  };
+  const rT = document.createElement("div");
+  rT.className = "row capo";
+  rT.innerHTML = "<div class='k'>tempo (0-1)</div>";
+  rT.appendChild(bpT);
+  box.appendChild(rT);
+
+  const ovunque = mkInterp("**");
+  ovunque.onchange = () => {
+    // Questo scrive subito su TUTTI i punti: non e' una proposta da salvare,
+    // e' la decisione che azzera le eccezioni fatte finora.
+    for (const b of bps) {
+      b.ints = b.ints || {};
+      for (const p of AUT) if (!p.noint) b.ints[p.path] = ovunque.value;
+    }
+    for (const p of AUT) if (!p.noint) document.getElementById("I:" + p.path).value = ovunque.value;
+    drawTl();
+    document.getElementById("labInfo").textContent =
+      "interpolazione " + ovunque.value + " su tutti i " + bps.length + " breakpoint";
+  };
+  box.appendChild(riga("interpolazione (tutti)", ovunque, "capo capo2"));
+
+  const tutti = mkInterp("*");
+  tutti.onchange = () => {
+    for (const p of AUT) if (!p.noint) document.getElementById("I:" + p.path).value = tutti.value;
+    labInfo();
+  };
+  box.appendChild(riga("interpolazione (questo bp)", tutti, "capo"));
+  for (const p of NUM) if (!p.voce) { mk(p, box); box.lastChild.appendChild(mkInterp(p.path)); }
+  if (ENVP) {
+    if (Object.keys(ENV).length) mkEnv(ENVP, box, ENV); else mk(ENVP, box);
+    box.lastChild.appendChild(mkInterp(EP));
+  }
+  vociInit(mk);
+  document.getElementById("bpAdd").onclick = bpAdd;
+  document.getElementById("bpSave").onclick = bpSave;
+  document.getElementById("bpAll").onclick = bpAll;
+  document.getElementById("bpDel").onclick = bpDel;
+  genInit();
+  // Cambiare un select su un breakpoint selezionato non lo modifica da solo:
+  // finche' non si salva, i valori a schermo e quelli del punto divergono, e
+  // e' l'unica cosa che si puo' guardare senza accorgersene. Lo dice l'info.
+  for (const p of NUM) if (!p.voce) document.getElementById("P:" + p.path).onchange = labInfo;
+  for (const path of PUNTI) document.getElementById("P:" + path).onchange = drawTl;
+  if (ENVP) ENVCB = labInfo;
+  document.getElementById("labRender").onclick = labRender;
+  document.getElementById("fNew").onclick = fNew;
+  document.getElementById("fOpen").onclick = fOpen;
+  document.getElementById("fSave").onclick = () => fSave(false);
+  document.getElementById("fSaveAs").onclick = () => fSave(true);
+  segna();
+  avvio();
+}
+
+// Il lucchetto vive sulla riga della durata, perche' e' di quella che parla.
+function lucchetto() {
+  const dur = document.getElementById("labDur");
+  DURPREC = durata();
+  const b = document.createElement("button");
+  const segna = () => {
+    b.textContent = LUCCHETTO ? "lucchetto chiuso" : "lucchetto aperto";
+    b.classList.toggle("on", LUCCHETTO);
+    b.title = LUCCHETTO
+      ? "i breakpoint tengono il loro tempo in secondi e si ridispongono"
+      : "i breakpoint restano dove sono e si stirano con la durata";
+  };
+  b.onclick = () => { LUCCHETTO = !LUCCHETTO; segna(); };
+  segna();
+  dur.parentNode.classList.add("audio");   // la riga a tre colonne, col bottone
+  dur.parentNode.appendChild(b);
+  dur.onchange = () => {
+    const n = durata();
+    const persi = LUCCHETTO ? ridimensiona(DURPREC, n) : 0;
+    DURPREC = n;
+    mostraBp();
+    if (persi) document.getElementById("labInfo").textContent =
+      persi + (persi === 1 ? " breakpoint usciva" : " breakpoint uscivano")
+      + " dalla nuova durata: tolti, con il punto di chiusura al bordo";
+  };
+}
+
+// Sotto il lucchetto, perche' parla anche lui del tempo: acceso, i parametri
+// smettono di mostrare il breakpoint selezionato e mostrano dove sono adesso.
+function bottoneSegui() {
+  const dur = document.getElementById("labDur");
+  const r = document.createElement("div");
+  r.className = "row audio";
+  r.innerHTML = "<div class='k'>segui</div><div></div>";
+  const b = document.createElement("button");
+  b.textContent = "segui il render";
+  b.title = "mentre suona, i parametri mostrano il valore degli inviluppi al cursore";
+  b.onclick = () => {
+    SEGUI = !SEGUI;
+    b.classList.toggle("on", SEGUI);
+    if (!SEGUI) mostraBp();     // si torna al punto selezionato
+  };
+  r.appendChild(b);
+  dur.parentNode.after(r);
+}
+
+// Chiamata a ogni frame dal cursore: scrive e basta, non salva niente.
+function mostraSegui(t) {
+  if (!SEGUI || !LAB_AUDIO) return;
+  const b = bpA(Math.min(1, Math.max(0, t / (ENVDUR || durata()))));
+  if (!b) return;
+  for (const [path, v] of Object.entries(b.vals)) setSel(path, v);
+}
+
+// Il sample si sente PRIMA di sceglierlo, come nel browser dei media di
+// PGE-ui — ma senza popup: il pannello di destra e' gia' un lettore completo
+// (sonogramma, forma d'onda, spectroscope, stereoscope, cursore che si
+// trascina, durata e frequenza di campionamento nella riga di stato). Un
+// secondo lettore dentro una finestra sarebbe lo stesso codice due volte, in
+// meno spazio.
+function ascoltoSample(fixed) {
+  const sel = document.getElementById("P:sample");
+  if (!sel) return;
+  sel.parentNode.classList.add("audio");
+  const b = document.createElement("button");
+  b.textContent = "▶ ascolta";
+  b.title = "sente il sample nel pannello di destra (spazio: play/pausa)";
+  b.onclick = () => ascolta(sel.value);
+  sel.parentNode.appendChild(b);
+  // Il ritorno: l'ultimo render dello stream e' ancora sul disco e i suoi
+  // campioni sono ancora nella cache dell'analisi, quindi tornarci e'
+  // immediato e non rende niente. Senza questo, per riascoltare lo stream
+  // dopo un sample bisognerebbe ri-renderizzarlo.
+  TORNA = document.createElement("button");
+  TORNA.textContent = "↩ stream";
+  TORNA.title = "torna all'ultimo render dello stream";
+  TORNA.disabled = true;
+  TORNA.onclick = () => riprendiStream();
+  sel.parentNode.appendChild(TORNA);
+  // Cambiare sample lo fa partire: scegliere un materiale E' ascoltarlo, e
+  // un click in meno per ogni file conta quando se ne provano trenta.
+  sel.onchange = () => { ascolta(sel.value); bozzaSalva(); segna(); };
+}
+
+// L'ultimo render del laboratorio, per poterci tornare dopo aver ascoltato
+// un sample. Il bottone e' spento finche' non c'e' niente dove tornare.
+let ULTIMO = "";
+let TORNA = null;
+
+// Che cosa sta suonando. Lo scriveva anche la griglia, che non c'e' piu':
+// restano lo stream reso e il sample che si sta provando.
+function ora(tipo, nome) {
+  document.getElementById("now").innerHTML =
+    "<b>" + tipo + "</b><br><span class='file'>" + nome + "</span>";
+}
+
+function riprendiStream() {
+  if (!ULTIMO) return;
+  ora("stream", document.getElementById("labName").value || NOME0);
+  LAB_AUDIO = true;
+  SAMPLE_AUDIO = false;
+  audio.src = ULTIMO;
+  audio.play();
+  analyse(ULTIMO);
+  marcaAudio();
+}
+
+// `/samples/` non sta sotto lo studio: e' il server che lo mappa sulla
+// cartella dei sample del repo (serve.translate_path).
+async function ascolta(nome) {
+  if (!nome) return;
+  const url = "/samples/" + nome.split("/").map(encodeURIComponent).join("/");
+  // Il caso vero: un `make serve` avviato prima che questa rotta esistesse.
+  // Senza questo controllo l'audio non parte e non lo dice nessuno — e' lo
+  // stesso silenzio che `post` evita sulle rotte POST.
+  const r = await fetch(url, {method: "HEAD"}).catch(() => null);
+  if (!r || !r.ok) {
+    document.getElementById("labInfo").textContent = r && r.status === 404
+      ? "il server non serve /samples/: e' una versione vecchia (o un altro "
+        + "studio), fermalo con Ctrl-C e rilancia `make serve`."
+      : "sample non raggiungibile: serve `make serve` (non file://).";
+    return;
+  }
+  LAB_AUDIO = false;
+  SAMPLE_AUDIO = true;
+  marcaAudio();
+  ora("sample", nome);
+  audio.src = url;
+  audio.play();
+  analyse(url);
+}
+
+// Una finestra disegnata: polilinea del profilo vero, quello che l'engine
+// moltiplica per il grano.
+function envSvg(pts) {
+  const w = 46, h = 20;
+  const d = pts.map((v, i) =>
+    (i ? "L" : "M") + (i / (pts.length - 1) * w).toFixed(1) + " " +
+    ((1 - v) * (h - 2) + 1).toFixed(1)).join(" ");
+  return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><path d="${d}"/></svg>`;
+}
+
+let ENVCB = null;    // labInit lo aggancia a labInfo, come per i select
+
+function mkEnv(p, box, ENV) {
+  const r = document.createElement("div"); r.className = "row";
+  const k = document.createElement("div"); k.className = "k"; k.textContent = p.path;
+  // Il valore vive in un campo nascosto: labDoc legge "P:<path>" come per
+  // ogni altro parametro, e la galleria e' solo il modo di sceglierlo.
+  const hid = document.createElement("input");
+  hid.type = "hidden"; hid.id = "P:" + p.path;
+  const d = iniziale(p);
+  hid.value = ENV[d] ? d : (p.values.includes("hanning") ? "hanning" : Object.keys(ENV)[0]);
+  const box2 = document.createElement("div"); box2.id = "envs";
+  for (const [name, pts] of Object.entries(ENV)) {
+    const b = document.createElement("button");
+    b.innerHTML = envSvg(pts) + "<span class='n'>" + name + "</span>";
+    b.title = name;
+    if (name === hid.value) b.classList.add("on");
+    b.onclick = () => {
+      hid.value = name;
+      for (const o of box2.querySelectorAll("button")) o.classList.toggle("on", o === b);
+      if (ENVCB) ENVCB();
+    };
+    box2.appendChild(b);
+  }
+  r.appendChild(k); r.appendChild(box2); r.appendChild(hid);
+  box.appendChild(r);
+}
+
+// Una riga della griglia dei parametri: etichetta a sinistra, il menu nella
+// terza colonna (la seconda, quella del valore, qui resta vuota).
+function riga(testo, el, cls) {
+  const r = document.createElement("div");
+  r.className = "row " + cls;
+  r.innerHTML = "<div class='k'>" + testo + "</div><div></div>";
+  r.appendChild(el);
+  return r;
+}
+
+function mkInterp(path) {
+  const s = document.createElement("select");
+  s.id = "I:" + path;
+  for (const t of INTERP) {
+    const o = document.createElement("option");
+    o.value = o.textContent = t;
+    s.appendChild(o);
+  }
+  s.value = "linear";
+  if (path !== "*") s.onchange = labInfo;
+  return s;
+}
+
+function snapshot() {
+  const v = {};
+  for (const p of AUT) {
+    const raw = document.getElementById("P:" + p.path).value;
+    // Scritto a mano: la virgola vale il punto, e un campo vuoto o sbagliato
+    // tiene il valore del breakpoint invece di diventare NaN.
+    const testo = String(raw).trim().replace(",", ".");
+    v[p.path] = p.kind === "num" ? (testo === "" ? NaN : Number(testo)) : raw;
+    if (p.kind === "num" && !Number.isFinite(v[p.path]))
+      v[p.path] = (bps[curBp] && bps[curBp].vals[p.path]) ?? iniziale(p);
+  }
+  return v;
+}
+
+// Il tipo di interpolazione scelto ora, parametro per parametro.
+function snapInterp() {
+  const v = {};
+  // Il rivolto non ha un menu: sulla progressione e' il terzo elemento del
+  // passo, non un segmento che si interpola. Vale `linear` come i punti
+  // salvati prima che i tipi esistessero.
+  for (const p of AUT) {
+    const el = document.getElementById("I:" + p.path);
+    v[p.path] = el ? el.value : "linear";
+  }
+  return v;
+}
+
+// I fissi per lo stream, per l'undo: accendere il loop e' lavoro come gli altri.
+function snapFissi() {
+  return Object.fromEntries(CAT.map(p => [p.path, valFisso(p.path)]));
+}
+
+// Il tipo di un parametro in un breakpoint. I punti salvati prima che i tipi
+// esistessero non ce l'hanno: valgono linear, che e' cio' che facevano.
+function tipoDi(b, path) { return (b.ints || {})[path] || "linear"; }
+
+function bpAdd() {
+  // Il primo breakpoint sta a 0, gli altri in fondo: da li' si trascinano.
+  const t = bps.length ? 1 : 0;
+  bps.push({t, vals: snapshot(), ints: snapInterp()});
+  bps.sort((a, b) => a.t - b.t);
+  curBp = bps.findIndex(b => b.t === t);
+  drawTl();
+}
+
+function bpSave() {
+  if (curBp < 0) return;
+  bps[curBp].vals = snapshot();
+  bps[curBp].ints = snapInterp();
+  drawTl();
+}
+
+// I parametri che i select mostrano diversi dal breakpoint selezionato: sono
+// quelli che hai appena cambiato, e l'unica cosa che `applica a tutti` deve
+// toccare.
+function cambiati() {
+  if (curBp < 0) return [];
+  const ora = snapshot(), ori = snapInterp();
+  return AUT.map(p => p.path).filter(
+    k => ora[k] !== bps[curBp].vals[k] || ori[k] !== tipoDi(bps[curBp], k));
+}
+
+// Scrive SOLO quei parametri su ogni breakpoint. Gli altri restano come
+// sono, ognuno col suo valore: un inviluppo che avevi disegnato non va
+// appiattito perche' stavi cambiando un'altra manopola.
+function bpAll() {
+  const ks = cambiati();
+  if (!ks.length) return;
+  const ora = snapshot(), ori = snapInterp();
+  for (const b of bps) for (const k of ks) {
+    b.vals[k] = ora[k];
+    (b.ints = b.ints || {})[k] = ori[k];
+  }
+  drawTl();
+  document.getElementById("labInfo").textContent =
+    "applicato a tutti i " + bps.length + " breakpoint: " + ks.join(", ");
+}
+
+// La selezione multipla: i breakpoint presi con la banda, per oggetto e non
+// per indice — un trascinamento riordina la lista e gli indici si spostano
+// sotto i piedi. Non entra nella storia dell'undo: selezionare non e' una
+// modifica del documento (`istantanea` non la guarda, quindi non registra un
+// passo a vuoto), e per lo stesso motivo un undo la lascia indietro — i
+// breakpoint che tornano sono altri oggetti. Li' si azzera.
+let SELEZIONE = new Set();
+
+function selezionaFra(a, b) {
+  SELEZIONE.clear();
+  for (const p of bps) if (p.t >= Math.min(a, b) && p.t <= Math.max(a, b)) SELEZIONE.add(p);
+}
+
+// Quando il punto corrente cambia da solo — generando, cancellando — i valori
+// a schermo devono seguirlo. Cliccare un punto lo fa gia' (`bpLoad`); se qui
+// non lo facesse nessuno, i valori rimasti a schermo sono quelli di prima e
+// `cambiati()` li segnerebbe come non salvati su un punto che nessuno ha
+// toccato. Senza piu' punti non c'e' niente da mostrare: si ridisegna e basta.
+function mostraBp() { if (curBp >= 0) bpLoad(curBp); else drawTl(); }
+
+function bpDel() {
+  // Con una banda aperta si tolgono tutti insieme; senza, il punto corrente,
+  // che e' quello che il bottone ha sempre fatto.
+  if (SELEZIONE.size) {
+    const b0 = bps[curBp];
+    bps = bps.filter(p => !SELEZIONE.has(p));
+    SELEZIONE.clear();
+    // Se il punto corrente e' sopravvissuto resta lui, se no si scende
+    // all'ultimo: la barra dei valori deve puntare comunque a qualcosa.
+    curBp = bps.includes(b0) ? bps.indexOf(b0) : bps.length - 1;
+    mostraBp();
+    return;
+  }
+  if (curBp < 0) return;
+  bps.splice(curBp, 1);
+  curBp = Math.min(curBp, bps.length - 1);
+  mostraBp();
+}
+
+// `delete` (e `backspace`) toglie quello che e' selezionato, come su una
+// scrivania. Dentro un campo di testo resta la cancellazione del testo.
+addEventListener("keydown", e => {
+  if (e.key !== "Delete" && e.key !== "Backspace") return;
+  if (document.getElementById("lab").hidden) return;
+  if (inCampo(e.target)) return;
+  e.preventDefault();
+  bpDel();
+});
+
+// --- il lucchetto della durata --------------------------------------------
+// Cambiare `durata (s)` cambia il significato di ogni x, perche' le x sono
+// normalizzate: lo stesso 0.5 e' 15 s in uno stream di 30 e 5 s in uno di 10.
+// Col lucchetto APERTO i punti restano dove sono e si stirano con lo stream —
+// e' quello che il laboratorio ha sempre fatto. CHIUSO tengono il loro tempo
+// ASSOLUTO e si ridispongono: e' il `freezeEnvOnResize` di PGE-ui, stessa
+// formula (x' = x * durVecchia / durNuova).
+let LUCCHETTO = false;
+let DURPREC = 0;              // la durata da cui si riscala
+
+// Il punto in cui il segmento a->b taglia il tempo t. Serve accorciando:
+// senza, l'ultimo tratto dell'inviluppo sparirebbe con il punto che lo
+// chiudeva e la coda resterebbe piatta sull'ultimo valore rimasto.
+// Come `valoreA`, interpola in linea anche dove il tipo e' `cubic`: e'
+// l'approssimazione che la pagina fa gia' ovunque legga un inviluppo.
+function bpFra(a, b, t) {
+  const k = (t - a.t) / (b.t - a.t);
+  const vals = {}, ints = {};
+  for (const p of AUT) {
+    const tipo = tipoDi(a, p.path);
+    ints[p.path] = tipo;
+    const x = a.vals[p.path], y = b.vals[p.path];
+    vals[p.path] = (tipo !== "step" && typeof x === "number" && typeof y === "number")
+                 ? x + (y - x) * k : x;
+  }
+  return {t, vals, ints};
+}
+
+// --- seguire gli inviluppi mentre suona ------------------------------------
+// I valori a schermo diventano quelli che lo stream sta percorrendo: gli
+// inviluppi letti al tempo del cursore, con la stessa interpolazione dei
+// breakpoint (`bpFra`). E' una lettura, non una modifica: i breakpoint non si
+// toccano, e spegnendo si torna a quello selezionato.
+let SEGUI = false;
+
+// Il breakpoint virtuale al tempo normalizzato x: fuori dagli estremi vale
+// l'estremo, come fa l'engine con un inviluppo che non arriva fino al bordo.
+function bpA(x) {
+  if (!bps.length) return null;
+  if (x <= bps[0].t) return bps[0];
+  let i = bps.length - 1;
+  while (i > 0 && bps[i].t > x) i--;
+  if (i === bps.length - 1 || bps[i + 1].t - bps[i].t < 1e-9) return bps[i];
+  return bpFra(bps[i], bps[i + 1], x);
+}
+
+function durata() {
+  const el = document.getElementById("labDur");
+  return (el && Number(el.value)) || DUR;
+}
+
+function ridimensiona(vecchia, nuova) {
+  if (!bps.length || !(vecchia > 0) || !(nuova > 0) || vecchia === nuova) return 0;
+  for (const b of bps) b.t = +(b.t * (vecchia / nuova)).toFixed(5);
+  const dentro = bps.filter(b => b.t <= 1 + 1e-9);
+  const fuori = bps.length - dentro.length;
+  if (!fuori) return 0;
+  // Allungando non esce nessuno; qui si sta accorciando, e chi e' finito
+  // oltre la fine se ne va — ma lascia il punto dove l'inviluppo tagliava la
+  // nuova fine. Senza un punto rimasto dentro non c'e' segmento da tagliare.
+  if (dentro.length) {
+    const ultimo = dentro[dentro.length - 1], primo = bps[dentro.length];
+    if (ultimo.t < 1 - 1e-9) dentro.push(bpFra(ultimo, primo, 1));
+  }
+  bps = dentro;
+  return fuori;
+}
+
+// --- generare breakpoint a mucchio ----------------------------------------
+// Si sceglie un tratto dell'asse, quanti punti metterci e come si dispongono;
+// e per i parametri che devono muoversi, una maschera (min, max) e lo stesso
+// modo. Tempi e valori sono lo stesso problema — riempire un intervallo — per
+// questo li riempie una funzione sola.
+// Un parametro senza regola prende il valore che ha a schermo, come fa
+// `+ breakpoint`.
+// Uno deterministico e due casuali. `regolare` non e' un modo solo: e' una
+// manopola, il `ratio` con cui ogni passo sta al precedente. A 1 i passi sono
+// tutti uguali — equidistanti; sopra crescono e i punti si addensano in
+// principio, sotto calano e si addensano alla fine. La vecchia `geometrica`
+// e' un valore di quella manopola, ratio = (b/a)^(1/(n-1)), che e' proprio il
+// rapporto fra un valore e il successivo; ma qui gli estremi ci cadono sempre
+// sopra e lo zero non e' piu' un caso vietato.
+// `random` e `gaussiana` invece pescano, e due generazioni danno due risultati
+// diversi: la prima con tutti i valori ugualmente probabili, la seconda
+// addensata in mezzo.
+const MODI = {regolare: "regolare", random: "random (uniforme)",
+              gauss: "random (gaussiana)"};
+
+function gaussiano() {         // Box-Muller: uno standard normale
+  let u = 0, v = 0;
+  while (!u) u = Math.random();
+  while (!v) v = Math.random();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+function riempi(modo, n, a, b, passo, ratio) {
+  const out = [], lo = Math.min(a, b), hi = Math.max(a, b);
+  const dentro = v => Math.min(hi, Math.max(lo, v));
+  // I primi k passi, in progressione geometrica di ragione r. A r=1 sono k
+  // passi uguali; il rapporto fra il parziale e il totale e' la frazione di
+  // intervallo percorsa, quindi gli estremi ci cadono sopra per costruzione.
+  const r = ratio > 0 ? ratio : 1;
+  const somma = k => r === 1 ? k : (Math.pow(r, k) - 1) / (r - 1);
+  const tot = n > 1 ? somma(n - 1) : 0;
+  for (let i = 0; i < n; i++) {
+    let v;
+    if (modo === "random") v = a + Math.random() * (b - a);
+    // gaussiana: il centro dell'intervallo, con tre sigma sugli estremi —
+    // la massa sta in mezzo e la coda si taglia sulla maschera.
+    else if (modo === "gauss") v = (a + b) / 2 + gaussiano() * (hi - lo) / 6;
+    else v = a + (b - a) * (tot ? somma(i) / tot : 0);
+    out.push(dentro(passo > 0 ? a + Math.round((v - a) / passo) * passo : v));
+  }
+  return out;
+}
+
+// Le tacche dello study.yml, una per breakpoint, nell'ordine della lista: si
+// parte dalla prima che non sta sotto `min` e si va avanti. Niente passo da
+// indovinare — rigenerare da' gli stessi valori dello sweep — e niente `max`:
+// dove si arriva lo dice `quanti`. Il passo qui e' un salto sull'indice
+// della lista: 2 prende una tacca si' e una no. Finite le tacche, i punti che
+// avanzano tengono l'ultima.
+function tacche(vs, n, a, passo) {
+  const t = vs.map(Number).filter(v => v >= a - 1e-12);
+  if (!t.length) return null;
+  const k = Math.max(1, Math.round(passo) || 1);
+  return Array.from({length: n}, (_, i) => t[Math.min(i * k, t.length - 1)]);
+}
+
+function numero(s, d) {
+  const v = Number(String(s).trim().replace(",", "."));
+  return Number.isFinite(v) ? v : d;
+}
+
+function genNum(val, segno) {
+  const i = document.createElement("input");
+  i.type = "text"; i.inputMode = "decimal"; i.value = val;
+  if (segno) i.placeholder = segno;
+  return i;
+}
+
+function genModo() {
+  const s = document.createElement("select");
+  for (const [v, t] of Object.entries(MODI)) s.appendChild(new Option(t, v));
+  return s;
+}
+
+// La manopola di `regolare`. Sui due modi che pescano non vuol dire niente:
+// li' si spegne invece di restare li' a farsi girare senza effetto.
+function genRatio(modo) {
+  const i = genNum(1, "ratio");
+  i.title = "quanto ogni passo sta al precedente: 1 = equidistanti, "
+          + ">1 fitti in principio, <1 fitti alla fine";
+  modo.onchange = () => { i.disabled = modo.value !== "regolare"; };
+  return i;
+}
+
+function genRule() {
+  const r = document.createElement("div");
+  r.className = "rule";
+  const p = document.createElement("select");
+  for (const q of NUM) p.appendChild(new Option(q.path, q.path));
+  const min = genNum("", "min"), max = genNum("", "max"), passo = genNum("", "passo");
+  const modo = genModo(), ratio = genRatio(modo);
+  const opt = new Option("tacche dello study.yml", "tacche");
+  modo.appendChild(opt);
+  modo.onchange = () => {
+    ratio.disabled = modo.value !== "regolare";
+    max.disabled = modo.value === "tacche";
+    // Sulle tacche il passo non e' un valore ma un salto di indice.
+    passo.placeholder = modo.value === "tacche" ? "ogni n" : "passo";
+  };
+  const via = document.createElement("button");
+  via.textContent = "×"; via.title = "togli la regola";
+  via.onclick = () => r.remove();
+  // Le tacche dello study.yml danno la maschera di partenza; un parametro
+  // senza tacche (il volume) parte fermo sul suo valore.
+  p.onchange = () => {
+    const q = NUM.find(x => x.path === p.value);
+    min.value = q.values.length ? Math.min(...q.values) : iniziale(q);
+    max.value = q.values.length ? Math.max(...q.values) : iniziale(q);
+    // Un parametro senza tacche (il volume) non ha una lista da cui pescare.
+    opt.disabled = !q.values.length;
+    if (opt.disabled && modo.value === "tacche") { modo.value = "regolare"; modo.onchange(); }
+  };
+  p.onchange();
+  r.append(p, min, max, modo, ratio, passo, via);
+  document.getElementById("gRules").appendChild(r);
+}
+
+function genBps() {
+  const n = Math.round(numero(document.getElementById("gN").value, 0));
+  if (n < 1) return;
+  const chiuso = t => Math.min(1, Math.max(0, t));
+  const da = chiuso(numero(document.getElementById("gDa").value, 0));
+  const a = chiuso(numero(document.getElementById("gA").value, 1));
+  // I tempi vanno comunque ordinati (`serie` vuole un inviluppo che non torna
+  // indietro), e ordinarli PRIMA di assegnare i valori fa si' che una rampa
+  // di valori segua il tempo anche quando i tempi sono casuali.
+  const ts = riempi(document.getElementById("gModo").value, n, da, a, 0,
+                    numero(document.getElementById("gRatio").value, 1))
+             .map(chiuso).sort((x, y) => x - y);
+  const regole = [...document.querySelectorAll("#gRules .rule")].map(r => {
+    const [p, min, max, modo, ratio, passo] = r.children;
+    const A = numero(min.value, NaN), B = numero(max.value, NaN);
+    if (!Number.isFinite(A)) return null;
+    const vals = modo.value === "tacche"
+      ? tacche(NUM.find(q => q.path === p.value).values, n, A, numero(passo.value, 1))
+      : !Number.isFinite(B) ? null
+      : riempi(modo.value, n, A, B, numero(passo.value, 0), numero(ratio.value, 1));
+    return vals && {path: p.value, vals};
+  }).filter(Boolean);
+  const base = snapshot(), ints = snapInterp();
+  let ultimo = null;
+  ts.forEach((t, i) => {
+    const vals = Object.assign({}, base);
+    for (const g of regole) vals[g.path] = g.vals[i];
+    bps.push(ultimo = {t, vals, ints: Object.assign({}, ints)});
+  });
+  bps.sort((x, y) => x.t - y.t);
+  curBp = bps.indexOf(ultimo);
+  mostraBp();
+  document.getElementById("labInfo").textContent =
+    "generati " + n + " breakpoint fra " + da + " e " + a +
+    (regole.length ? " · " + regole.map(g => g.path).join(", ") : "");
+}
+
+function genInit() {
+  const box = document.getElementById("genBox");
+  const tre = document.createElement("div");
+  tre.className = "tre";
+  const da = genNum(0), a = genNum(1), n = genNum(8);
+  da.id = "gDa"; a.id = "gA"; n.id = "gN";
+  tre.append(da, a, n);
+  box.appendChild(riga("da · a · quanti", tre, ""));
+  const modo = genModo(), ratio = genRatio(modo);
+  modo.id = "gModo"; ratio.id = "gRatio";
+  const disp = document.createElement("div");
+  disp.className = "tre";
+  disp.append(modo, ratio);
+  box.appendChild(riga("disposizione", disp, ""));
+  const rules = document.createElement("div");
+  rules.id = "gRules";
+  box.appendChild(rules);
+  const bar = document.createElement("div");
+  bar.className = "bar";
+  const piu = document.createElement("button");
+  piu.textContent = "+ parametro";
+  piu.onclick = () => genRule();
+  const via = document.createElement("button");
+  via.textContent = "genera";
+  via.onclick = genBps;
+  bar.append(piu, via);
+  box.appendChild(bar);
+}
+
+function bpLoad(i) {
+  curBp = i;
+  // setSel e non `s.value =`: la galleria delle finestre ha anche il bottone
+  // acceso da spostare, e il valore da solo lascerebbe indietro il disegno.
+  for (const [path, v] of Object.entries(bps[i].vals)) setSel(path, v);
+  for (const p of AUT) {
+    const s = document.getElementById("I:" + p.path);
+    if (s) s.value = tipoDi(bps[i], p.path);
+  }
+  drawTl();
+}
+
+function drawTl() {
+  bozzaSalva();
+  if (typeof segna === "function") segna();
+  loopVis();
+  marcaAudio();
+  const tl = document.getElementById("tl");
+  tl.innerHTML = "";
+  // Trascinare sul vuoto della linea disegna una banda e prende i punti che
+  // ci cadono dentro; un click a vuoto la scioglie. Sui punti no: li' il
+  // trascinamento e' gia' il loro, sposta il breakpoint nel tempo.
+  tl.onpointerdown = e => {
+    if (e.target !== tl) return;
+    e.preventDefault();
+    const box = tl.getBoundingClientRect();
+    const x = ev => Math.min(1, Math.max(0, (ev.clientX - box.left) / box.width));
+    const x0 = x(e);
+    const banda = document.createElement("div");
+    banda.className = "banda";
+    tl.appendChild(banda);
+    let mosso = false;
+    const move = ev => {
+      mosso = mosso || Math.abs(ev.clientX - e.clientX) > 3;
+      banda.style.left = (Math.min(x0, x(ev)) * 100) + "%";
+      banda.style.width = (Math.abs(x(ev) - x0) * 100) + "%";
+    };
+    const up = ev => {
+      removeEventListener("pointermove", move);
+      removeEventListener("pointerup", up);
+      banda.remove();
+      if (mosso) selezionaFra(x0, x(ev)); else SELEZIONE.clear();
+      drawTl();
+    };
+    addEventListener("pointermove", move);
+    addEventListener("pointerup", up);
+  };
+  bps.forEach((b, i) => {
+    const d = document.createElement("div");
+    d.className = "bp" + (i === curBp ? " on" : "") + (SELEZIONE.has(b) ? " sel" : "");
+    d.style.left = (b.t * 100) + "%";
+    d.innerHTML = "<span class='t'>" + b.t.toFixed(2) + "</span>";
+    d.onpointerdown = e => {
+      e.preventDefault();
+      bpLoad(i);
+      const box = tl.getBoundingClientRect();
+      const move = ev => {
+        GESTO = true;      // il trascinamento e' un passo solo di undo
+        b.t = Math.min(1, Math.max(0, (ev.clientX - box.left) / box.width));
+        drawTl();
+      };
+      const up = () => {
+        removeEventListener("pointermove", move);
+        removeEventListener("pointerup", up);
+        GESTO = false;
+        // L'ordine dei punti e' il tempo: dopo il trascinamento la lista va
+        // riordinata, o `serie` produrrebbe un inviluppo che torna indietro.
+        const b0 = bps[curBp];
+        bps.sort((x, y) => x.t - y.t);
+        curBp = bps.indexOf(b0);
+        drawTl();
+      };
+      addEventListener("pointermove", move);
+      addEventListener("pointerup", up);
+    };
+    tl.appendChild(d);
+  });
+  // Il campo del tempo segue il punto selezionato, ma non mentre ci si scrive
+  // dentro: riscriverlo sotto le dita cancellerebbe quello che stai digitando.
+  const bpT = document.getElementById("bpT");
+  if (bpT && document.activeElement !== bpT)
+    bpT.value = curBp >= 0 ? bps[curBp].t.toFixed(3) : "";
+  labInfo();
+}
+
+// Un parametro diventa una lista di breakpoint solo dove cambia: i punti in
+// cui il valore e' uguale sia a prima che a dopo non dicono niente che
+// l'interpolazione non dica gia', e un inviluppo con dodici punti identici
+// e' illeggibile. Se non cambia mai, resta lo scalare che era.
+//
+// Il tipo va sul punto da cui parte il segmento, e solo se non e' `linear`
+// (che e' il default dell'engine): scriverlo ovunque raddoppierebbe la
+// lunghezza di ogni riga per dire quello che gia' si sa. Un punto che cambia
+// il tipo non e' ridondante nemmeno a valore fermo — decide come si arriva
+// al prossimo — quindi resta.
+function serie(path) {
+  const pts = bps.map(b => [b.t, b.vals[path], tipoDi(b, path)]);
+  if (!pts.length || pts.some(p => !Number.isFinite(p[1]))) return null;
+  if (pts.every(p => p[1] === pts[0][1]) && pts.every(p => p[2] === "linear"))
+    return pts[0][1];
+  const tenuti = pts.filter((p, i) =>
+    i === 0 || i === pts.length - 1 ||
+    !(pts[i - 1][1] === p[1] && pts[i + 1][1] === p[1]) ||
+    p[2] !== pts[i - 1][2]);
+  return tenuti.map((p, i) =>
+    // L'ultimo punto non ha un segmento dopo di se': niente tipo.
+    (p[2] === "linear" || i === tenuti.length - 1) ? [p[0], p[1]] : [p[0], p[1], p[2]]);
+}
+
+// La sequenza delle finestre diventa {states, curve}: gli stati sono le
+// finestre nell'ordine in cui compaiono — una ripetizione consecutiva non ne
+// apre uno nuovo — spaziati uniformemente in [0,1], e la curve e' il cammino
+// nel tempo dentro quello spazio. Cosi' gli stati restano crescenti come
+// l'engine pretende anche quando la sequenza torna su una finestra gia' usata:
+// hanning -> bartlett -> hanning da' tre stati, non due.
+//
+// Se la finestra non cambia mai resta la stringa di prima: uno stream con un
+// envelope solo non ha motivo di diventare un multistate.
+function serieEnv() {
+  const seq = bps.map(b => b.vals[EP]);
+  if (!seq.length || seq.some(w => !w)) return null;
+  if (seq.every(w => w === seq[0])) return seq[0];
+  const W = [], idx = [];
+  for (const w of seq) {
+    if (!W.length || W[W.length - 1] !== w) W.push(w);
+    idx.push(W.length - 1);
+  }
+  const n = W.length - 1;
+  return {
+    states: W.map((w, i) => [i / n, w]),
+    // Il tipo sta sul punto e governa il segmento che parte di li'; l'ultimo
+    // non ne ha uno, e `linear` e' il default che non si scrive.
+    curve: bps.map((b, i) => {
+      const pt = [b.t, idx[i] / n], tipo = tipoDi(b, EP);
+      return (tipo === "linear" || i === bps.length - 1) ? pt : pt.concat(tipo);
+    }),
+  };
+}
+
+// L'inverso: la finestra al tempo t. La curve vale li' quanto dice il suo
+// inviluppo e lo stato e' quello col valore piu' vicino — sui tempi dei
+// breakpoint ci cade esattamente sopra, che e' cio' che chiude il round-trip.
+function envA(spec, t) {
+  if (typeof spec === "string") return spec;
+  if (!spec || !spec.states || !spec.states.length) return null;
+  const v = Number(valoreA(spec.curve, t));
+  let best = spec.states[0];
+  for (const st of spec.states)
+    if (Math.abs(st[0] - v) < Math.abs(best[0] - v)) best = st;
+  return best[1];
+}
+
+// --- le voci: schermo e documento ------------------------------------------
+
+// Un blocco per asse, chiuso finche' non serve: le voci sono quattro strategie
+// piu' due manopole, e aperte da sole occuperebbero quanto il resto del
+// pannello. Le righe dentro sono quelle di sempre — campo, tacche, menu
+// dell'interpolazione — perche' dal documento in giu' non c'e' niente di
+// diverso: `voices.pan.spread` e' un path come `grain.duration`.
+function vociInit(mk) {
+  const box = document.getElementById("labParams");
+  for (const voce of ["voci"].concat(Object.keys(STRAT))) {
+    const det = document.createElement("details");
+    det.className = "voce";
+    const cap = document.createElement("summary");
+    cap.innerHTML = (voce === "voci" ? "voci" : "voci · " + voce) + " <b></b>";
+    det.appendChild(cap);
+    // Attaccato PRIMA di riempirlo: le righe cercano i propri controlli con
+    // getElementById, e dentro un sottoalbero staccato dal documento non li
+    // troverebbero (`labInit` moriva li', e con lui tutto cio' che viene dopo).
+    box.appendChild(det);
+    for (const p of VOCI.filter(q => q.voce === voce)) {
+      mk(p, det);
+      p.riga = det.lastChild;
+      if (p.bp && !p.noint) p.riga.appendChild(mkInterp(p.path));
+      document.getElementById("P:" + p.path).onchange = () => { vociVis(); labInfo(); };
+    }
+  }
+  vociVis();
+}
+
+function valFisso(path) {
+  const el = document.getElementById("P:" + path);
+  return el ? el.value : "";
+}
+
+// Le righe che la strategia scelta non usa spariscono. Nel documento non ci
+// finiscono comunque (ci pensa `vociDoc`), ma vederle a schermo farebbe
+// credere che contino: `base` sotto una `linear` non e' una manopola morbida,
+// e' una manopola di un'altra strategia.
+function vociVis() {
+  for (const p of VOCI) {
+    if (!p.riga) continue;
+    const s = p.dim ? valFisso("voices." + p.dim + ".strategy") : "";
+    let ok = !p.str || p.str.includes(s);
+    // L'unica unita' che porta un numero con se'.
+    if (p.chiave === "edo") ok = ok && valFisso("voices.pitch.unit") === "edo";
+    p.riga.hidden = !ok;
+  }
+  // Il riassunto sulla linguetta: la strategia accesa, o il numero di voci.
+  for (const dim of Object.keys(STRAT)) {
+    const s = valFisso("voices." + dim + ".strategy");
+    VOCI_DI["voices." + dim + ".strategy"].riga.parentNode
+      .querySelector("summary b").textContent = s === "off" ? "" : s;
+  }
+  const n = Number(valFisso("voices.num_voices"));
+  VOCI_DI["voices.num_voices"].riga.parentNode.querySelector("summary b")
+    .textContent = n > 1 ? n + " voci" : "";
+}
+
+// La progressione di accordi: un accordo per breakpoint. Un accordo ripetuto
+// non apre un passo nuovo — dura finche' non cambia — e il rivolto e' il terzo
+// elemento, scritto solo quando non e' lo stato fondamentale.
+function progressione() {
+  const out = [];
+  for (const b of bps) {
+    const c = b.vals[PROG.path];
+    if (!c) continue;
+    const inv = Math.min(Math.max(0, Math.round(Number(b.vals["voices.pitch.inversion"]) || 0)),
+                         (NOTE_DI[c] || 1) - 1);
+    const prec = out[out.length - 1];
+    if (prec && prec[1] === c && (prec[2] || 0) === inv) continue;
+    out.push(inv ? [b.t, c, inv] : [b.t, c]);
+  }
+  return out;
+}
+
+// Il passo che vale al tempo t. L'accordo cambia di colpo e resta: fra due
+// accordi non si interpola (l'interpolazione, quella si', decide come le voci
+// ci arrivano — ed e' `interp`, che sta sul blocco).
+function passoA(prog, t) {
+  let out = null;
+  for (const st of prog) { if (st[0] > t + 1e-9) break; out = st; }
+  return out || prog[0] || null;
+}
+
+// Le voci sul documento. Quattro cose che le righe da sole non sanno fare:
+// togliere gli assi spenti, tenere del blocco solo le chiavi che la strategia
+// scelta usa, portare nella forma dell'engine le due che non sono un numero
+// (`unit: {edo: N}` e il flag `normalized`), e montare la progressione dai
+// breakpoint.
+function vociDoc(st) {
+  const v = st.voices;
+  if (!v) return;
+  for (const dim of Object.keys(STRAT)) {
+    const b = v[dim];
+    if (!b) continue;
+    if (!STRAT[dim].includes(b.strategy)) { delete v[dim]; continue; }
+    for (const k of Object.keys(b)) {
+      const p = VOCI_DI["voices." + dim + "." + k];
+      if (k !== "strategy" && p && p.str && !p.str.includes(b.strategy)) delete b[k];
+    }
+  }
+  const p = v.pitch;
+  if (p) {
+    if (p.unit === "edo") p.unit = {edo: Math.max(1, Math.round(p.edo))};
+    else if (p.unit === "semitones") delete p.unit;   // e' il default dell'engine
+    delete p.edo;
+    if (p.max_partial != null) p.max_partial = Math.max(1, Math.round(p.max_partial));
+    if (p.voice_leading === "nearest") delete p.voice_leading;
+    const inv0 = Math.max(0, Math.round(
+      Number((bps[0] || {vals: {}}).vals["voices.pitch.inversion"]) || 0));
+    if (p.strategy === "chord") {
+      // Qui il rivolto e' uno scalare, non un inviluppo: vale quello del primo
+      // breakpoint, che e' l'accordo da cui si parte.
+      const inv = Math.min(inv0, (NOTE_DI[p.chord] || 1) - 1);
+      if (inv) p.inversion = inv; else delete p.inversion;
+    } else if (p.strategy === "chord_progression") {
+      p.progression = progressione();
+      const t = tipoDi(bps[0] || {}, PROG.path);
+      if (t !== "linear") p.interp = t;   // linear e' il default, non si scrive
+      delete p.inversion;                 // sta nei passi della progressione
+    }
+  }
+  if (v.pointer) {
+    if (v.pointer.normalized === "si") v.pointer.normalized = true;
+    else delete v.pointer.normalized;
+  }
+  // Un blocco che non dice niente non si scrive: una voce sola, nessuno
+  // sparpaglio, nessuna strategia.
+  if (v.scatter === 0) delete v.scatter;
+  if (v.num_voices === 1 && !Object.keys(STRAT).some(d => v[d])) delete st.voices;
+}
+
+// L'inverso, riaprendo un documento: le chiavi che non sono un numero. Le
+// strategie si rileggono anche quando il blocco manca — il documento aperto e'
+// la verita', non quello che c'era a schermo prima.
+function vociCarica(st) {
+  const p = leggiPath(st, "voices.pitch") || {};
+  for (const dim of Object.keys(STRAT))
+    setSel("voices." + dim + ".strategy",
+           (leggiPath(st, "voices." + dim) || {}).strategy || "off");
+  if (p.unit && typeof p.unit === "object") {
+    setSel("voices.pitch.unit", "edo");
+    setSel("voices.pitch.edo", p.unit.edo);
+  }
+  setSel("voices.pointer.normalized",
+         leggiPath(st, "voices.pointer.normalized") === true ? "si" : "no");
+  // L'accordo lo ha gia' messo `carica` (e' un valore di breakpoint); qui
+  // tornano il rivolto, che viaggia dentro il passo, e l'interpolazione, che
+  // sul documento e' una sola per tutta la progressione.
+  if (Array.isArray(p.progression))
+    for (const b of bps) {
+      const passo = passoA(p.progression, b.t);
+      if (!passo) continue;
+      b.vals["voices.pitch.inversion"] = passo[2] || 0;
+      (b.ints = b.ints || {})[PROG.path] = p.interp || "linear";
+    }
+  vociVis();
+}
+
+// I tempi dei breakpoint sono frazioni dello stream (la riga `tempo (0-1)`),
+// ma l'engine li legge cosi' solo con `time_mode: normalized`: senza, sono
+// secondi, e una rampa scritta in frazioni si schiacciava nel primo secondo.
+// Il documento parte dal `base:` dello studio, ed e' lui a decidere: i tempi
+// si scrivono nella sua convenzione, cosi' anche gli inviluppi che il
+// documento eredita dal base (gia' nella sua) restano giusti. Vale per tutto
+// cio' che sta sui breakpoint — numerici, voci, loop, `curve` della finestra,
+// progressione: l'engine legge tutti con lo stesso `time_mode`.
+function scalaTempi(v, f) {
+  if (!Array.isArray(v)) return v;
+  return v.map(p => Array.isArray(p) && typeof p[0] === "number"
+    ? [f(p[0])].concat(p.slice(1)) : p);
+}
+
+// Quanto vale 1 sull'asse dei tempi del documento: 1 se normalized, la
+// durata se no. Una durata che non si sa lascia i tempi come sono.
+function inSecondi(st, dur) {
+  return st.time_mode === "normalized" ? 1 : (Number(dur) || 1);
+}
+
+// L'inverso, riaprendo: una copia dello stream con i tempi in frazioni, che
+// e' quello che il resto della pagina sa leggere.
+function tempiFrazione(st, dur = st.duration) {
+  const k = inSecondi(st, dur);
+  if (k === 1) return st;
+  const out = JSON.parse(JSON.stringify(st));
+  const f = t => +(t / k).toFixed(6);
+  for (const p of AUT) {
+    const v = leggiPath(out, p.path);
+    if (p.path === EP) { if (v && Array.isArray(v.curve)) v.curve = scalaTempi(v.curve, f); }
+    else if (Array.isArray(v)) setPath(out, p.path, scalaTempi(v, f));
+  }
+  out.time_mode = "normalized";
+  return out;
+}
+
+function labDoc() {
+  const dur = durata();
+  // stream_id/onset/duration in testa, come nei documenti scritti a mano.
+  const st = Object.assign({stream_id: "lab", onset: 0, duration: dur},
+                           JSON.parse(JSON.stringify(L.base)));
+  st.onset = 0;
+  st.duration = dur;
+  const k = inSecondi(st, dur);
+  const tempo = k === 1 ? (t => t) : (t => +(t * k).toFixed(6));
+  for (const p of CAT) {
+    const raw = document.getElementById("P:" + p.path).value;
+    // I fissi sono quasi tutti nomi; i pochi numerici — max_partial, le
+    // divisioni dell'edo — vanno scritti numeri, non stringhe.
+    setPath(st, p.path, p.kind === "num" ? Number(String(raw).replace(",", ".")) : raw);
+  }
+  for (const p of NUM) {
+    const v = serie(p.path);
+    if (v !== null) setPath(st, p.path, scalaTempi(v, tempo));
+  }
+  if (ENVP) {
+    const v = serieEnv();
+    if (v && typeof v === "object") v.curve = scalaTempi(v.curve, tempo);
+    if (v !== null) setPath(st, EP, v);
+  }
+  vociDoc(st);
+  const vp = leggiPath(st, "voices.pitch");
+  if (vp && vp.strategy === "chord_progression")
+    vp.progression = scalaTempi(vp.progression, tempo);
+  scriviLoop(st);
+  return {duration: dur, bpm: 120, streams: [st]};
+}
+
+function setPath(obj, path, v) {
+  const parts = path.split(".");
+  let o = obj;
+  for (const k of parts.slice(0, -1)) o = (o[k] = o[k] || {});
+  o[parts[parts.length - 1]] = v;
+}
+
+function labInfo() {
+  const mossi = NUM.filter(p => Array.isArray(serie(p.path)));
+  if (ENVP && typeof serieEnv() === "object" && serieEnv() !== null)
+    mossi.push(ENVP);
+  // Quali select non corrispondono piu' al breakpoint selezionato.
+  const diversi = cambiati();
+  document.getElementById("bpSave").disabled = !diversi.length;
+  document.getElementById("bpAll").disabled = !diversi.length;
+  document.getElementById("labInfo").textContent =
+    bps.length + " breakpoint · " + mossi.length + " parametri mossi" +
+    (mossi.length ? ": " + mossi.map(p => p.path).join(", ") : "") +
+    (SELEZIONE.size ? "  ·  " + SELEZIONE.size + " selezionati" : "") +
+    (diversi.length ? "  |  non salvati sul breakpoint " + (curBp + 1) + ": "
+                      + diversi.join(", ") : "");
+  document.getElementById("labYaml").textContent = bps.length ? preview() : "";
+  // Ogni modifica passa di qui: e' il posto dove la storia si registra.
+  if (!GESTO) storia();
+}
+
+// I breakpoint disegnati sopra sonogramma e forma d'onda: trascinando un
+// punto si vede dove cade nel suono, non solo su una linea astratta.
+//
+// Ha senso solo se quello che suona e' il render di QUESTI breakpoint:
+// sull'ascolto di un sample le stesse righe indicherebbero punti a caso. Lo
+// dice LAB_AUDIO, che il render del laboratorio accende e l'ascolto di un
+// sample spegne.
+function marcaAudio() {
+  lpSync();
+  drawEnvs();
+  drawGrani();
+  const wv = document.getElementById("waveView");
+  for (const v of wv.querySelectorAll(".loopr")) v.remove();
+  const LOOP = SAMPLE_AUDIO && loopFrac();
+  if (LOOP) {
+    const r = document.createElement("div");
+    r.className = "loopr";
+    r.style.left = (LOOP[0] * 100) + "%";
+    r.style.width = ((LOOP[1] - LOOP[0]) * 100) + "%";
+    [0, 1].forEach(k => {
+      const h = document.createElement("b");
+      h.className = k ? "b" : "a";
+      h.onpointerdown = e => {
+        e.preventDefault();          // niente mousedown: non e' un seek
+        const box = wv.getBoundingClientRect();
+        const move = ev => {
+          const x = Math.min(1, Math.max(0, (ev.clientX - box.left) / box.width));
+          // Un estremo non scavalca l'altro: loop_end > loop_start, lo
+          // pretende l'engine.
+          LOOP[k] = k ? Math.max(LOOP[0] + 0.001, x) : Math.min(LOOP[1] - 0.001, x);
+          loopDisegna(LOOP[0], LOOP[1]);
+        };
+        const up = () => {
+          removeEventListener("pointermove", move);
+          removeEventListener("pointerup", up);
+        };
+        addEventListener("pointermove", move);
+        addEventListener("pointerup", up);
+      };
+      r.appendChild(h);
+    });
+    wv.appendChild(r);
+  }
+  for (const id of ["specView", "waveView"]) {
+    const box = document.getElementById(id);
+    if (!box) continue;
+    for (const v of box.querySelectorAll(".bpm")) v.remove();
+    if (!LAB_AUDIO) continue;
+    bps.forEach((b, i) => {
+      const m = document.createElement("div");
+      m.className = "bpm" + (i === curBp ? " on" : "");
+      m.style.left = (b.t * 100) + "%";
+      if (id === "specView") m.innerHTML = "<i>" + (i + 1) + "</i>";
+      box.appendChild(m);
+    });
+  }
+}
+
+// --- gli inviluppi realizzati --------------------------------------------
+// Quello che la partitura disegna nella corsia di uno stream: non gli
+// inviluppi che hai scritto, ma le curve della IR che l'engine ha davvero
+// percorso — dentro ci sono anche le derivate (`effective_density`, cioe'
+// fill_factor/grain_duration, la densita' vera) e gli offset per-voce. Le
+// calcola il server dopo il render (`engine_bridge.stream_envelopes`) e
+// arrivano gia' normalizzate in [0,1] su tutte e due le coordinate, ognuna
+// sulla propria escursione: qui resta da tirare una linea.
+//
+// `pts` e' la spezzata da disegnare, non una griglia di campioni: e' il
+// server a metterci l'angolo esatto dei gradini (vedi `_spezzata`), perche'
+// un `step` campionato fitto resterebbe una rampa ripidissima. `bp` sono i
+// breakpoint, i punti in cui la curva e' scritta.
+let ENVS = [];       // [{nome, colore, min, max, da, a, pts, bp}]
+let ENVDUR = 0;      // la durata dello stream: il file reso puo' essere piu'
+                     // lungo (la coda dell'ultimo grano), e le curve non
+                     // devono stirarsi fin la'.
+
+function drawEnvs() {
+  const box = document.getElementById("envView");
+  const leg = document.getElementById("envLeg");
+  // Ha senso solo se a suonare e' il render di QUESTE curve: sull'ascolto di
+  // un sample non sono le curve di niente (stessa regola dei breakpoint sul
+  // sonogramma).
+  box.hidden = !(LAB_AUDIO && ENVS.length);
+  leg.innerHTML = "";
+  if (box.hidden) return;
+  const c = document.getElementById("envc");
+  c.width = c.parentNode.clientWidth;
+  const g = c.getContext("2d"), W = c.width, H = c.height, m = 8;
+  // La porzione di file occupata dallo stream: senza questo, con una coda di
+  // grani l'ultimo breakpoint cadrebbe prima della fine del disegno.
+  const q = (view && view.duration && ENVDUR) ? Math.min(1, ENVDUR / view.duration) : 1;
+  g.clearRect(0, 0, W, H);
+  g.strokeStyle = getComputedStyle(document.body).color;
+  g.globalAlpha = .15;
+  g.beginPath(); g.moveTo(0, H - m); g.lineTo(W, H - m);
+  g.moveTo(0, m); g.lineTo(W, m); g.stroke();
+  g.globalAlpha = 1;
+  g.lineWidth = 1.2;
+  const px = t => t * q * W;
+  const py = v => H - m - v * (H - 2 * m);
+  for (const cu of ENVS) {
+    g.strokeStyle = cu.colore;
+    g.beginPath();
+    (cu.pts || []).forEach(([t, v], i) => {
+      i ? g.lineTo(px(t), py(v)) : g.moveTo(px(t), py(v));
+    });
+    g.stroke();
+    // I breakpoint: dove la curva e' scritta. Sulle curve che l'engine
+    // campiona da se' — `effective_density`, gli offset per-voce — sono
+    // fitti, ed e' giusto che si veda che sono campionate e non scritte.
+    g.fillStyle = cu.colore;
+    g.globalAlpha = .55;
+    for (const [t, v] of cu.bp || []) g.fillRect(px(t) - 1.5, py(v) - 1.5, 3, 3);
+    g.globalAlpha = 1;
+    const sp = document.createElement("span");
+    const i = document.createElement("i");
+    i.style.background = cu.colore;
+    sp.appendChild(i);
+    sp.appendChild(document.createTextNode(cu.nome + " "));
+    const b = document.createElement("b");
+    b.textContent = cu.da === cu.a ? cu.da : cu.da + " … " + cu.a;
+    sp.appendChild(b);
+    leg.appendChild(sp);
+  }
+}
+
+// --- i grani -------------------------------------------------------------
+// Il piano dei grani della partitura (`ScoreVisualizer._draw_grains_full`),
+// qui sotto gli inviluppi: x il tempo d'uscita, y la posizione di lettura nel
+// sample — l'asse su cui la partitura mette la forma d'onda del file — il
+// colore l'altezza (la stessa colormap divergente, auto-zoomata sull'
+// escursione vera) e l'opacita' il volume.
+//
+// Il conto e' tutto del server (`engine_bridge._grani`): qui arrivano colonne
+// parallele di numeri e un indice di palette per grano. Due scelte, e sono
+// entrambe per il peso:
+//
+//   - il grano e' una COLONNA, non la freccia o la silhouette della finestra:
+//     a questa scala e' largo un paio di pixel, e la partitura stessa ripiega
+//     sulla freccia sotto i tre (`window_shape_min_px`);
+//   - si disegna un Path2D per TINTA, non per grano: `fillStyle` cambia
+//     centoventotto volte invece di quarantamila, ed e' quello il costo vero
+//     di un canvas 2D.
+let GRANI = null;    // {n, tot, passo, sample_dur, x, w, y, h, k, palette, colore}
+
+function drawGrani() {
+  const box = document.getElementById("graniRow");
+  const leg = document.getElementById("graniLeg");
+  // Come per gli inviluppi: sull'ascolto di un sample questi grani non sono
+  // i grani di niente.
+  box.hidden = !(LAB_AUDIO && GRANI);
+  leg.textContent = "";
+  if (box.hidden) return;
+  const c = document.getElementById("granic");
+  c.width = c.parentNode.clientWidth;
+  const g = c.getContext("2d"), W = c.width, H = c.height;
+  g.clearRect(0, 0, W, H);
+  const dur = (view && view.duration) || 1;
+  const sx = W / dur, sy = H / (GRANI.sample_dur || 1);
+  const X = GRANI.x, L = GRANI.w, Y = GRANI.y, A = GRANI.h, K = GRANI.k;
+  const paths = [];
+  for (let i = 0; i < X.length; i++) {
+    const p = paths[K[i]] || (paths[K[i]] = new Path2D());
+    // Almeno un pixel per lato: un grano di un campione esiste e si deve
+    // vedere, come il `min_grain_width_pts` della partitura.
+    const h = A[i] * sy, y = H - Y[i] * sy;
+    p.rect(X[i] * sx, h >= 0 ? y - h : y,
+           Math.max(1, L[i] * sx), Math.max(1, Math.abs(h)));
+  }
+  paths.forEach((p, k) => { g.fillStyle = GRANI.palette[k]; g.fill(p); });
+  // La forma d'onda accanto: arriva quando il sample e' decodificato, e
+  // subito se era gia' in cache.
+  caricaSample(GRANI.sample).then(drawOnda);
+  leg.textContent = GRANI.n.toLocaleString("it") + " grani" +
+    (GRANI.passo > 1 ? " (uno ogni " + GRANI.passo + " dei " +
+                       GRANI.tot.toLocaleString("it") + ")" : "") +
+    "  ·  " + GRANI.colore +
+    "  ·  sample " + GRANI.sample_dur.toFixed(3) + " s";
+}
+
+// La forma d'onda del sample, in verticale a sinistra dei grani: senza, il
+// piano dice DOVE il pointer legge ma non COSA c'e' li'. E' la corsia
+// `ax_wave` della partitura (`_draw_waveform_full`), che disegna lo stesso
+// asse dei grani — y il tempo nel file, x l'ampiezza.
+//
+// I campioni sono quelli del sample vero, presi da `/samples/` e tenuti nella
+// stessa cache degli ascolti: sentire il sample dopo averlo visto non
+// ridecodifica niente. I picchi sono la stessa `peaks` della forma d'onda del
+// render, solo letta per righe invece che per colonne.
+let SAMPLEBUF = null;   // {nome, mono} del sample dello stream reso
+
+async function caricaSample(nome) {
+  if (!nome) { SAMPLEBUF = null; return; }
+  if (SAMPLEBUF && SAMPLEBUF.nome === nome) return;
+  const url = "/samples/" + nome.split("/").map(encodeURIComponent).join("/");
+  let d = cache.get(url);
+  if (!d) {
+    try {
+      const buf = await ctx.decodeAudioData(await (await fetch(url)).arrayBuffer());
+      d = {duration: buf.duration, rate: buf.sampleRate, mono: mixdown(buf), buf, url};
+      cache.set(url, d);
+    } catch (e) {
+      // Il sample non si legge: restano i grani, senza la corsia accanto.
+      SAMPLEBUF = null;
+      return;
+    }
+  }
+  SAMPLEBUF = {nome, mono: d.mono};
+}
+
+function drawOnda() {
+  const c = document.getElementById("granw");
+  const g = c.getContext("2d"), W = c.width, H = c.height, mid = W / 2;
+  g.clearRect(0, 0, W, H);
+  if (!SAMPLEBUF) return;
+  const p = peaks(SAMPLEBUF.mono, H);
+  g.strokeStyle = getComputedStyle(document.body).color;
+  g.globalAlpha = .25;
+  g.beginPath(); g.moveTo(mid, 0); g.lineTo(mid, H); g.stroke();
+  g.globalAlpha = .8;
+  g.beginPath();
+  for (let y = 0; y < H; y++) {
+    // In alto la fine del file: lo stesso verso dell'asse dei grani, dove y
+    // cresce verso l'alto.
+    const i = H - 1 - y;
+    g.moveTo(mid + p.lo[i] * mid, y + .5);
+    g.lineTo(mid + p.hi[i] * mid, y + .5);
+  }
+  g.stroke();
+  g.globalAlpha = 1;
+}
+
+// Il punto del buffer che si sta leggendo adesso: la riga orizzontale sulla
+// forma d'onda, perpendicolare al cursore rosso del tempo. Non e' un dato a
+// parte — sono i grani vivi in questo istante, ognuno col suo pointer.
+//
+// Un grano percorre il suo tratto di buffer mentre dura, quindi al tempo t
+// legge il punto `y + h * (t - onset) / durata`: e' quella la posizione, non
+// il pointer d'attacco. Fra i grani vivi c'e' un'escursione — l'offset_range,
+// le voci, la dispersione del pointer — e la si mostra come banda, con la
+// riga sul centro: cento righe separate sarebbero cento righe attaccate.
+//
+// ponytail: la scansione e' lineare su tutti i grani, a ogni frame. Sono
+// quarantamila confronti su array tipizzati, meno di un millisecondo; se
+// crescesse (o se arrivasse uno zoom che alza il tetto della decimazione)
+// servirebbe un indice ordinato per onset.
+function letturaA(t) {
+  if (!GRANI) return null;
+  const X = GRANI.x, L = GRANI.w, Y = GRANI.y, A = GRANI.h;
+  let lo = Infinity, hi = -Infinity, somma = 0, n = 0;
+  for (let i = 0; i < X.length; i++) {
+    if (X[i] > t || X[i] + L[i] <= t) continue;
+    const p = Y[i] + A[i] * (t - X[i]) / (L[i] || 1);
+    if (p < lo) lo = p;
+    if (p > hi) hi = p;
+    somma += p; n++;
+  }
+  // Nessun grano vivo: silenzio, e niente da indicare.
+  return n ? {lo, hi, media: somma / n, n} : null;
+}
+
+function mostraLettura(t) {
+  const banda = document.getElementById("letturaB");
+  const riga = document.getElementById("letturaL");
+  const l = document.getElementById("graniRow").hidden ? null : letturaA(t);
+  banda.hidden = riga.hidden = !l;
+  if (!l) return;
+  const dur = GRANI.sample_dur || 1;
+  const cima = v => (1 - Math.min(1, Math.max(0, v / dur))) * 100;
+  banda.style.top = cima(l.hi) + "%";
+  // Almeno un pixel: con un grano solo la banda ha altezza zero e sparirebbe.
+  banda.style.height = "max(1px, " + (cima(l.lo) - cima(l.hi)) + "%)";
+  riga.style.top = cima(l.media) + "%";
+}
+
+// Anteprima: solo i parametri mossi, nella forma che finisce nello YAML —
+// terzo elemento compreso, altrimenti due inviluppi che suonano diverso si
+// leggono identici e la scelta dell'interpolazione sembra non aver fatto
+// niente.
+function preview() {
+  const punto = pt => "[" + pt[0].toFixed(3) + ", " + pt[1] +
+                      (pt[2] ? ", " + pt[2] : "") + "]";
+  const righe = NUM.map(p => [p.path, serie(p.path)])
+                   .filter(([, v]) => Array.isArray(v))
+                   .map(([k, v]) => k + ": [" + v.map(punto).join(", ") + "]");
+  const e = ENVP ? serieEnv() : null;
+  if (e && typeof e === "object")
+    righe.push(EP + ":\n  states: [" +
+               e.states.map(st => "[" + st[0].toFixed(3) + ", " + st[1] + "]").join(", ") +
+               "]\n  curve: [" + e.curve.map(punto).join(", ") + "]");
+  return righe.join("\n");
+}
+
+
+// --- il file su cui si lavora ---------------------------------------------
+// Semantica normale: nuovo / apri / salva / salva con nome, e l'avviso se ci
+// sono modifiche non salvate. I pannelli sono quelli di macOS, aperti dal
+// server (POST /pick): la pagina da sola non sa dove sta un file sul disco.
+//
+// Il file di progetto e' lo YAML: un documento engine puro, che si riapre
+// qui, si incolla nel brano o si apre in PGE-ui. I breakpoint non si salvano
+// a parte perche' non sono un'informazione in piu': sono i tempi che
+// compaiono negli inviluppi.
+
+let FILE = "";        // path assoluto del file aperto; "" = mai salvato
+let SALVATO = "";     // com'era il documento all'ultimo salvataggio
+
+// Rete di sicurezza per il refresh accidentale: il lavoro in corso torna da
+// solo. Non e' un salvataggio — quello e' il file.
+const BOZZA = "lab:" + D.study;
+// Il foglio bianco si chiama cosi' finche' non e' un file.
+const NOME0 = "nuovo stream";
+// Letta subito, prima che qualunque disegno la riscriva: e' la bozza con cui
+// la pagina e' stata aperta.
+const BOZZA0 = (() => {
+  try { return JSON.parse(localStorage.getItem(BOZZA) || "null"); } catch (e) { return null; }
+})();
+let SESSIONE = "";     // l'avvio del server, che risponde /stato
+
+function statoOra() { return JSON.stringify(bps.length ? labDoc() : null); }
+function sporco() { return statoOra() !== SALVATO; }
+
+function segna() {
+  const el = document.getElementById("fFile");
+  el.textContent = FILE ? FILE.split("/").pop() : "(non salvato)";
+  el.title = FILE || "";
+  el.classList.toggle("dirty", sporco());
+  document.getElementById("fSave").disabled = !bps.length || !sporco();
+}
+
+function bozzaSalva() {
+  try {
+    localStorage.setItem(BOZZA, JSON.stringify({
+      bps, file: FILE, salvato: SALVATO, sess: SESSIONE,
+      name: document.getElementById("labName").value,
+      dur: document.getElementById("labDur").value,
+      cat: Object.fromEntries(CAT.map(p => [p.path, document.getElementById("P:" + p.path).value])),
+    }));
+  } catch (e) { /* private browsing: pazienza, il file resta la verita' */ }
+}
+
+function ripristina() {
+  const b = BOZZA0;
+  if (!b || !b.bps || !b.bps.length) return;
+  bps = b.bps;
+  FILE = b.file || "";
+  SALVATO = b.salvato || "";
+  document.getElementById("labName").value = b.name || NOME0;
+  document.getElementById("labDur").value = b.dur || DUR;
+  for (const [path, v] of Object.entries(b.cat || {})) setSel(path, v);
+  vociVis();
+  storiaReset();
+  bpLoad(0);
+  document.getElementById("labInfo").textContent =
+    "ripreso il lavoro in corso (" + bps.length + " breakpoint)";
+}
+
+// Il valore di un parametro fisso: select o galleria delle finestre.
+function setSel(path, v) {
+  const el = document.getElementById("P:" + path);
+  if (!el || v === undefined || v === null) return;
+  el.value = v;
+  const box = document.getElementById("envs");
+  if (box && path === "grain.envelope")
+    for (const b of box.querySelectorAll("button"))
+      b.classList.toggle("on", b.title === v);
+}
+
+async function post(rotta, body) {
+  const info = document.getElementById("labInfo");
+  let r;
+  try {
+    r = await fetch(rotta, {method: "POST",
+      headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  } catch (e) {
+    info.textContent = "server non raggiungibile: serve `make serve` (non file://).";
+    return {ok: false, error: info.textContent};
+  }
+  if (!r.ok) {
+    // Il caso vero: un `make serve` avviato prima che questa rotta esistesse.
+    // Senza questo messaggio il bottone semplicemente non reagisce.
+    info.textContent = r.status === 404
+      ? "il server non conosce /" + rotta + ": e' una versione vecchia, "
+        + "fermalo (Ctrl-C) e rilancia `make serve`."
+      : "il server ha risposto " + r.status + ".";
+    return {ok: false, error: info.textContent};
+  }
+  try {
+    return await r.json();
+  } catch (e) {
+    info.textContent = "risposta non leggibile dal server: " + e;
+    return {ok: false, error: info.textContent};
+  }
+}
+
+// Se c'e' del lavoro non salvato, chiedere prima di buttarlo: e' l'unica
+// azione della pagina che perde qualcosa per sempre.
+function confermaPerdita(cosa) {
+  if (!bps.length || !sporco()) return true;
+  return confirm("Ci sono modifiche non salvate" + (FILE ? " a " + FILE.split("/").pop() : "")
+                 + ".\nVuoi " + cosa + " comunque? (Annulla per tornare indietro e salvare)");
+}
+
+function fNew() {
+  if (!confermaPerdita("creare un nuovo stream")) return;
+  storiaReset();
+  bps = [];
+  curBp = -1;
+  SELEZIONE.clear();
+  setSel("pointer.loop", "off");   // il loop si disegna, non si eredita
+  FILE = "";
+  SALVATO = statoOra();
+  document.getElementById("labName").value = NOME0;
+  document.getElementById("labInfo").textContent = "nuovo stream.";
+  drawTl();
+}
+
+async function fOpen() {
+  if (!confermaPerdita("aprire un altro file")) return;
+  const sc = await post("pick", {mode: "open", start: FILE ? dir(FILE) : ""});
+  if (sc.error) { document.getElementById("labInfo").textContent = sc.error; return; }
+  if (!sc.path) return;                       // annullato nel pannello
+  apriPath(sc.path);
+}
+
+async function apriPath(path) {
+  const out = await post("open", {path});
+  if (!out.ok) { document.getElementById("labInfo").textContent = out.error; return; }
+  carica(out.doc, path);
+  recenti();                                  // il file aperto va in testa
+}
+
+// Cosa dice il server all'apertura: questa sessione e i file recenti. Se non
+// risponde — pagina aperta da file:// — restano foglio bianco e nessun
+// recente, che e' anche la cosa giusta da mostrare.
+async function stato() {
+  try {
+    const r = await fetch("/stato", {method: "POST",
+      headers: {"Content-Type": "application/json"}, body: "{}"});
+    if (r.ok) return await r.json();
+  } catch (e) { /* nessun server */ }
+  return null;
+}
+
+async function avvio() {
+  const s = await stato();
+  SESSIONE = (s && s.sessione) || "";
+  recentiMenu((s && s.recenti) || []);
+  // La bozza vale solo per la sessione che l'ha scritta: un refresh riprende
+  // il lavoro non salvato, un `make serve` nuovo apre un foglio bianco.
+  if (BOZZA0 && BOZZA0.sess && BOZZA0.sess === SESSIONE) ripristina();
+  else try { localStorage.removeItem(BOZZA); } catch (e) { /* pazienza */ }
+  segna();
+}
+
+async function recenti() { recentiMenu(((await stato()) || {}).recenti || []); }
+
+// I recenti sono quelli del server, non della pagina: sono i file usciti da
+// un pannello, e solo quelli si possono riaprire senza ripassare di li'.
+function recentiMenu(lista) {
+  const s = document.getElementById("fRecent");
+  s.hidden = !lista.length;
+  s.innerHTML = "";
+  s.appendChild(new Option("apri recente…", ""));
+  for (const p of lista) {
+    const o = new Option(p.split("/").pop(), p);
+    o.title = p;
+    s.appendChild(o);
+  }
+  s.onchange = () => {
+    const p = s.value;
+    s.selectedIndex = 0;                      // resta l'etichetta, non una scelta
+    if (!p || !confermaPerdita("aprire un altro file")) return;
+    apriPath(p);
+  };
+}
+
+function dir(p) { return p.slice(0, p.lastIndexOf("/")); }
+
+async function fSave(chiediDove) {
+  if (!bps.length) { document.getElementById("labInfo").textContent = "niente da salvare."; return; }
+  let path = FILE;
+  if (chiediDove || !path) {
+    const nome = (document.getElementById("labName").value || "stream") + ".yml";
+    const sc = await post("pick", {mode: "save", name: nome, start: FILE ? dir(FILE) : ""});
+    if (sc.error) { document.getElementById("labInfo").textContent = sc.error; return; }
+    if (!sc.path) return;
+    path = sc.path;
+  }
+  await labPost(false, path);
+  recenti();
+}
+
+// Carica un documento nel laboratorio: i breakpoint sono i tempi che
+// compaiono negli inviluppi, e ogni parametro vale li' quanto vale il suo.
+function carica(doc, path) {
+  if (!doc || !doc.streams || !doc.streams[0]) {
+    document.getElementById("labInfo").textContent = "non e' un documento con stream.";
+    return;
+  }
+  const st = tempiFrazione(doc.streams[0],
+                           doc.streams[0].duration || doc.duration || DUR);
+  const fissiLoop = leggiLoop(st);
+  const ts = new Set([0]);
+  for (const p of NUM) {
+    const v = leggiPath(st, p.path);
+    if (Array.isArray(v)) for (const [t] of v) ts.add(t);
+  }
+  // I tempi della curve dell'envelope sono breakpoint come gli altri: e' la
+  // stessa unione, altrimenti riaprendo un cambio di finestra sparirebbe.
+  const espec = ENVP ? leggiPath(st, EP) : null;
+  if (espec && Array.isArray(espec.curve)) for (const [t] of espec.curve) ts.add(t);
+  // E i tempi della progressione di accordi, per la stessa ragione.
+  const prog = leggiPath(st, "voices.pitch.progression");
+  if (Array.isArray(prog)) for (const passo of prog)
+    if (Number.isFinite(passo[0])) ts.add(passo[0]);
+  const envOra = () => ENVP ? document.getElementById("P:" + EP).value : null;
+  bps = [...ts].sort((a, b) => a - b).map(t => ({
+    t,
+    // Il tipo del segmento in cui t cade: e' quello che decide come si arriva
+    // al punto dopo, ed e' cio' che il menu di quella riga deve mostrare.
+    ints: Object.fromEntries(AUT.map(p => [p.path,
+      p.path === EP ? tipoA(espec && espec.curve, t)
+                    : tipoA(leggiPath(st, p.path), t)])),
+    vals: Object.fromEntries(AUT.map(p => {
+      if (p.path === EP) return [EP, (espec ? envA(espec, t) : null) || envOra()];
+      if (p === PROG) return [p.path, (Array.isArray(prog) && (passoA(prog, t) || [])[1])
+                                      || document.getElementById("P:" + p.path).value];
+      // Il documento puo' non avere affatto la chiave (un parametro lasciato
+      // al default dell'engine): li' vale quello che dice il select, non NaN.
+      const v = leggiPath(st, p.path);
+      return [p.path, v === undefined || v === null
+        ? Number(document.getElementById("P:" + p.path).value)
+        : Number(valoreA(v, t))];
+    })),
+  }));
+  for (const p of CAT) setSel(p.path, leggiPath(st, p.path));
+  vociCarica(st);
+  for (const [path, v] of Object.entries(fissiLoop)) setSel(path, v);
+  SELEZIONE.clear();        // i breakpoint di prima non esistono piu'
+  FILE = path || "";
+  document.getElementById("labName").value =
+    (path || NOME0).split("/").pop().replace(/\.ya?ml$/, "");
+  document.getElementById("labDur").value = doc.duration || st.duration || DUR;
+  DURPREC = durata();
+  storiaReset();
+  bpLoad(0);
+  SALVATO = statoOra();
+  segna();
+  document.getElementById("labInfo").textContent =
+    (path || "documento") + " — " + bps.length + " breakpoint";
+}
+
+// Il valore di un parametro al tempo t: il punto se c'e', altrimenti quello
+// che l'inviluppo vale li' — INTERPOLATO, non il piu' vicino a sinistra.
+// Riaprendo, un parametro prende un punto a ogni tempo della griglia: col
+// valore a sinistra una rampa 0.2 -> 0.75 diventerebbe un plateau a 0.2 e poi
+// una rampa piu' ripida, e il file risalvato suonerebbe diverso da quello
+// aperto. Un gradino dichiarato (terzo elemento `step`) invece tiene.
+function valoreA(v, t) {
+  if (!Array.isArray(v)) return v;
+  let prev = v[0];
+  for (const pt of v) {
+    if (pt[0] >= t - 1e-9) {
+      if (pt[0] - prev[0] < 1e-9 || prev[2] === "step") return prev[1];
+      const k = (t - prev[0]) / (pt[0] - prev[0]);
+      return prev[1] + (pt[1] - prev[1]) * k;
+    }
+    prev = pt;
+  }
+  return prev[1];
+}
+
+// Il tipo del segmento che contiene t (l'ultimo punto non ne ha: vale linear).
+function tipoA(v, t) {
+  if (!Array.isArray(v)) return "linear";
+  let tipo = "linear";
+  for (const pt of v) {
+    if (pt[0] > t + 1e-9) break;
+    tipo = pt[2] || "linear";
+  }
+  return tipo;
+}
+
+function leggiPath(st, path) {
+  let o = st;
+  for (const k of path.split(".")) { if (o == null) return undefined; o = o[k]; }
+  return o;
+}
+
+function labRender() { return labPost(true); }
+
+async function labPost(render, path) {
+  if (!bps.length) { document.getElementById("labInfo").textContent = "nessun breakpoint."; return; }
+  const name = document.getElementById("labName").value || NOME0;
+  const info = document.getElementById("labInfo");
+  info.textContent = render ? "render in corso…" : "salvo…";
+  try {
+    const out = await post("render", {name, doc: labDoc(), render, path: path || FILE});
+    if (!out.ok) { info.textContent = out.error; return; }
+    FILE = out.path || FILE;
+    SALVATO = statoOra();
+    segna();
+    info.textContent = out.yaml + (render ? "" : "  (salvato)");
+    if (!render) return;
+    // `?t=` perche' rirendendo con lo stesso nome il browser servirebbe il
+    // file vecchio dalla cache.
+    const src = out.src + "?t=" + Date.now();
+    ULTIMO = src;
+    ora("stream", name);
+    if (TORNA) TORNA.disabled = false;
+    ENVS = out.inviluppi || [];
+    GRANI = out.grani || null;
+    ENVDUR = durata();
+    LAB_AUDIO = true;
+    SAMPLE_AUDIO = false;
+    audio.src = src;
+    audio.play();
+    analyse(src);
+    marcaAudio();
+  } catch (e) {
+    info.textContent = "server non raggiungibile: serve `make serve` (non file://). " + e;
+  }
+}
+
+labInit();
+
+// ===========================================================================
+// Analisi. Due strade diverse, per due domande diverse:
+//
+//   - sonogramma e forma d'onda guardano il file INTERO, quindi si calcolano
+//     una volta sola sui campioni decodificati (fetch + decodeAudioData) e si
+//     disegnano su canvas fermi;
+//   - spectroscope e stereoscope guardano l'ISTANTE, quindi si leggono dal
+//     grafo Web Audio in riproduzione (AnalyserNode) a ogni frame.
+//
+// Il cursore non e' uno stato: e' una funzione di `audio.currentTime`, letta
+// dallo stesso requestAnimationFrame per entrambe le viste. Il seek scrive su
+// `audio.currentTime` e basta. Non esistendo una seconda copia della
+// posizione, non esiste desincronizzazione possibile.
+// ===========================================================================
+
+const ctx = new (window.AudioContext || window.webkitAudioContext)();
+const analyser = ctx.createAnalyser();
+analyser.fftSize = 4096;
+analyser.smoothingTimeConstant = 0.6;
+const splitter = ctx.createChannelSplitter(2);
+const anL = ctx.createAnalyser(), anR = ctx.createAnalyser();
+anL.fftSize = anR.fftSize = 2048;
+const src = ctx.createMediaElementSource(audio);
+// Il gain muta l'elemento quando a suonare e' il loop del sample (vedi LP).
+const gainEl = ctx.createGain();
+src.connect(gainEl);
+gainEl.connect(analyser);
+analyser.connect(ctx.destination);
+gainEl.connect(splitter);
+splitter.connect(anL, 0);
+splitter.connect(anR, 1);
+
+audio.addEventListener("play", () => { ctx.resume(); lpSync(); });
+audio.addEventListener("pause", () => lpStop());
+
+// --- il loop del sample ----------------------------------------------------
+// Un loop non si fa spostando `audio.currentTime` alla fine della regione: il
+// seek dell'elemento e' asincrono, il cursore salta subito e il suono riparte
+// quando il browser ha ribufferizzato — si sentono i due andare fuori passo.
+// Qui suona un AudioBufferSourceNode col loop nativo (preciso al campione) e
+// l'elemento resta in play ma muto, solo come trasporto: play/pausa, spazio,
+// seek passano ancora da li'. Il cursore legge l'orologio del contesto.
+var LP = null;       // {node, ls, le, off, t0}; var: marcaAudio lo tocca prima di qui
+
+function lpPos() {
+  const el = Math.max(0, ctx.currentTime - latenza() - LP.t0);
+  return LP.ls + (LP.off - LP.ls + el) % (LP.le - LP.ls);
+}
+
+function lpStop() {
+  if (!LP) return;
+  LP.node.stop();
+  LP.node.disconnect();
+  LP = null;
+  gainEl.gain.value = 1;
+  audio.loop = loop.checked;
+}
+
+function lpStart(at) {
+  lpStop();
+  const LOOP = loopFrac(), D = view.buf.duration, ls = LOOP[0] * D, le = LOOP[1] * D;
+  const off = at >= ls && at < le ? at : ls;
+  const node = ctx.createBufferSource();
+  node.buffer = view.buf;
+  node.loop = true;
+  node.loopStart = ls;
+  node.loopEnd = le;
+  node.connect(analyser);
+  node.connect(splitter);
+  node.start(0, off);
+  LP = {node, ls, le, off, t0: ctx.currentTime};
+  gainEl.gain.value = 0;
+  audio.loop = true;       // l'elemento muto non deve fermarsi a fine file
+}
+
+// Allinea il loop allo stato: parte, si ferma, o riparte se la regione e'
+// cambiata (dal punto in cui era).
+// ponytail: durante il trascinamento degli estremi riparte a ogni mossa, con
+// qualche click; aggiornare loopStart/loopEnd dal vivo se da' fastidio.
+function lpSync() {
+  if (!LP && !SAMPLE_AUDIO) return;
+  const LOOP = SAMPLE_AUDIO && loopFrac();
+  const ok = LOOP && LOOP[1] > LOOP[0] && view && view.buf && !audio.paused &&
+             audio.src.endsWith(view.url);
+  if (!ok) return lpStop();
+  const D = view.buf.duration;
+  if (LP && LP.ls === LOOP[0] * D && LP.le === LOOP[1] * D) return;
+  lpStart(LP ? lpPos() : audio.currentTime);
+}
+
+// --- spunte del trasporto, ricordate fra una sessione e l'altra -----------
+const loop = document.getElementById("loop");
+for (const [el, k] of [[loop, "graph.loop"]]) {
+  try { el.checked = localStorage.getItem(k) === "1"; } catch (e) {}
+  el.addEventListener("change", () => {
+    try { localStorage.setItem(k, el.checked ? "1" : "0"); } catch (e) {}
+    if (el === loop) audio.loop = loop.checked;
+  });
+}
+audio.loop = loop.checked;
+
+// Il cursore mostra l'istante in cui l'audio e' PRODOTTO; alle orecchie arriva
+// dopo (buffer del sistema, DAC, Bluetooth). Il browser lo dice solo a volte
+// (`outputLatency`, non in Safari): il resto si tara a orecchio qui.
+const latEl = document.getElementById("lat");
+try { latEl.value = localStorage.getItem("graph.lat") || 0; } catch (e) { latEl.value = 0; }
+latEl.addEventListener("change", () => {
+  try { localStorage.setItem("graph.lat", latEl.value); } catch (e) {}
+});
+function latenza() {
+  return (ctx.outputLatency || 0) + (Number(latEl.value) || 0) / 1000;
+}
+
+// L'altezza di un canvas e' quella del suo attributo, e non dipende dalla
+// larghezza della colonna. Senza, `width:100%` da solo lascia l'altezza al
+// RAPPORTO fra gli attributi (`height:auto` su un elemento rimpiazzato): con
+// la bitmap ancora larga 300 — nessun audio caricato, quindi `analyse` non ha
+// ancora scritto `c.width` — una colonna larga stirava il sonogramma per
+// mezzo schermo. Se lo dicesse il CSS, i numeri sarebbero scritti due volte.
+for (const c of document.querySelectorAll(".view canvas"))
+  c.style.height = c.height + "px";
+
+const FMIN = 20;
+const cache = new Map();      // src -> {peaks, spec} gia' calcolati
+
+// --- FFT radix-2 iterativa, in-place -------------------------------------
+// Cooley-Tukey: bit-reversal in testa, poi log2(N) stadi di farfalle. Le
+// tabelle di seno/coseno si calcolano una volta per dimensione: e' l'unica
+// parte che vale la pena precalcolare, il resto e' aritmetica.
+const twiddles = new Map();
+function tables(n) {
+  if (twiddles.has(n)) return twiddles.get(n);
+  const cos = new Float32Array(n / 2), sin = new Float32Array(n / 2);
+  for (let i = 0; i < n / 2; i++) {
+    cos[i] = Math.cos(-2 * Math.PI * i / n);
+    sin[i] = Math.sin(-2 * Math.PI * i / n);
+  }
+  const rev = new Uint32Array(n);
+  const bits = Math.log2(n);
+  for (let i = 0; i < n; i++) {
+    let r = 0;
+    for (let b = 0; b < bits; b++) if (i & (1 << b)) r |= 1 << (bits - 1 - b);
+    rev[i] = r;
+  }
+  const t = {cos, sin, rev};
+  twiddles.set(n, t);
+  return t;
+}
+
+function fft(re, im) {
+  const n = re.length, {cos, sin, rev} = tables(n);
+  for (let i = 0; i < n; i++) {
+    const j = rev[i];
+    if (j > i) {
+      let t = re[i]; re[i] = re[j]; re[j] = t;
+      t = im[i]; im[i] = im[j]; im[j] = t;
+    }
+  }
+  for (let size = 2; size <= n; size <<= 1) {
+    const half = size >> 1, step = n / size;
+    for (let i = 0; i < n; i += size) {
+      for (let j = 0, k = 0; j < half; j++, k += step) {
+        const l = i + j, r = l + half;
+        const tr = re[r] * cos[k] - im[r] * sin[k];
+        const ti = re[r] * sin[k] + im[r] * cos[k];
+        re[r] = re[l] - tr; im[r] = im[l] - ti;
+        re[l] += tr;        im[l] += ti;
+      }
+    }
+  }
+}
+
+// --- STFT: una colonna di magnitudini in dB per hop ------------------------
+const DBFLOOR = -96;
+
+// La finestra decide il compromesso: piu' lunga = piu' risoluzione in
+// frequenza e meno nel tempo. Su grani da 20 us conta la seconda, su grani da
+// mezzo secondo la prima — per questo la scelta e' esposta e non fissata.
+// L'hop resta un quarto della finestra: 75% di sovrapposizione a ogni misura.
+function stft(mono, n) {
+  const win = new Float32Array(n);              // Hann
+  for (let i = 0; i < n; i++) win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / n);
+  const hop = n / 4;
+  const cols = Math.max(1, Math.floor((mono.length - n) / hop) + 1);
+  const bins = n / 2;
+  const out = new Float32Array(cols * bins);
+  const re = new Float32Array(n), im = new Float32Array(n);
+  for (let c = 0; c < cols; c++) {
+    const off = c * hop;
+    for (let i = 0; i < n; i++) {
+      re[i] = (mono[off + i] || 0) * win[i];
+      im[i] = 0;
+    }
+    fft(re, im);
+    for (let b = 0; b < bins; b++) {
+      const m = Math.sqrt(re[b] * re[b] + im[b] * im[b]) * 2 / n;
+      out[c * bins + b] = Math.max(DBFLOOR, 20 * Math.log10(m + 1e-12));
+    }
+  }
+  return {cols, bins, db: out};
+}
+
+// Picchi min/max per colonna di pixel: la forma d'onda vera, non un
+// sottocampionamento che salta le transienti (con grani da 20 us salterebbe
+// tutto).
+function peaks(mono, cols) {
+  const per = mono.length / cols;
+  const lo = new Float32Array(cols), hi = new Float32Array(cols);
+  for (let c = 0; c < cols; c++) {
+    const a = Math.floor(c * per), b = Math.min(mono.length, Math.floor((c + 1) * per));
+    let mn = 0, mx = 0;
+    for (let i = a; i < b; i++) {
+      const v = mono[i];
+      if (v < mn) mn = v;
+      if (v > mx) mx = v;
+    }
+    lo[c] = mn; hi[c] = mx;
+  }
+  return {lo, hi};
+}
+
+function mixdown(buf) {
+  const n = buf.length, out = new Float32Array(n);
+  for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+    const d = buf.getChannelData(ch);
+    for (let i = 0; i < n; i++) out[i] += d[i];
+  }
+  if (buf.numberOfChannels > 1) for (let i = 0; i < n; i++) out[i] /= buf.numberOfChannels;
+  return out;
+}
+
+// Scala di colore: nero -> viola -> arancio -> bianco, in tre tratti lineari.
+// Serve solo a rendere leggibili 96 dB di dinamica, non e' percettivamente
+// uniforme.
+function heat(v) {
+  const s = [[0, 0, 0], [60, 20, 90], [220, 90, 30], [255, 255, 220]];
+  const t = Math.min(0.999, Math.max(0, v)) * 3;
+  const i = Math.floor(t), f = t - i;
+  const a = s[i], b = s[i + 1];
+  return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+}
+
+let view = null;   // {duration} della clip attualmente disegnata
+// 8192 campioni di default: la grana fine si guarda in frequenza, e una
+// finestra corta impasta le righe dei grani.
+let logScale = true, nfft = 8192;
+
+const RES = [256, 512, 1024, 2048, 4096, 8192];
+function drawCtl() {
+  const sc = document.getElementById("scale"), rs = document.getElementById("res");
+  sc.innerHTML = ""; rs.innerHTML = "";
+  for (const [lab, v] of [["lin", false], ["log", true]]) {
+    const b = document.createElement("button");
+    b.textContent = lab;
+    if (logScale === v) b.classList.add("on");
+    b.onclick = () => { logScale = v; drawCtl(); redrawSpec(); };
+    sc.appendChild(b);
+  }
+  for (const n of RES) {
+    const b = document.createElement("button");
+    b.textContent = n;
+    if (nfft === n) b.classList.add("on");
+    // Ogni risoluzione ha la sua STFT, tenuta in cache a parte: tornare
+    // indietro non ricalcola.
+    b.onclick = () => { nfft = n; drawCtl(); redrawSpec(); };
+    rs.appendChild(b);
+  }
+}
+
+function redrawSpec() {
+  if (!view) return;
+  const c = document.getElementById("spec");
+  c.width = c.parentNode.clientWidth;
+  drawSpec(c, view);
+}
+
+async function analyse(url) {
+  const specC = document.getElementById("spec"), waveC = document.getElementById("wave");
+  const scopeEl = document.getElementById("scope");
+  specC.width = specC.parentNode.clientWidth;
+  waveC.width = waveC.parentNode.clientWidth;
+  scopeEl.width = scopeEl.parentNode.clientWidth;
+  status.textContent = "analisi…";
+  let data = cache.get(url);
+  if (!data) {
+    try {
+      const buf = await ctx.decodeAudioData(await (await fetch(url)).arrayBuffer());
+      const mono = mixdown(buf);
+      data = {duration: buf.duration, rate: buf.sampleRate, mono, buf, url};
+      cache.set(url, data);
+    } catch (e) {
+      status.textContent = "impossibile leggere l'audio (" + e.name +
+        "): apri la pagina da http://localhost, non da file://.";
+      return;
+    }
+  }
+  view = data;
+  lpSync();          // il play e' arrivato prima dell'analisi: il buffer c'e' ora
+  drawCtl();
+  drawSpec(specC, data);
+  drawWave(waveC, data);
+  const s = data.specs[nfft];
+  status.textContent = data.duration.toFixed(2) + " s · " + data.rate + " Hz · " +
+    "finestra " + nfft + " campioni (" + (nfft / data.rate * 1000).toFixed(1) + " ms, " +
+    (data.rate / nfft).toFixed(1) + " Hz per bin) · " + s.cols + " colonne";
+  // Inviluppi e grani vivono sull'asse dei tempi del FILE, che si sa solo
+  // qui: `analyse` e' asincrona e chi l'ha chiamata (`labPost`, `ascolta`)
+  // ha gia' disegnato con la durata di prima — o con nessuna, al primo
+  // ascolto, e allora non si vedeva niente finche' qualcos'altro non
+  // ridisegnava. Si ridisegna quando il dato c'e'.
+  drawEnvs();
+  drawGrani();
+}
+
+function drawSpec(c, d) {
+  const g = c.getContext("2d"), W = c.width, H = c.height;
+  d.specs = d.specs || {};
+  const s = d.specs[nfft] || (d.specs[nfft] = stft(d.mono, nfft));
+  const nyq = d.rate / 2, binHz = nyq / s.bins;
+  const img = g.createImageData(W, H);
+  for (let x = 0; x < W; x++) {
+    const col = Math.min(s.cols - 1, Math.floor(x / W * s.cols));
+    for (let y = 0; y < H; y++) {
+      // y=0 in alto = Nyquist. In log lo spazio e' distribuito per ottave —
+      // le prime armoniche si leggono; in lineare per hertz — l'alto si legge.
+      const f = logScale ? FMIN * Math.pow(nyq / FMIN, 1 - y / H)
+                         : nyq * (1 - y / H);
+      const b = Math.min(s.bins - 1, Math.round(f / binHz));
+      const db = s.db[col * s.bins + b];
+      const [r, gg, bb] = heat((db - DBFLOOR) / -DBFLOOR);
+      const p = (y * W + x) * 4;
+      img.data[p] = r; img.data[p + 1] = gg; img.data[p + 2] = bb; img.data[p + 3] = 255;
+    }
+  }
+  g.putImageData(img, 0, 0);
+}
+
+function drawWave(c, d) {
+  const g = c.getContext("2d"), W = c.width, H = c.height, mid = H / 2;
+  const p = peaks(d.mono, W);
+  g.clearRect(0, 0, W, H);
+  g.strokeStyle = getComputedStyle(document.body).color;
+  g.globalAlpha = .8;
+  g.beginPath();
+  for (let x = 0; x < W; x++) {
+    g.moveTo(x + .5, mid - p.hi[x] * mid);
+    g.lineTo(x + .5, mid - p.lo[x] * mid);
+  }
+  g.stroke();
+  g.globalAlpha = .25;
+  g.beginPath(); g.moveTo(0, mid); g.lineTo(W, mid); g.stroke();
+  g.globalAlpha = 1;
+}
+
+// --- seek: un solo handler per entrambe le viste --------------------------
+function seekFrom(el, e) {
+  if (!view) return;
+  const r = el.getBoundingClientRect();
+  vaiA(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * view.duration);
+}
+
+function vaiA(t) {
+  audio.currentTime = t;
+  if (LP) lpStart(t);
+}
+// Con un loop acceso lpStart(0) cade prima della regione e parte da loop_start.
+document.getElementById("daCapo").addEventListener("click", () => {
+  vaiA(0);
+  audio.play();
+});
+// Sulla forma d'onda di un sample un trascinamento non e' un seek ma un
+// loop: click = seek, click e trascina = regione. Sotto i 4 pixel e' un
+// click con la mano che trema.
+for (const id of ["specView", "waveView", "envView", "graniView"]) {
+  const el = document.getElementById(id);
+  let down = false, x0 = 0, disegna = false;
+  const frac = e => {
+    const r = el.getBoundingClientRect();
+    return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+  };
+  el.addEventListener("mousedown", e => {
+    down = true; disegna = false; x0 = e.clientX; seekFrom(el, e);
+  });
+  addEventListener("mousemove", e => {
+    if (!down) return;
+    if (id === "waveView" && SAMPLE_AUDIO && (disegna || Math.abs(e.clientX - x0) > 4)) {
+      disegna = true;
+      const a = frac({clientX: x0}), b = frac(e);
+      if (Math.abs(b - a) < 0.001) return;
+      GESTO = true;      // disegnare il loop e' un passo solo di undo
+      loopDisegna(Math.min(a, b), Math.max(a, b));
+    } else if (!disegna) seekFrom(el, e);
+  });
+  addEventListener("mouseup", () => {
+    // Finito di disegnare, l'ascolto riparte dall'inizio del loop.
+    const LOOP = down && disegna && view && loopFrac();
+    if (LOOP) vaiA(LOOP[0] * view.duration);
+    if (down && disegna) { GESTO = false; drawTl(); }
+    down = false;
+  });
+}
+document.getElementById("waveView").addEventListener("dblclick", () => {
+  if (!SAMPLE_AUDIO || !loopFrac()) return;
+  setSel("pointer.loop", "off");
+  drawTl();
+});
+
+// --- il ciclo: cursori + viste in tempo reale -----------------------------
+const scopeC = document.getElementById("scope"), stereoC = document.getElementById("stereo");
+const freqData = new Uint8Array(analyser.frequencyBinCount);
+const bufL = new Float32Array(anL.fftSize), bufR = new Float32Array(anR.fftSize);
+
+function drawScope() {
+  const c = scopeC, g = c.getContext("2d"), W = c.width, H = c.height;
+  analyser.getByteFrequencyData(freqData);
+  const nyq = ctx.sampleRate / 2, binHz = nyq / freqData.length;
+  g.clearRect(0, 0, W, H);
+  g.strokeStyle = getComputedStyle(document.body).color;
+  g.beginPath();
+  for (let x = 0; x < W; x++) {
+    const f = FMIN * Math.pow(nyq / FMIN, x / W);      // x logaritmico in frequenza
+    const v = freqData[Math.min(freqData.length - 1, Math.round(f / binHz))] / 255;
+    const y = H - v * H;                                 // y = dinamica (0..-96 dB)
+    if (x === 0) g.moveTo(x, y); else g.lineTo(x, y);
+  }
+  g.stroke();
+}
+
+function drawStereo() {
+  const c = stereoC, g = c.getContext("2d"), W = c.width, H = c.height;
+  anL.getFloatTimeDomainData(bufL);
+  anR.getFloatTimeDomainData(bufR);
+  // Scia: invece di cancellare, si sbiadisce. Un goniometro senza scia e'
+  // illeggibile a 60 fps.
+  g.fillStyle = getComputedStyle(document.querySelector(".view")).backgroundColor;
+  g.globalAlpha = .3; g.fillRect(0, 0, W, H); g.globalAlpha = 1;
+  g.strokeStyle = "#888"; g.globalAlpha = .3;
+  g.beginPath(); g.moveTo(W / 2, 0); g.lineTo(W / 2, H); g.moveTo(0, H / 2); g.lineTo(W, H / 2);
+  g.stroke(); g.globalAlpha = 1;
+  // Lissajous ruotato di 45 gradi: mono in verticale, fuori fase in
+  // orizzontale. x = (R-L)/sqrt2, y = (L+R)/sqrt2.
+  g.fillStyle = getComputedStyle(document.body).color;
+  const k = Math.min(W, H) / 2 * 0.95, r2 = Math.SQRT1_2;
+  for (let i = 0; i < bufL.length; i++) {
+    const x = W / 2 + (bufR[i] - bufL[i]) * r2 * k;
+    const y = H / 2 - (bufL[i] + bufR[i]) * r2 * k;
+    g.fillRect(x, y, 1, 1);
+  }
+}
+
+const curSpec = document.getElementById("curSpec"), curWave = document.getElementById("curWave");
+
+function frame() {
+  // Un solo valore letto una volta sola: i due cursori non possono divergere.
+  if (view && view.duration) {
+    const t = LP ? lpPos() : Math.max(0, audio.currentTime - (audio.paused ? 0 : latenza()));
+    const p = (t / view.duration) * 100;
+    curSpec.style.left = p + "%";
+    curWave.style.left = p + "%";
+    curEnv.style.left = p + "%";
+    curGrani.style.left = p + "%";
+    mostraLettura(t);
+    mostraSegui(t);
+  }
+  if (!audio.paused) { drawScope(); drawStereo(); }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// --- divisore trascinabile ------------------------------------------------
+const left = document.getElementById("left"), gutter = document.getElementById("gutter");
+const SAVED = "graph.split";
+try {
+  const w = localStorage.getItem(SAVED);
+  if (w) left.style.width = w;
+} catch (e) { /* localStorage negato: si parte dal default */ }
+
+gutter.addEventListener("mousedown", e => {
+  e.preventDefault();
+  document.body.classList.add("dragging");
+  gutter.classList.add("drag");
+  const move = ev => {
+    const w = Math.min(innerWidth - 280, Math.max(220, ev.clientX));
+    left.style.width = w + "px";
+  };
+  const up = () => {
+    removeEventListener("mousemove", move);
+    removeEventListener("mouseup", up);
+    document.body.classList.remove("dragging");
+    gutter.classList.remove("drag");
+    try { localStorage.setItem(SAVED, left.style.width); } catch (e) {}
+  };
+  addEventListener("mousemove", move);
+  addEventListener("mouseup", up);
+});
+
+// I canvas hanno una larghezza in pixel, non in percentuale: vanno ridisegnati
+// quando la colonna cambia. La STFT no, quella e' in cache: si ridisegna e
+// basta. Un frame di ritardo per non ricalcolare a ogni pixel del trascinamento.
+let pending = false;
+new ResizeObserver(() => {
+  if (pending || !view) return;
+  pending = true;
+  requestAnimationFrame(() => {
+    pending = false;
+    const specC = document.getElementById("spec"), waveC = document.getElementById("wave");
+    specC.width = specC.parentNode.clientWidth;
+    waveC.width = waveC.parentNode.clientWidth;
+    drawSpec(specC, view);
+    drawWave(waveC, view);
+    const sc = document.getElementById("scope");
+    sc.width = sc.parentNode.clientWidth;
+    drawEnvs();
+    drawGrani();
+  });
+}).observe(document.getElementById("right"));
+</script>

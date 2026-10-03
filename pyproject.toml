@@ -22,3 +22,7 @@ granstudies = "granstudies.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# La pagina del laboratorio (`graph`) e' un file HTML dentro il pacchetto.
+[tool.setuptools.package-data]
+granstudies = ["*.html"]
