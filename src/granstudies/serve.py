@@ -64,6 +64,18 @@ _SAFE = re.compile(r"[^A-Za-z0-9._-]")
 _AUTORIZZATI: set = set()
 
 
+def _stringa_as(s) -> str:
+    """``s`` come letterale AppleScript.
+
+    Nome e cartella arrivano dalla pagina: interpolati com'erano, una
+    virgoletta chiudeva la stringa e il resto diventava AppleScript eseguito
+    (``do shell script`` compreso) — o, con un nome innocente come
+    ``il "grande" stream``, un pannello che non si apre.
+    """
+    s = str(s)
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def pannello(mode: str, name: str = "stream.yml", start: str = "") -> Tuple[str, str]:
     """Il pannello Apri/Salva di macOS. Ritorna ``(path, errore)``.
 
@@ -76,10 +88,10 @@ def pannello(mode: str, name: str = "stream.yml", start: str = "") -> Tuple[str,
     ``osascript`` blocca finche' l'utente non risponde: gira in un thread del
     server (ThreadingHTTPServer), quindi la pagina resta viva nel frattempo.
     """
-    loc = f' default location POSIX file "{start}"' if os.path.isdir(start) else ""
+    loc = f" default location POSIX file {_stringa_as(start)}" if os.path.isdir(start) else ""
     if mode == "save":
         scelta = (f'choose file name with prompt "Salva lo stream"'
-                  f' default name "{name}"{loc}')
+                  f" default name {_stringa_as(name)}{loc}")
     else:
         scelta = (f'choose file with prompt "Apri uno stream"'
                   f' of type {{"yml", "yaml"}}{loc}')
@@ -103,6 +115,12 @@ def pannello(mode: str, name: str = "stream.yml", start: str = "") -> Tuple[str,
             return "", ""
         return "", err or "il pannello non si e' aperto"
     path = p.stdout.strip()
+    # `choose file name` non impone l'estensione: scelto `brano`, `render_doc`
+    # scriverebbe `brano.yml` ma l'autorizzazione (e il recente) resterebbe su
+    # `brano`, e il salvataggio dopo — sul path che la pagina ha tenuto —
+    # verrebbe rifiutato. Il path che torna e' quello che si scrivera'.
+    if path and mode == "save" and not path.endswith((".yml", ".yaml")):
+        path += ".yml"
     if path:
         _AUTORIZZATI.add(os.path.abspath(path))
         recenti_aggiungi(path)
@@ -111,6 +129,13 @@ def pannello(mode: str, name: str = "stream.yml", start: str = "") -> Tuple[str,
 
 def autorizzato(path: str) -> bool:
     return os.path.abspath(path) in _AUTORIZZATI
+
+
+# L'audio reso accanto a un file scelto FUORI dallo studio. La pagina lo
+# chiede col path assoluto che le torna in `src`, e la stdlib lo cercherebbe
+# sotto la cartella servita: 404, e uno stream salvato altrove non si sentiva.
+# Si serve solo cio' che questo server ha appena reso, non il disco.
+_AUDIO_FUORI: set = set()
 
 
 # Questo avvio del server. La pagina se lo fa dire e ci confronta la bozza in
@@ -221,6 +246,10 @@ def render_doc(doc: dict, name: str, gen_root: str, repo_root: str,
         # mostra in una riga di stato, non in un pannello.
         tail = (p.stderr or p.stdout).strip().splitlines()[-12:]
         return {"ok": False, "error": "\n".join(tail)}
+    if os.path.isabs(_rel(out_path)):
+        # Fuori dallo studio la pagina chiede l'audio col suo path assoluto:
+        # `translate_path` lo serve, ma solo lui (vedi `_AUDIO_FUORI`).
+        _AUDIO_FUORI.add(os.path.abspath(out_path))
     return {"ok": True, "src": _rel(out_path), "yaml": _rel(doc_path),
             "path": doc_path, **_analisi(doc_path, repo_root, live)}
 
@@ -250,20 +279,55 @@ def _analisi(doc_path: str, repo_root: str, live: str) -> dict:
 
 
 class Handler(SimpleHTTPRequestHandler):
-    """GET come ``http.server``; l'unico POST e' il render."""
+    """GET come ``http.server``; le rotte POST solo dalla pagina servita qui."""
 
     repo_root = ""
 
+    def _estraneo(self) -> bool:
+        """Risponde 403 se la richiesta non e' indirizzata a localhost.
+
+        Contro il DNS rebinding: un dominio estraneo che risolve su 127.0.0.1
+        e' la stessa origine per il browser, ma il suo nome resta nell'header
+        ``Host``. Senza header (HTTP/1.0, un client a mano) si lascia passare:
+        un browser lo manda sempre.
+        """
+        host = (self.headers.get("Host") or "").strip().lower()
+        if not host or host.rsplit(":", 1)[0] in ("localhost", "127.0.0.1"):
+            return False
+        self.send_error(403)
+        return True
+
+    def do_GET(self):                       # noqa: N802
+        if not self._estraneo():
+            super().do_GET()
+
+    def do_HEAD(self):                      # noqa: N802
+        if not self._estraneo():
+            super().do_HEAD()
+
     def do_POST(self):                      # noqa: N802  (nome dell'API stdlib)
+        if self._estraneo():
+            return
         rotta = self.path.rstrip("/")
         if rotta not in ("/render", "/pick", "/open", "/stato"):
             self.send_error(404)
             return
-        n = int(self.headers.get("Content-Length") or 0)
+        # Un sito qualunque aperto nel browser puo' mandare qui un POST
+        # `text/plain` senza preflight, e arriverebbe a `osascript` e
+        # all'engine. La pagina manda `application/json`, che da un'altra
+        # origine richiede un preflight (OPTIONS) che questo server non concede.
+        tipo = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if tipo != "application/json":
+            self._json({"ok": False, "error": "serve Content-Type: application/json"}, 415)
+            return
         try:
+            n = max(0, int(self.headers.get("Content-Length") or 0))
             body = json.loads(self.rfile.read(n) or b"{}")
         except ValueError as e:
             self._json({"ok": False, "error": f"richiesta non valida: {e}"}, 400)
+            return
+        if not isinstance(body, dict):
+            self._json({"ok": False, "error": "richiesta non valida: serve un oggetto"}, 400)
             return
         if rotta == "/stato":
             self._json({"ok": True, "sessione": SESSIONE, "recenti": list(_RECENTI)})
@@ -301,9 +365,14 @@ class Handler(SimpleHTTPRequestHandler):
         I sample stanno in ``<repo>/samples`` e la pagina e' servita dalla
         cartella dello studio: senza questo, sentire un sample prima di
         sceglierlo nel laboratorio sarebbe l'unica cosa che richiede di
-        renderizzare qualcosa.
+        renderizzare qualcosa. Esce anche l'audio reso accanto a un file
+        salvato fuori dallo studio, chiesto col suo path assoluto
+        (``_AUDIO_FUORI``).
         """
         p = path.split("?")[0].split("#")[0]
+        fuori = os.path.abspath(unquote(p))
+        if fuori in _AUDIO_FUORI:
+            return fuori
         if not p.startswith(SAMPLES):
             return super().translate_path(path)
         base = os.path.join(self.repo_root, "samples")

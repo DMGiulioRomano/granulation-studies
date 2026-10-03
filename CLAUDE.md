@@ -130,6 +130,22 @@ usciti da un pannello di quella sessione si possono leggere e scrivere: il
 dialogo **e'** l'autorizzazione dell'utente. L'audio nasce accanto allo YAML,
 stesso nome: due file che si spostano insieme.
 
+Tre deviazioni di `serve.py` da mare-nostrum, emerse in review (#94) e
+verificate in `tests/test_serve_deviazioni.py`, che sta a parte perche'
+`tests/test_serve.py` resta identico all'originale:
+
+- **le rotte POST rispondono solo alla pagina**: `Content-Type:
+  application/json` obbligatorio (da un'altra origine richiede un preflight
+  che il server non concede, mentre un `text/plain` arrivava fino a
+  `osascript`) e `Host` che sia `localhost`/`127.0.0.1` (DNS rebinding);
+  nome e cartella entrano nello script di `osascript` come letterali
+  AppleScript escapati, non interpolati;
+- **l'audio di uno stream salvato fuori dallo studio si sente**: la pagina lo
+  chiede col path assoluto, e il server serve quello che ha appena reso
+  (`_AUDIO_FUORI`) — solo quello, non il disco;
+- **`salva con nome` senza estensione** torna gia' come `<nome>.yml`, cosi'
+  il path autorizzato e' quello che si scrive e i salvataggi dopo passano.
+
 I breakpoint non si salvano a parte perche' **non sono un'informazione in
 piu'**: sono i tempi che compaiono negli inviluppi. Riaprendo si prende
 l'unione di quei tempi, e ogni parametro vale li' quanto vale il suo
