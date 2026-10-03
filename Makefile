@@ -49,6 +49,7 @@ help:
 	@echo "                              APPLY=1 li cancella, STEMS=1 prende di mira anche gli stem"
 	@echo "  make where STUDY=...        cartelle di output correnti (una per combinazione di for_each:)"
 	@echo "                              COMBO=chiave=valore restringe ogni target a una fetta delle combinazioni"
+	@echo "  make serve STUDY=...        laboratorio del singolo stream in Safari (macOS; PORT=8000)"
 	@echo "  make clean / clean-all      pulizia output / output+venv"
 	@echo "  make kill-sonic             chiude tutte le istanze di Sonic Visualiser (senza salvare)"
 

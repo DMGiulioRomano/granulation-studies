@@ -37,6 +37,25 @@ prune: _require-study $(MARKER)
 		$(if $(filter $(PRUNE_ON),$(APPLY)),--apply,) \
 		$(if $(filter $(PRUNE_ON),$(STEMS)),--stems,)
 
+# La pagina del laboratorio del singolo stream: una per studio, non una per
+# combinazione di `for_each:` (le tacche sono quelle di tutto lo study.yml),
+# in generated/<study>/graph.html. Non legge il disco: la si scrive anche
+# prima di qualunque render.
+.PHONY: graph
+graph: _require-study $(MARKER)
+	$(PY) -m granstudies graph $(STUDY)
+
+# La pagina legge i campioni con fetch + decodeAudioData per disegnare
+# sonogramma e forma d'onda: da `file://` il browser lo vieta (origine opaca),
+# quindi la si serve. Non e' `http.server` perche' il laboratorio fa
+# `POST /render`: vedi `granstudies.serve`. macOS: `open -a Safari`, e i
+# pannelli Apri/Salva passano da `osascript`.
+PORT ?= 8000
+.PHONY: serve
+serve: graph
+	@($(PY) -m granstudies serve $(STUDY) --port $(PORT) & \
+	  sleep 1; open -a Safari "http://localhost:$(PORT)/graph.html"; wait)
+
 .PHONY: describe
 describe: _require-study $(MARKER)
 	$(PY) -m granstudies describe $(STUDY)
