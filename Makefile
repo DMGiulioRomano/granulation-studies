@@ -45,6 +45,8 @@ help:
 	@echo "  make render-final STUDY=... renderizza il brano finale"
 	@echo "  make sv STUDY=...            CSV envelope per Sonic Visualiser"
 	@echo "  make all-study STUDY=...    pipeline completa (sweep→stack→render)"
+	@echo "  make prune STUDY=...        elenca YAML/audio dello sweep che lo study.yml non genera piu'"
+	@echo "                              APPLY=1 li cancella, STEMS=1 prende di mira anche gli stem"
 	@echo "  make where STUDY=...        cartelle di output correnti (una per combinazione di for_each:)"
 	@echo "                              COMBO=chiave=valore restringe ogni target a una fetta delle combinazioni"
 	@echo "  make serve STUDY=...        laboratorio del singolo stream in Safari (macOS; PORT=8000)"

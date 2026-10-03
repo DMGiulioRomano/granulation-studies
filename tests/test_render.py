@@ -803,3 +803,81 @@ def test_render_default_budget_falls_back_to_cpu_count(tmp_path, monkeypatch, af
     # della macchina: la stessa regola dell'engine (_available_cores).
     _machine(monkeypatch, cpu=12, affinity=affinity)
     assert _default_budget_seen(tmp_path, monkeypatch) == [12]
+
+
+# --- variant_paths: la stessa enumerazione, senza scrivere -----------------
+
+def test_variant_paths_coincide_con_write_variants(tmp_path):
+    """Il contratto su cui poggia `prune`: se i due divergono, prune cancella
+    file buoni. Vale per tutte e tre le modalita', stream compreso."""
+    import dataclasses
+
+    from granstudies.render import variant_paths
+
+    for mode in ("discrete", "envelope", "both"):
+        for stream_id in (None, "vox"):
+            spec = dataclasses.replace(_spec(mode), stream_id=stream_id)
+            d = tmp_path / mode / (stream_id or "_")
+            written = write_variants(spec, str(d))
+            assert written
+            assert sorted(variant_paths(spec, str(d))) == sorted(written)
+
+
+def test_variant_paths_non_scrive_niente(tmp_path):
+    from granstudies.render import variant_paths
+
+    paths = variant_paths(_spec("both"), str(tmp_path))
+    assert paths
+    assert os.listdir(str(tmp_path)) == []   # nessuna cartella 'discrete/' creata
+
+
+# --- audio_for: la regola yaml -> audio, una volta sola ---------------------
+
+def test_audio_for_mette_studio_e_stream_nel_basename(tmp_path):
+    from granstudies.render import audio_for
+
+    v, a = str(tmp_path / "yaml"), str(tmp_path / "audio")
+    y = os.path.join(v, "sweep", "discrete", "st", "o2__a=1.yml")
+    name, audio = audio_for(y, v, a, "s01")
+    assert name == os.path.join("sweep", "discrete", "st", "o2__a=1")
+    assert audio == os.path.join(a, "sweep", "discrete", "st", "s01_st_o2__a=1.aif")
+
+
+def test_audio_for_senza_sottocartella_di_stream(tmp_path):
+    from granstudies.render import audio_for
+
+    v, a = str(tmp_path / "yaml"), str(tmp_path / "audio")
+    _, audio = audio_for(os.path.join(v, "sweep", "discrete", "o2__a=1.yml"), v, a, "s01")
+    assert audio == os.path.join(a, "sweep", "discrete", "s01_o2__a=1.aif")
+    # i documenti dei processi restano senza prefisso
+    _, audio = audio_for(os.path.join(v, "stack", "stack.yml"), v, a, "s01")
+    assert audio == os.path.join(a, "stack", "stack.aif")
+
+
+def test_audio_for_e_il_nome_che_il_render_scrive(tmp_path, monkeypatch):
+    """La regola e' una sola solo se il render la usa davvero: se il render
+    nominasse l'audio per conto suo, `prune` cancellerebbe il mix appena
+    scritto credendolo di un'altra variante."""
+    import dataclasses
+
+    from granstudies.render import audio_for, write_stack
+
+    variant_root = str(tmp_path / "yaml")
+    for stream_id in (None, "vox"):
+        spec = dataclasses.replace(_spec("both"), stream_id=stream_id)
+        write_variants(spec, os.path.join(variant_root, "sweep"))
+    write_stack(_stack_specs(), variant_root)
+    calls = []
+    monkeypatch.setattr(render_mod.engine_bridge, "render", _fake_engine_render(calls))
+    audio_dir = str(tmp_path / "audio")
+    manifest = render_variants(
+        variant_dir=variant_root,
+        audio_dir=audio_dir,
+        score_dir=None,
+        samples_dir="unused",
+        jobs=1,
+        study="s01",
+    )
+    assert len(manifest) > 2
+    for e in manifest:
+        assert (e["name"], e["audio"]) == audio_for(e["yaml"], variant_root, audio_dir, "s01")

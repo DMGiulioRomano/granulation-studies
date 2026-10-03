@@ -91,8 +91,9 @@ non si muove mai resta scalare.
 
 **Da dove viene.** Il laboratorio e' nato in mare-nostrum ed e' stato
 portato qui per stato finale (#76), a DMGiulioRomano/mare-nostrum@f7fdb58:
-`graph_page.html` e' identica a quella di mare-nostrum, per poterne riportare
-le modifiche successive con un diff. Non e' stata portata la griglia delle
+`graph_page.html` e' quella di mare-nostrum, per poterne riportare le
+modifiche successive con un diff, con una sola deviazione (i tempi nella
+convenzione del documento, sotto). Non e' stata portata la griglia delle
 varianti discrete (la pagina si chiama `graph` per lei), che mare-nostrum
 aveva gia' tolto, ne' `make explore`, che serviva a lei.
 
@@ -129,6 +130,22 @@ darebbe il contenuto ma non il percorso su cui risalvare. Solo i percorsi
 usciti da un pannello di quella sessione si possono leggere e scrivere: il
 dialogo **e'** l'autorizzazione dell'utente. L'audio nasce accanto allo YAML,
 stesso nome: due file che si spostano insieme.
+
+Tre deviazioni di `serve.py` da mare-nostrum, emerse in review (#94) e
+verificate in `tests/test_serve_deviazioni.py`, che sta a parte perche'
+`tests/test_serve.py` resta identico all'originale:
+
+- **le rotte POST rispondono solo alla pagina**: `Content-Type:
+  application/json` obbligatorio (da un'altra origine richiede un preflight
+  che il server non concede, mentre un `text/plain` arrivava fino a
+  `osascript`) e `Host` che sia `localhost`/`127.0.0.1` (DNS rebinding);
+  nome e cartella entrano nello script di `osascript` come letterali
+  AppleScript escapati, non interpolati;
+- **l'audio di uno stream salvato fuori dallo studio si sente**: la pagina lo
+  chiede col path assoluto, e il server serve quello che ha appena reso
+  (`_AUDIO_FUORI`) — solo quello, non il disco;
+- **`salva con nome` senza estensione** torna gia' come `<nome>.yml`, cosi'
+  il path autorizzato e' quello che si scrive e i salvataggi dopo passano.
 
 I breakpoint non si salvano a parte perche' **non sono un'informazione in
 piu'**: sono i tempi che compaiono negli inviluppi. Riaprendo si prende
@@ -327,6 +344,19 @@ finire, tranne durante un gesto (`GESTO`): un trascinamento e' un passo solo,
 non cento. Dentro un campo di testo `cmd+Z` resta l'undo del testo. Aprire un
 file o fare `nuovo` azzera la storia.
 
+**I tempi sul documento seguono il suo `time_mode`.** Nella pagina i tempi
+dei breakpoint sono frazioni dello stream, ma l'engine li legge cosi' solo con
+`time_mode: normalized`; senza, sono secondi. Il documento parte dal `base:`
+dello studio, ed e' lui a decidere: con `normalized` i tempi escono frazioni,
+altrimenti `labDoc` li scrive in secondi (`scalaTempi`, `inSecondi`), e
+riaprendo `carica` li riporta a frazioni (`tempiFrazione`). Cosi' gli
+inviluppi ereditati dal `base:` restano nella loro convenzione. Vale per tutto
+cio' che sta sui breakpoint: numerici, voci, loop, la `curve` di
+`grain.envelope`, la progressione. Prima la pagina contava sul
+`time_mode: normalized` del `base:`, che oggi tutti gli studi dichiarano: su
+uno studio senza, una rampa di 30 s si schiacciava nel primo secondo.
+Deviazione da mare-nostrum, verificata in `tests/test_graph_js.py`.
+
 **Il tempo di un breakpoint si scrive.** La riga `tempo (0-1)` in cima ai
 parametri mostra la x normalizzata del punto selezionato e la accetta digitata:
 vale subito, come il trascinamento, e riordina i punti (non passa da `salva
@@ -495,8 +525,8 @@ giro. La legenda sotto dice il colore, il nome e l'escursione vera
 (`10.0ms … 200ms`), che e' l'unica cosa che una curva normalizzata non puo'
 mostrare da se'.
 
-Il conto lo fa il server dopo il render (`engine_bridge.stream_envelopes`,
-chiamato da `_inviluppi` in `serve.py`) ricaricando lo YAML appena scritto, e
+Il conto lo fa il server dopo il render (`engine_bridge.stream_analysis`,
+chiamato da `_analisi` in `serve.py`) ricaricando lo YAML appena scritto, e
 le curve tornano nella risposta di `POST /render` gia' campionate e
 normalizzate: la pagina tira una linea e basta. Le **costanti restano fuori**
 (`show_static=False`), come nella partitura: qui si guarda cio' che si muove.
