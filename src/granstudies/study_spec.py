@@ -144,9 +144,7 @@ class StudySpec:
         Il salt ``:y`` separa il dominio da quello X: senza, Y e X con lo stesso
         seed auto-derivato pescherebbero la stessa sequenza uniforme.
         """
-        if self.axes_seed is not None:
-            return self.axes_seed
-        return stable_seed(f"{self._seed_key()}:y")
+        return default_y_seed(self.axes_seed, self._seed_key())
 
     def resolved_x_seed(self) -> int:
         """Seed-X di default per questo stream (il per-asse vince comunque)."""
@@ -472,7 +470,7 @@ def _resolve_baseline(
     """
     if "baseline" in cfg:
         return cfg["baseline"]
-    path = cfg.get("path", name)
+    path = axis_path(name, cfg)
     if path == "grain.duration" and grain_unit not in (None, "seconds"):
         raise ctx.err(
             f"Asse '{name}': con 'grain.duration_unit: {grain_unit}' il "
@@ -639,6 +637,86 @@ def _replace_generators(merged: Dict[str, Any], override: Dict[str, Any]) -> Non
                 ax.pop(k, None)
 
 
+def axis_names(data: Dict[str, Any]) -> frozenset:
+    """I nomi d'asse dichiarati in ``axes:``: le chiavi a valore dict che non
+    sono vocabolario condiviso (``interpolation``, ``seed``).
+
+    E' la regola con cui il parse decide cosa e' un asse, e vive qui perche'
+    la leggono anche ``resolve_streams`` (per il confine dei nomi dotted) e il
+    laboratorio (``graph.lab_data``, che da ogni asse ricava le sue tacche).
+    Una seconda copia altrove sarebbe una lista di chiavi riservate da tenere
+    allineata a mano.
+    """
+    return frozenset(
+        k
+        for k, v in (data.get("axes") or {}).items()
+        if k not in _AXES_RESERVED_KEYS and isinstance(v, dict)
+    )
+
+
+def axis_path(name: str, cfg: Dict[str, Any]) -> Any:
+    """Il path engine di un asse: ``path`` se e' scritto, altrimenti il nome.
+
+    ``path`` e' un alias (``axes: {densita: {path: density, ...}}``); senza,
+    la chiave dell'asse — anche dotted, ``grain.duration`` — *e'* il path. Lo
+    leggono il parse e il laboratorio, che sul path scrive la manopola.
+    """
+    return cfg.get("path", name)
+
+
+def default_y_seed(axes_seed: Any, seed_key: str) -> int:
+    """Il seed delle bande di Y che non ne dichiarano uno proprio.
+
+    Precedenza: ``axes.seed`` globale, altrimenti auto-derivazione stabile
+    dall'id dello stream (o dello studio, se non ha stream) — gli stream
+    impilati si decorrelano di default. Il salt ``:y`` separa il dominio da
+    quello X.
+    """
+    return axes_seed if axes_seed is not None else stable_seed(f"{seed_key}:y")
+
+
+def axis_values(gen_key: str, gen_params: Any, seed: int) -> List[float]:
+    """I valori che la Y di un asse enumera, come li sente il render.
+
+    E' il seam sweep/Y: i nodi annidati negli Env (``base``/``range`` della
+    banda, ``step`` della rampa) si compilano qui in breakpoint col seed
+    effettivo, e una banda senza ``seed`` proprio pesca con ``seed``
+    (``default_y_seed``). Vive da sola perche' la legge anche il laboratorio
+    (``graph.lab_data``): con ``value_generators.resolve`` le bande senza seed
+    pescavano col seed 0 e i nodi annidati non si risolvevano — tacche che
+    nessun render sente. La banda senza ``n`` non passa di qui: i suoi valori
+    emergono dalla camminata-X.
+    """
+    if gen_key == "values":
+        return list(gen_params)
+    if gen_key == "ramp":
+        return ramp(**expand_params(gen_params, seed=seed))
+    params = dict(gen_params)
+    params.setdefault("seed", seed)
+    return band(**expand_params(params, seed=params["seed"]))
+
+
+def merge_stream_override(
+    data: Dict[str, Any],
+    override: Dict[str, Any] | None,
+    names: frozenset,
+    ctx: ErrCtx,
+) -> Dict[str, Any]:
+    """Il documento come lo vede uno stream di ``streams:``.
+
+    I tre passi del merge in un posto solo — chiavi puntate espanse in dict
+    annidati, deep-merge sul documento, generatore dell'override che rimpiazza
+    quello ereditato — perche' li fa anche il laboratorio, che degli stream
+    legge gli ``axes:`` senza parsarne lo spec (``graph.lab_data``, issue #77).
+    Due copie di questa sequenza divergono in silenzio: l'override smette di
+    arrivare dove deve e il risultato e' un valore in meno, non un errore.
+    """
+    override = _expand_dotted_keys(override or {}, names, ctx)
+    merged = _deep_merge(data, override)
+    _replace_generators(merged, override)
+    return merged
+
+
 def reject_top_level_duration(
     data: Dict[str, Any], locs: yaml_loc.Locations | None = None
 ) -> None:
@@ -711,11 +789,7 @@ def resolve_streams(
     # Nomi d'asse del documento base: risolvono il confine dei nomi dotted
     # nelle chiavi puntate degli override e nei path di spread.over (vedi
     # ``split_axis_key``).
-    axis_names = frozenset(
-        k
-        for k, v in (data.get("axes") or {}).items()
-        if k not in _AXES_RESERVED_KEYS and isinstance(v, dict)
-    )
+    names = axis_names(data)
     # Manopole di gruppo (`let:` per entry): risolte e iniettate PRIMA
     # dell'espansione, cosi' tutte le voci del gruppo condividono il valore.
     streams = apply_group_let(streams, locs)
@@ -723,7 +797,7 @@ def resolve_streams(
         streams,
         locs,
         pad_n=spread_pad,
-        axis_names=axis_names,
+        axis_names=names,
         global_spread=data.get("spread"),
         base_volume=(data.get("base") or {}).get("volume"),
     )
@@ -731,11 +805,9 @@ def resolve_streams(
     for stream_id, override in streams.items():
         # Le chiavi puntate scritte a mano nell'override (``axes.density.base.expr``)
         # si espandono in dict annidati prima del merge, come in ``spread.over``.
-        override = _expand_dotted_keys(
-            override or {}, axis_names, ErrCtx(locs=locs, stream=stream_id)
+        merged = merge_stream_override(
+            data, override, names, ErrCtx(locs=locs, stream=stream_id)
         )
-        merged = _deep_merge(data, override)
-        _replace_generators(merged, override)
         merged.pop("streams", None)
         merged.setdefault("sweep", {})["stream_id"] = stream_id
         try:
@@ -905,7 +977,7 @@ def parse_study_spec(
     seed_key = sweep_cfg.get("stream_id") or sid
     # Default per le bande di Y senza seed proprio (precedenza: per-asse >
     # axes.seed globale > auto-derivazione per-stream).
-    default_y_seed = axes_seed if axes_seed is not None else stable_seed(f"{seed_key}:y")
+    y_seed = default_y_seed(axes_seed, seed_key)
 
     study_interpolation = axes_raw.get("interpolation", "linear")
     if "interpolation" in axes_raw:
@@ -930,7 +1002,7 @@ def parse_study_spec(
             )
         # 'path' esplicito resta un alias; se omesso, la chiave dell'asse
         # (anche in dot-notation, es. 'grain.duration') e' il path engine.
-        path = cfg.get("path", name)
+        path = axis_path(name, cfg)
         if "interpolation" in cfg:
             _check_interpolation(
                 cfg["interpolation"], ctx,
@@ -992,15 +1064,7 @@ def parse_study_spec(
             # (base/range della banda, step del ramp) si compilano in
             # breakpoint qui, col seed effettivo gia' risolto.
             with ctx.wrapping(key=("axes", name), axis=name):
-                if gen_key == "values":
-                    values = list(gen_params)
-                elif gen_key == "ramp":
-                    params = expand_params(gen_params, seed=default_y_seed)
-                    values = ramp(**params)
-                else:  # band con n: la Y possiede il conteggio
-                    params = dict(gen_params)
-                    params.setdefault("seed", default_y_seed)
-                    values = band(**expand_params(params, seed=params["seed"]))
+                values = axis_values(gen_key, gen_params, y_seed)
         axes.append(
             Axis(
                 name=name,
