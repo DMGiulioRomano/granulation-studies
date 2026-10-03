@@ -18,8 +18,8 @@ import os
 from typing import Any, Dict, Iterator, List, Tuple
 
 from .errors import ErrCtx
-from .study_spec import axis_names, merge_stream_override
-from .value_generators import resolve
+from .study_spec import axis_names, axis_values, default_y_seed, merge_stream_override
+from .value_generators import resolve, y_generator
 
 
 # Le eccezioni di un generatore che non si risolve. E' l'insieme che
@@ -29,18 +29,21 @@ from .value_generators import resolve
 # lista), ``LookupError`` da un Env di banda senza il suo valore — piu'
 # ``RuntimeError``: espandere una chiave puntata che introduce un asse dotted
 # nuovo chiede il registro dell'engine (``split_axis_key`` ->
-# ``bounds.known_paths``), che senza il submodule non c'e'.
-_ILLEGGIBILE = (ValueError, TypeError, LookupError, RuntimeError)
+# ``bounds.known_paths``), che senza il submodule non c'e'. E
+# ``ArithmeticError``: i nodi ``expr`` annidati si valutano davvero
+# (``axis_values``), e un ``10**400`` arriva alla banda come un intero che non
+# diventa float.
+_ILLEGGIBILE = (ValueError, TypeError, LookupError, RuntimeError, ArithmeticError)
 
 # Il prefisso che, in ``for_each:``, marca una patch sullo stream a riposo.
 _BASE = "base."
 
 
-def _tacche(cfg: Any) -> List[Any] | None:
-    """I valori del generatore di un asse, o ``None`` se non e' leggibile.
+def _tacche_for_each(cfg: Any) -> List[Any] | None:
+    """I valori di una chiave ``for_each: base.*``, o ``None`` se non si leggono.
 
-    Un generatore solo lo risolve ``value_generators.resolve``, lo stesso che
-    usa ``for_each:``: ``values`` (lista), ``ramp`` (griglia), banda
+    Li risolve ``value_generators.resolve``, lo stesso che usa ``for_each:``
+    (``for_each._parse_axis``): ``values`` (lista), ``ramp`` (griglia), banda
     (``base``/``range``/``n``). La lista nuda e' la forma breve che
     ``for_each`` accetta, e si legge come ``values``.
 
@@ -55,6 +58,34 @@ def _tacche(cfg: Any) -> List[Any] | None:
         return None
     try:
         return list(resolve(cfg))
+    except _ILLEGGIBILE:
+        return None
+
+
+def _tacche_asse(cfg: Dict[str, Any], doc: Dict[str, Any], seed_key: str) -> List[Any] | None:
+    """I valori di un asse come li sente il render, o ``None`` se non si enumerano.
+
+    Passano dal seam del parse (``study_spec.axis_values``), non da
+    ``resolve``: un asse non e' una chiave di ``for_each``. Una banda senza
+    ``seed`` pesca col seed che il parse le darebbe (``axes.seed``, altrimenti
+    derivato da ``seed_key``, l'id dello stream o dello studio), e i nodi
+    annidati negli Env (``linear_env:``, ``expr``) si compilano. Con
+    ``resolve`` la banda pescava col seed 0 — tacche che nessun render sente —
+    e un nodo annidato rendeva l'asse illeggibile.
+
+    Una banda senza ``n`` non si enumera: i valori li fa emergere la
+    camminata-X dello ``stack:``. Stessa tolleranza di ``_tacche_for_each``.
+    """
+    try:
+        gen_key, params = y_generator(cfg)
+        if gen_key == "values" and not isinstance(cfg["values"], list):
+            # ``list()`` di una stringa la spezza in lettere: e' il rifiuto
+            # di ``for_each._parse_axis``, non un menu di caratteri.
+            return None
+        if gen_key == "band" and "n" not in params:
+            return None
+        seed = default_y_seed((doc.get("axes") or {}).get("seed"), seed_key)
+        return list(axis_values(gen_key, params, seed))
     except _ILLEGGIBILE:
         return None
 
@@ -87,7 +118,7 @@ def _uniche(valori: List[Any]) -> List[Any]:
     return out
 
 
-def lab_data(raw: Dict[str, Any] | None) -> Dict[str, Any]:
+def lab_data(raw: Dict[str, Any] | None, study_id: str | None = None) -> Dict[str, Any]:
     """Il corredo del laboratorio: lo stream a riposo e le tacche di ogni parametro.
 
     Le liste sono quelle gia' scelte nello ``study.yml`` — assi interni, assi
@@ -118,8 +149,21 @@ def lab_data(raw: Dict[str, Any] | None) -> Dict[str, Any]:
     dal banco proprio il parametro che lo studio sta studiando. Una chiave di
     ``for_each:`` illeggibile invece non dichiara niente — li' il generatore
     *e'* la dichiarazione, e ``for_each`` stesso la rifiuta.
+
+    **Le tacche di un asse sono i valori che il render sente**, non un altro
+    pescaggio: passano dal seam del parse (``_tacche_asse``), col seed che il
+    parse darebbe a una banda senza ``seed`` — derivato dall'id dello stream,
+    o dello studio per il documento. ``study_id`` e' il nome dello studio, che
+    fa da id quando il documento non scrive ``study_id``: la stessa catena di
+    ``_load_specs``. Il documento conta come una fonte a se', come se si
+    rendesse da solo.
     """
     raw = raw or {}
+    sweep = raw.get("sweep")
+    doc_key = (
+        (sweep.get("stream_id") if isinstance(sweep, dict) else None)
+        or raw.get("study_id") or study_id or "study"
+    )
     ordine: List[str] = []
     grezze: Dict[str, List[Any]] = {}
 
@@ -130,13 +174,13 @@ def lab_data(raw: Dict[str, Any] | None) -> Dict[str, Any]:
         grezze[path].extend(valori)
 
     for nome, cfg in _assi(raw):
-        aggiungi(nome, _tacche(cfg) or [])
+        aggiungi(nome, _tacche_asse(cfg, raw, doc_key) or [])
     for key, cfg in (raw.get("for_each") or {}).items():
         # Solo le patch su `base.`: `stack.seed` o `percorso.arco` non sono
         # parametri di uno stream e nel laboratorio non hanno posto.
         if not isinstance(key, str) or not key.startswith(_BASE):
             continue
-        valori = _tacche(cfg)
+        valori = _tacche_for_each(cfg)
         if valori:
             aggiungi(key[len(_BASE):], valori)
     nomi = axis_names(raw)
@@ -154,7 +198,9 @@ def lab_data(raw: Dict[str, Any] | None) -> Dict[str, Any]:
         except _ILLEGGIBILE:
             continue
         for nome, cfg in _assi(merged):
-            aggiungi(nome, _tacche(cfg) or [])
+            # L'id dello stream e' la chiave del suo seed, come dopo il merge
+            # di ``resolve_streams`` (``sweep.stream_id``).
+            aggiungi(nome, _tacche_asse(cfg, merged, str(sid)) or [])
 
     params: List[Dict[str, Any]] = []
     for path in ordine:

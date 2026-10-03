@@ -164,10 +164,23 @@ sentono insieme; il laboratorio e' il banco del singolo stream.
 ### Le tacche: cosa legge il laboratorio dello `study.yml`
 
 I valori fra cui si sceglie sono quelli gia' dichiarati nello `study.yml`
-(`graph.lab_data`), e da #77 ogni **generatore di sequenza** passa da
-`value_generators.resolve` — lo stesso che usa `for_each:`. Quindi `ramp:` e
-le bande danno tacche come `values:`, e la lista nuda (`base.distribution:
-[0, 1]`) e' la forma breve che `for_each` gia' accettava. Prima contava solo
+(`graph.lab_data`), e da #77 ogni **generatore di sequenza** si risolve come
+lo risolve chi lo rende: gli assi dal seam del parse
+(`study_spec.axis_values`), le chiavi di `for_each: base.*` da
+`value_generators.resolve`, come fa `for_each:`. Quindi `ramp:` e le bande
+danno tacche come `values:`, e la lista nuda (`base.distribution: [0, 1]`) e'
+la forma breve che `for_each` gia' accettava.
+
+**Le tacche di un asse sono i valori che il render sente**, non un altro
+pescaggio. Una banda senza `seed` pesca col seed che le darebbe il parse —
+`axes.seed`, altrimenti `stable_seed("<id>:y")` con l'id dello stream, o
+quello dello studio per il documento (il nome della cartella se lo
+`study.yml` non scrive `study_id`, come in `_load_specs`: per questo `graph`
+lo passa) — e i nodi annidati negli Env (`linear_env:`, un `expr` senza
+`let:`) si compilano in breakpoint come al parse. Con `resolve` la banda
+pescava col seed 0, valori che nessun render produce, e un nodo annidato
+rendeva l'asse illeggibile. Il documento conta come una fonte a se', come se
+si rendesse da solo. Prima di #77 contava solo
 `values:`, che e' come sono scritti gli studi di mare-nostrum da cui il
 laboratorio viene: qui gli assi sono quasi tutti rampe, e su `1-10ms` la
 pagina non aveva **nessuna** manopola.
@@ -222,8 +235,10 @@ tacche, mai la pagina — un `make serve` che non parte su uno studio che
 renderizza benissimo sarebbe il guasto peggiore. Chi sbaglia il generatore lo
 sentono dire `sweep` e `render`, che su quei valori ci devono renderizzare.
 L'insieme di eccezioni e' quello che `for_each._parse_axis` gia' riconosce,
-piu' `RuntimeError`: espandere una chiave puntata che introduce un asse dotted
-nuovo chiede il registro dell'engine, che senza il submodule non c'e'.
+piu' `RuntimeError` (espandere una chiave puntata che introduce un asse dotted
+nuovo chiede il registro dell'engine, che senza il submodule non c'e') e
+`ArithmeticError` (gli `expr` annidati si valutano davvero, e un `10**400`
+arriva alla banda come un intero che non diventa float).
 Due canarini sul corpus vero (`tests/test_studies_corpus.py`) tengono le due
 meta' — il laboratorio si apre su ogni studio, e ogni asse dichiarato e' una
 manopola.

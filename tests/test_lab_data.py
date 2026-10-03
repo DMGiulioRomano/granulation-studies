@@ -18,8 +18,8 @@ import pytest
 from granstudies.graph import lab_data
 
 
-def _params(doc):
-    return {p["path"]: p for p in lab_data(doc)["params"]}
+def _params(doc, study_id=None):
+    return {p["path"]: p for p in lab_data(doc, study_id)["params"]}
 
 
 # --- i generatori: ramp e bande, non solo `values:` ------------------------
@@ -67,6 +67,80 @@ def test_un_asse_senza_generatore_resta_una_manopola_a_mano():
     assert p["values"] == [] and p["kind"] == "num" and p["free"] is True
 
 
+# --- le tacche sono i valori che il render sente ---------------------------
+#
+# Il confronto e' col parse (``resolve_streams``), non con numeri trascritti:
+# la regola del seed e la compilazione dei nodi annidati sono del parse, e un
+# test che le riscrivesse si confronterebbe con la propria copia.
+
+_RIPOSO = {"base": {"sample": "a.wav", "duration": 6, "time_mode": "normalized"},
+           "sweep": {"mode": "discrete"}}
+
+
+def _resi(doc, study_id="s"):
+    """I valori che il parse da' a ogni asse, per path: cio' che il render sente."""
+    from granstudies.study_spec import resolve_streams
+
+    out = {}
+    for spec in resolve_streams(copy.deepcopy(doc), study_id):
+        for ax in spec.axes:
+            out.setdefault(ax.path, set()).update(ax.values)
+    return out
+
+
+def _tacche_di(doc, path, study_id="s"):
+    return set(_params(doc, study_id)[path]["values"])
+
+
+def test_una_banda_senza_seed_da_le_tacche_del_render():
+    """Senza ``seed`` la banda non pesca col seed 0 del generatore: il parse
+    deriva il seed dallo studio (``stable_seed("<id>:y")``), e le tacche
+    devono essere quelle, non un pescaggio che nessun render fa."""
+    doc = dict(copy.deepcopy(_RIPOSO),
+               axes={"density": {"baseline": 20, "base": 10, "range": 5, "n": 3}})
+    assert _tacche_di(doc, "density") == _resi(doc)["density"]
+
+
+def test_axes_seed_e_il_seed_delle_bande_che_non_ne_hanno_uno():
+    doc = dict(copy.deepcopy(_RIPOSO),
+               axes={"seed": 42, "density": {"baseline": 20, "base": 10, "range": 5, "n": 3}})
+    assert _tacche_di(doc, "density") == _resi(doc)["density"]
+
+
+def test_la_banda_di_uno_stream_pesca_col_seed_dello_stream():
+    """Due stream che ereditano la stessa banda senza seed pescano valori
+    diversi (il seed viene dal loro id): le tacche sono l'unione di quelli."""
+    doc = dict(copy.deepcopy(_RIPOSO),
+               axes={"density": {"baseline": 20, "base": 10, "range": 5, "n": 3}},
+               streams={"a": {}, "b": {"base": {"volume": -3}}})
+    assert _resi(doc)["density"] <= _tacche_di(doc, "density")
+
+
+@pytest.mark.parametrize("cfg", [
+    {"ramp": {"start": 1, "stop": 20, "step": {"linear_env": [1, 5]}}},
+    {"n": 3, "seed": 1, "base": {"linear_env": {"values": [10, 20]}}, "range": 2},
+    {"n": 3, "seed": 1, "base": {"expr": "2*5"}, "range": 2},
+])
+def test_i_generatori_annidati_si_compilano_come_nel_parse(cfg):
+    """Un ``linear_env:`` (o un ``expr`` senza ``let``) dentro lo ``step`` di
+    una rampa o il ``base`` di una banda il parse lo compila in breakpoint
+    (``expand_params``): sono valori enumerati come gli altri, non un asse
+    illeggibile."""
+    doc = dict(copy.deepcopy(_RIPOSO), axes={"density": dict(cfg, baseline=20)})
+    assert _tacche_di(doc, "density") == _resi(doc)["density"]
+    assert "free" not in _params(doc)["density"]
+
+
+def test_graph_passa_l_id_dello_studio_come_il_parse():
+    """Senza ``study_id`` nel documento il seed lo da' il nome dello studio,
+    come in ``_load_specs``; con ``study_id`` vince quello."""
+    doc = dict(copy.deepcopy(_RIPOSO),
+               axes={"density": {"baseline": 20, "base": 10, "range": 5, "n": 3}})
+    assert _tacche_di(doc, "density", "lab01") == _resi(doc, "lab01")["density"]
+    doc["study_id"] = "altro"
+    assert _tacche_di(doc, "density", "lab01") == _resi(doc, "altro")["density"]
+
+
 @pytest.mark.parametrize("cfg", [
     {"ramp": {"step": 1}},                      # TypeError: manca start/stop
     {"ramp": "x"},                              # TypeError: ramp non e' un dict
@@ -76,6 +150,8 @@ def test_un_asse_senza_generatore_resta_una_manopola_a_mano():
     {"values": [1], "ramp": {"start": 0, "stop": 1, "step": 1}},   # due marcatori
     {"linear_env": {"values": [1, 2]}},         # wrapper di ruolo, non un asse piatto
     {"base": 1, "n": 2, "distribution": "boh"},  # distribuzione sconosciuta
+    {"base": {"expr": "10**400"}, "n": 2},      # OverflowError: l'expr si valuta
+    {"values": "hanning"},                      # una stringa, non una lista
 ])
 def test_un_generatore_illeggibile_non_fa_esplodere_il_laboratorio(cfg):
     """La pagina si apre sempre: un generatore che non si risolve costa le sue

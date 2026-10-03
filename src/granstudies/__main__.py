@@ -886,8 +886,11 @@ def cmd_graph(study: str) -> int:
     # e con essa consuma il blocco `for_each:`, che invece al laboratorio
     # serve tutto — sono le tacche di ogni parametro, non i valori di una
     # combinazione sola.
+    # Il nome dello studio e' l'id da cui il parse deriva il seed delle bande
+    # che non ne hanno uno (come in `_load_specs`): senza, le tacche di una
+    # banda sarebbero un pescaggio che nessun render fa.
     with open(os.path.join(study_dir(study), "study.yml")) as fh:
-        lab = lab_data(yaml.safe_load(fh))
+        lab = lab_data(yaml.safe_load(fh), study)
     lab["envelopes"] = _finestre()
     noti = {p["path"] for p in lab["params"]}
     # Si contano le TACCHE, non i parametri: un asse senza generatore leggibile

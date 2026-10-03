@@ -135,6 +135,20 @@ def test_graph_legge_le_rampe_e_gli_assi_degli_stream(tmp_path, monkeypatch, cap
     assert "con tacche" in out
 
 
+def test_graph_da_le_tacche_che_il_render_sente(tmp_path, monkeypatch):
+    """Una banda senza ``seed`` pesca col seed che il parse deriva dal nome
+    dello studio: le tacche della pagina sono i valori di ``_load_specs``,
+    non quelli di un pescaggio col seed 0 che nessun render fa."""
+    doc = {k: v for k, v in DOC.items() if k != "for_each"}
+    doc["axes"] = {"density": {"baseline": 20, "base": 10, "range": 5, "n": 3}}
+    study = _studio(tmp_path, monkeypatch, doc)
+    assert cli.main(["graph", study]) == 0
+    params = {p["path"]: p for p in
+              _payload((tmp_path / "generated" / study / "graph.html").read_text())["lab"]["params"]}
+    resi = {v for s in cli._load_specs(study) for v in s.axis("density").values}
+    assert set(params["density"]["values"]) == resi
+
+
 def test_serve_senza_la_pagina_chiede_graph(tmp_path, monkeypatch, capsys):
     """Senza `graph.html` il browser troverebbe un 404: meglio dirlo prima,
     col comando che la scrive — non `sweep`, che la pagina non la fa."""
