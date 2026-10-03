@@ -18,7 +18,13 @@ import os
 from typing import Any, Dict, Iterator, List, Tuple
 
 from .errors import ErrCtx
-from .study_spec import axis_names, axis_values, default_y_seed, merge_stream_override
+from .study_spec import (
+    axis_names,
+    axis_path,
+    axis_values,
+    default_y_seed,
+    merge_stream_override,
+)
 from .value_generators import resolve, y_generator
 
 
@@ -91,15 +97,21 @@ def _tacche_asse(cfg: Dict[str, Any], doc: Dict[str, Any], seed_key: str) -> Lis
 
 
 def _assi(doc: Dict[str, Any]) -> Iterator[Tuple[str, Any]]:
-    """Gli assi di ``doc``, nell'ordine in cui sono scritti.
+    """Gli assi di ``doc`` come ``(path, config)``, nell'ordine in cui sono scritti.
 
-    Cosa sia un asse lo decide ``study_spec.axis_names`` — la stessa regola
-    del parse, non una lista di chiavi riservate riscritta qui.
+    Cosa sia un asse lo decide ``study_spec.axis_names``, e quale parametro
+    muova ``study_spec.axis_path`` (``path:`` e' un alias del nome) — le
+    regole del parse, non una lista di chiavi riservate riscritta qui. La
+    manopola sta sul path: e' la chiave che la pagina scrive nel documento
+    engine, e un nome d'asse li' l'engine non lo conosce. Un ``path`` che non
+    e' una stringa non nomina nessun parametro, e non diventa una manopola.
     """
     nomi = axis_names(doc)
     for nome, cfg in (doc.get("axes") or {}).items():
         if nome in nomi:
-            yield nome, cfg
+            path = axis_path(nome, cfg)
+            if isinstance(path, str):
+                yield path, cfg
 
 
 def _uniche(valori: List[Any]) -> List[Any]:
@@ -173,8 +185,8 @@ def lab_data(raw: Dict[str, Any] | None, study_id: str | None = None) -> Dict[st
             grezze[path] = []
         grezze[path].extend(valori)
 
-    for nome, cfg in _assi(raw):
-        aggiungi(nome, _tacche_asse(cfg, raw, doc_key) or [])
+    for path, cfg in _assi(raw):
+        aggiungi(path, _tacche_asse(cfg, raw, doc_key) or [])
     for key, cfg in (raw.get("for_each") or {}).items():
         # Solo le patch su `base.`: `stack.seed` o `percorso.arco` non sono
         # parametri di uno stream e nel laboratorio non hanno posto.
@@ -197,10 +209,10 @@ def lab_data(raw: Dict[str, Any] | None, study_id: str | None = None) -> Dict[st
             )
         except _ILLEGGIBILE:
             continue
-        for nome, cfg in _assi(merged):
+        for path, cfg in _assi(merged):
             # L'id dello stream e' la chiave del suo seed, come dopo il merge
             # di ``resolve_streams`` (``sweep.stream_id``).
-            aggiungi(nome, _tacche_asse(cfg, merged, str(sid)) or [])
+            aggiungi(path, _tacche_asse(cfg, merged, str(sid)) or [])
 
     params: List[Dict[str, Any]] = []
     for path in ordine:

@@ -168,6 +168,22 @@ def test_interpolation_e_seed_non_sono_assi():
     assert set(_params(doc)) == {"density"}
 
 
+def test_la_manopola_sta_sul_path_dell_asse_non_sul_suo_nome():
+    """``path`` e' l'alias del parse (``axes: {densita: {path: density}}``):
+    la pagina scrive la manopola nel documento engine col suo path, e un
+    ``densita:`` li' l'engine non lo conosce."""
+    doc = {"axes": {"densita": {"path": "density", "baseline": 10, "values": [5, 10]}}}
+    p = _params(doc)
+    assert set(p) == {"density"}
+    assert p["density"]["values"] == [5, 10]
+
+
+def test_l_alias_vale_anche_dentro_gli_stream():
+    doc = {"axes": {"densita": {"path": "density", "baseline": 10, "values": [5]}},
+           "streams": {"a": {"axes": {"densita": {"values": [7]}}}}}
+    assert _params(doc)["density"]["values"] == [5, 7]
+
+
 # --- l'ordine delle tacche -------------------------------------------------
 
 def test_le_tacche_numeriche_sono_ordinate_e_senza_doppioni():

@@ -190,7 +190,10 @@ solo — valori di quel parametro che vale la pena sentire:
 
 1. gli assi del documento (`axes:`, dove `interpolation` e `seed` sono
    vocabolario condiviso e non assi: lo decide `study_spec.axis_names`, la
-   regola del parse);
+   regola del parse). La manopola sta sul **path** dell'asse, non sul suo
+   nome: `path:` e' un alias (`densita: {path: density}`, vedi
+   `study_spec.axis_path`), e la pagina scrive la chiave nel documento
+   engine, dove un nome d'asse non vuol dire niente;
 2. gli assi esterni che patchano lo stream a riposo (`for_each: base.*`);
    `stack.seed` o `percorso.arco` non sono parametri di uno stream e non
    entrano;
