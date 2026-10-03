@@ -169,7 +169,10 @@ lo risolve chi lo rende: gli assi dal seam del parse
 (`study_spec.axis_values`), le chiavi di `for_each: base.*` da
 `value_generators.resolve`, come fa `for_each:`. Quindi `ramp:` e le bande
 danno tacche come `values:`, e la lista nuda (`base.distribution: [0, 1]`) e'
-la forma breve che `for_each` gia' accettava.
+la forma breve che `for_each` gia' accettava. Prima di #77 contava solo
+`values:`, che e' come sono scritti gli studi di mare-nostrum da cui il
+laboratorio viene: qui gli assi sono quasi tutti rampe, e su `1-10ms` la
+pagina non aveva **nessuna** manopola.
 
 **Le tacche di un asse sono i valori che il render sente**, non un altro
 pescaggio. Una banda senza `seed` pesca col seed che le darebbe il parse —
@@ -180,10 +183,7 @@ lo passa) — e i nodi annidati negli Env (`linear_env:`, un `expr` senza
 `let:`) si compilano in breakpoint come al parse. Con `resolve` la banda
 pescava col seed 0, valori che nessun render produce, e un nodo annidato
 rendeva l'asse illeggibile. Il documento conta come una fonte a se', come se
-si rendesse da solo. Prima di #77 contava solo
-`values:`, che e' come sono scritti gli studi di mare-nostrum da cui il
-laboratorio viene: qui gli assi sono quasi tutti rampe, e su `1-10ms` la
-pagina non aveva **nessuna** manopola.
+si rendesse da solo.
 
 Le fonti sono tre, e sono la stessa cosa dal punto di vista di uno stream
 solo — valori di quel parametro che vale la pena sentire:
