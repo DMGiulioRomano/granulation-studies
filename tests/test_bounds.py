@@ -166,6 +166,33 @@ def test_nessun_path_noto_e_una_grafia_di_registry():
         assert bounds.bounds_for(p) is None, p
 
 
+def _vocabolari_loop_unit_dell_engine():
+    """``(LOOP_UNITS, LOOP_UNIT_SCOPE)`` come li dichiara l'engine in uso.
+
+    Da PGE #246 le due tuple stanno in ``pge.parameters.loop_unit``, un
+    modulo senza dipendenze, e la seconda ha perso l'underscore. Prima
+    stavano in ``pge.controllers.pointer_controller``, con lo scope privato
+    (``_LOOP_UNIT_SCOPE``): letto li', il bump del submodule oltre la #246
+    rendeva questo confronto un ``AttributeError``.
+
+    Il ripiego vale solo per un modulo che manca: un ``ImportError`` *dentro*
+    ``loop_unit`` (una dipendenza nuova, un nome rotto) e' un guasto da
+    vedere, non una ragione per leggere il path vecchio.
+
+    ponytail: il ripiego serve finche' il submodule e' pinnato prima della
+    PGE #246; dopo il bump va tolto, e resta la sola lettura nuova.
+    """
+    try:
+        import pge.parameters.loop_unit as loop_unit
+    except ModuleNotFoundError as e:
+        if e.name != "pge.parameters.loop_unit":
+            raise
+        from pge.controllers import pointer_controller
+
+        return pointer_controller.LOOP_UNITS, pointer_controller._LOOP_UNIT_SCOPE
+    return loop_unit.LOOP_UNITS, loop_unit.LOOP_UNIT_SCOPE
+
+
 def test_vocabolari_di_unita_coincidono_con_l_engine():
     # Copie a livello di modulo (``diagnostics`` le importa senza toccare
     # l'engine), da cui dipende ora il confronto coi bounds: ``LOOP_UNIT_SCOPE``
@@ -174,11 +201,11 @@ def test_vocabolari_di_unita_coincidono_con_l_engine():
     from granstudies.engine_bridge import _ensure_engine_on_path
 
     _ensure_engine_on_path()
-    from pge.controllers import pointer_controller
     from pge.core import stream
 
-    assert bounds.LOOP_UNITS == pointer_controller.LOOP_UNITS
-    assert bounds.LOOP_UNIT_SCOPE == pointer_controller._LOOP_UNIT_SCOPE
+    loop_units, loop_unit_scope = _vocabolari_loop_unit_dell_engine()
+    assert bounds.LOOP_UNITS == loop_units
+    assert bounds.LOOP_UNIT_SCOPE == loop_unit_scope
     assert bounds.GRAIN_DURATION_UNITS == stream.GRAIN_DURATION_UNITS
 
 
