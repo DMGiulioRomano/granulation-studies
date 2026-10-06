@@ -52,7 +52,8 @@ def _path_map() -> Dict[str, str]:
 GRAIN_DURATION_UNITS = ("seconds", "samples", "milliseconds")
 
 # Unita' ammesse per ``pointer.loop_unit``, come l'engine
-# (``pge.controllers.pointer_controller.LOOP_UNITS``). ``seconds`` e'
+# (``pge.parameters.loop_unit.LOOP_UNITS`` da PGE #246; prima in
+# ``pge.controllers.pointer_controller``). ``seconds`` e'
 # la grafia canonica, ``absolute`` l'alias storico — stessa lettura, valori
 # gia' in secondi assoluti. Fuori di qui l'engine alza
 # ``InvalidFieldValueError``: la chiave e' scritta, quindi il refuso va
@@ -67,7 +68,8 @@ LOOP_UNITS = ("seconds", "absolute", "normalized")
 LOOP_UNIT_DEFAULT = "seconds"
 
 # Le chiavi del blocco pointer che ``loop_unit`` interpreta: lo stesso
-# ``_LOOP_UNIT_SCOPE`` del PointerController dell'engine. ``start`` e' fra
+# ``LOOP_UNIT_SCOPE`` dell'engine (``pge.parameters.loop_unit`` da PGE #246;
+# prima ``_LOOP_UNIT_SCOPE`` del PointerController). ``start`` e' fra
 # queste benche' loop non sia — e' una posizione nel sample come loop_start,
 # stesso dominio e stessa unita'.
 LOOP_UNIT_SCOPE = ("start", "loop_start", "loop_end", "loop_dur")
