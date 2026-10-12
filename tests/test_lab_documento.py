@@ -390,6 +390,172 @@ labRender().then(() => console.log(JSON.stringify(POST[0])));
             == {k: v for k, v in st.items() if k not in piazzati})
 
 
+# --- un documento che non e' uno stream solo ---------------------------------
+# Il laboratorio e' il banco di UNO stream, e scrive un documento con uno
+# stream solo. Aperto un documento che ne ha di piu', o un master che li
+# importa con `file:` (PythonGranularEngine#290), la scrittura sul file aperto
+# ne butterebbe via tutti gli altri, al primo `rendi e ascolta` e senza una
+# domanda. E con la testa conservata (#87) il documento che ne usciva teneva
+# anche quella del documento intero: le corsie di PGE-ui di tutti gli stream,
+# la durata di tutto.
+#
+# Portati da DMGiulioRomano/mare-nostrum@c971ef9 e @49a9b2f, senza le parti
+# che vengono dalle issue dopo nello stack (l'id dal nome del file e il seed
+# dello studio, #89; la firma, #90), e con un master scritto qui: quello vero
+# del brano di mare-nostrum non e' fra le fixture.
+#
+# Il "disco" e' fatto di piu' file: `/open` legge quello chiesto, `/render`
+# scrive dove la pagina dice (in `live/`, se non dice niente).
+
+def _dischi(dischi):
+    return """
+const POST = [];
+const DISCHI = %s;
+fetch = async (rotta, opt) => {
+  if (rotta === '/stato')
+    return {ok: true, json: async () => ({ok: true, sessione: 'S', recenti: []})};
+  const body = JSON.parse(opt.body);
+  POST.push(Object.assign({rotta}, body));
+  if (rotta === 'open')
+    return {ok: true, json: async () => ({ok: true, path: body.path,
+      doc: JSON.parse(JSON.stringify(DISCHI[body.path]))})};
+  if (body.path) DISCHI[body.path] = body.doc;
+  return {ok: true, json: async () => ({ok: true, src: 'x.aif', yaml: 'r.yml',
+    path: body.path || 'live/x.yml'})};
+};
+""" % json.dumps(dischi)
+
+
+DOVE = """
+const SCRITTURE = () => POST.filter(p => p.rotta === 'render').map(p => p.path || '');
+"""
+
+# Un master come lo scrive PGE-ui (DMGiulioRomano/PGE-ui#184): ogni voce
+# importa uno stream da un file suo, e nel master resta il piazzamento.
+MASTER = {"duration": 322.074, "bpm": 120, "seed": 1441,
+          "streams": [{"file": "streams/stream2.yml"},
+                      {"file": "streams/stream5.yml", "onset": 43.761}]}
+
+
+@node
+def test_un_master_non_si_apre_come_uno_stream(tmp_path):
+    """La prima voce del master e' un rimando (`file: streams/stream2.yml`),
+    non uno stream. Aperto come uno stream, il master diventava il file del
+    laboratorio, e il primo render lo riscriveva con quella voce sola. Non si
+    apre, e resta aperto il documento di prima: la scrittura dopo va li', non
+    sul master."""
+    st = _stream("stream2")
+    got = _lab(tmp_path, _dischi({"/brano/streams/stream2.yml": _documento(st),
+                                  "/brano/master.yml": MASTER}) + DOVE + """
+(async () => {
+  await apriPath('/brano/streams/stream2.yml');
+  await apriPath('/brano/master.yml');
+  const dopo = {file: FILE, info: document.getElementById('labInfo').textContent,
+                id: labDoc().streams[0].stream_id};
+  await labRender();
+  console.log(JSON.stringify({dopo, scritture: SCRITTURE(),
+                              master: DISCHI['/brano/master.yml']}));
+})();
+""")
+    assert got["dopo"]["file"] == "/brano/streams/stream2.yml"
+    assert got["dopo"]["id"] == "stream2"
+    # La riga di stato dice cos'e' e cosa aprire al suo posto.
+    assert "master" in got["dopo"]["info"] and "streams/stream2.yml" in got["dopo"]["info"]
+    assert got["scritture"] == ["/brano/streams/stream2.yml"]
+    assert got["master"] == MASTER
+
+
+@node
+def test_un_master_non_si_apre_neanche_sul_foglio_bianco(tmp_path):
+    """Senza un documento di prima resta il foglio bianco: niente breakpoint,
+    quindi niente da rendere, e il master resta com'e'."""
+    got = _lab(tmp_path, _dischi({"/brano/master.yml": MASTER}) + DOVE + """
+(async () => {
+  await apriPath('/brano/master.yml');
+  const dopo = {file: FILE, bps: bps.length};
+  await labRender();
+  console.log(JSON.stringify({dopo, scritture: SCRITTURE(),
+                              master: DISCHI['/brano/master.yml']}));
+})();
+""")
+    assert got["dopo"] == {"file": "", "bps": 0}
+    assert got["scritture"] == []
+    assert got["master"] == MASTER
+
+
+@node
+def test_un_documento_con_piu_stream_si_apre_sul_primo_e_non_ci_si_riscrive(tmp_path):
+    """Un brano scritto per intero, o il documento di uno studio con piu'
+    stream (`stack`, `versions`), si apre sul primo stream, come sempre. Ma
+    quel file non e' piu' quello su cui il laboratorio scrive: e' un foglio da
+    salvare con un nome suo, e il nome proposto e' lo `stream_id` del primo
+    stream. La testa e' quella di un documento di uno stream: la sua durata,
+    non quella del brano intero."""
+    a, b = _stream("stream2"), _stream("stream5")
+    doc = {"duration": 322.074, "bpm": 120, "seed": 1441, "streams": [a, b]}
+    got = _lab(tmp_path, _dischi({"/brano/vecchio.yml": doc}) + DOVE + """
+(async () => {
+  await apriPath('/brano/vecchio.yml');
+  const dopo = {file: FILE, nome: document.getElementById('labName').value,
+                sporco: sporco(), bps: bps.length,
+                info: document.getElementById('labInfo').textContent, doc: labDoc()};
+  await labRender();
+  console.log(JSON.stringify({dopo, scritture: SCRITTURE(),
+                              disco: DISCHI['/brano/vecchio.yml']}));
+})();
+""")
+    dopo = got["dopo"]
+    assert (dopo["file"], dopo["nome"], dopo["sporco"]) == ("", "stream2", True)
+    assert dopo["bps"] > 0
+    assert "2 stream" in dopo["info"]
+    scritto = dopo["doc"]
+    assert scritto["streams"] == [a]
+    assert scritto["duration"] == a["duration"]
+    assert scritto["seed"] == 1441
+    # Il render va in `live/` (path vuoto), e il documento sul disco resta.
+    assert got["scritture"] == [""]
+    assert got["disco"] == doc
+
+
+@pytest.mark.parametrize("testa, durata, attese", [
+    # La testa di un brano scritto da PGE-ui: il titolo e le sue corsie, che
+    # nominano tutti gli stream del brano.
+    ({"title": "brano", "duration": 322.074, "bpm": 120, "seed": 1441,
+      "ui_tracks": [{"id": "t1", "name": "bassi", "streams": ["stream2", "stream5"]}]},
+     True, ["seed", "duration", "bpm", "streams"]),
+    # Senza seed nel documento non se ne inventa uno; senza durata nello
+    # stream (lunga quanto il sample, PGE #205) non se ne scrive una: quella
+    # del documento e' del brano intero.
+    ({"duration": 322.074, "bpm": 120}, False, ["bpm", "streams"]),
+])
+@node
+def test_lo_stream_preso_da_un_documento_con_piu_stream_ha_la_testa_di_uno_stream(
+        tmp_path, testa, durata, attese):
+    """Il documento che nasce dal primo stream e' un documento del laboratorio
+    come gli altri: in testa il `seed`, la durata dello stream e il `bpm`,
+    nell'ordine in cui li scrive il foglio bianco. Il resto della testa e' del
+    documento da cui viene — la sua durata, il titolo, le corsie di PGE-ui
+    (`ui_tracks`) — e accanto a uno stream solo direbbe il falso: aperto in
+    PGE-ui, le corsie degli altri stream diventerebbero corsie vuote."""
+    a, b = _stream("stream2"), _stream("stream5")
+    if not durata:
+        a = {k: v for k, v in a.items() if k != "duration"}
+    doc = dict(testa, streams=[a, b])
+    got = _lab(tmp_path, _dischi({"/brano/brano.yml": doc}) + """
+(async () => {
+  await apriPath('/brano/brano.yml');
+  const d = labDoc();
+  console.log(JSON.stringify({chiavi: Object.keys(d), doc: d}));
+})();
+""")
+    assert got["chiavi"] == attese
+    scritto = got["doc"]
+    assert scritto.get("seed") == testa.get("seed")
+    assert scritto["bpm"] == 120
+    assert scritto.get("duration") == a.get("duration")
+    assert scritto["streams"] == [a]
+
+
 # --- i tempi in secondi sopra lo stream conservato ------------------------------
 # Senza `time_mode: normalized` l'engine legge i tempi in secondi (93f201c):
 # il laboratorio li porta a frazioni per leggerli (`tempiFrazione`, su una

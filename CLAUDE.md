@@ -96,7 +96,12 @@ modifiche successive con un diff. La sola deviazione di allora (i tempi nella
 convenzione del documento, sotto) mare-nostrum l'ha ripresa da qui
 (DMGiulioRomano/mare-nostrum#9), e da li' le sue modifiche si riportano una
 issue alla volta: la prima e' lo stream aperto che si conserva (#87, da
-DMGiulioRomano/mare-nostrum#3). Non e' stata portata la griglia delle
+DMGiulioRomano/mare-nostrum#3). Con la #87 sono arrivate anche le due
+correzioni che mare-nostrum ha fatto dopo sullo stesso `carica` (un master non
+si apre, un documento con piu' stream non si riscrive: mare-nostrum@c971ef9 e
+@49a9b2f), senza le righe che dipendono dalle issue dopo nello stack — l'id
+dal nome del file (#89) e la firma (#90), che le riporteranno con le loro.
+Non e' stata portata la griglia delle
 varianti discrete (la pagina si chiama `graph` per lei), che mare-nostrum
 aveva gia' tolto, ne' `make explore`, che serviva a lei.
 
@@ -212,6 +217,30 @@ senza `mute`/`solo` (`perAscolto`), e il server rende quello (scritto in
 `logs/<nome>.ascolto.yml`) accanto allo YAML salvato. Senza, uno stream con
 onset 43 s partirebbe dopo 43 s di silenzio e uno con `mute` non suonerebbe
 affatto.
+
+**Un master non si apre, e un documento con piu' stream non si riscrive.** Il
+laboratorio scrive un documento con uno stream solo, quindi riscriverlo sul
+file aperto butterebbe via tutti gli altri stream di quel file: succedeva al
+primo `rendi e ascolta`, senza una domanda, e con la testa conservata il
+documento che ne usciva si portava dietro anche quella del documento intero.
+Ora `carica` distingue due casi:
+
+- un **master**, cioe' un documento la cui prima voce di `streams:` e' un
+  `file:` (`rimando`; li scrive PGE-ui, e qui li scrivera' la #92), non si
+  apre. La riga di stato dice quale file aprire al suo posto, e resta aperto
+  il documento di prima;
+- un documento con **piu' stream** — un brano scritto per intero, il
+  documento di uno studio con `stack` o `versions` — si apre sul primo, come
+  sempre, ma senza file. Nella barra c'e' `(non salvato)` con `• modificato`,
+  `salva` apre il pannello e `rendi e ascolta` scrive in `live/`. Il nome
+  proposto e' lo `stream_id` di quello stream (`idDelloStream`). La testa e'
+  quella di un documento di uno stream solo (`testaDiUnoStream`): il `seed` e
+  il `bpm` del documento e la durata dello stream. Il resto della testa e' del
+  documento intero — la durata di tutto,
+  il titolo, le corsie di PGE-ui (`ui_tracks`), che in PGE-ui diventerebbero
+  corsie vuote — e non passa.
+
+Verificato in `tests/test_lab_documento.py`.
 
 I test del documento girano sulla pagina intera, non a frammenti
 (`tests/test_lab_documento.py`): `tests/lab_dom.js` e' un DOM finto in node

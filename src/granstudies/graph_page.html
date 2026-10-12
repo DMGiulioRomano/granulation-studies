@@ -501,6 +501,8 @@ let bps = [];        // [{t, vals:{path: numero}}] — sempre ordinati per t
 //   TESTA:  il documento fuori dallo stream — `seed`, `bpm`, la `duration` del
 //           tutto, le chiavi di PGE-ui (`ui_tracks`) — con `streams` al suo
 //           posto ma vuoto. Si riscrive com'e', salvo la durata se toccata.
+//           Da un documento con piu' stream, solo quella di uno stream
+//           (`testaDiUnoStream`).
 // Stanno nella storia dell'undo e nella bozza, accanto ai breakpoint.
 let APERTO = null, VISTA0 = null, TESTA = null;
 // Il loop del pointer sta nei campi `pointer.*` (vedi PUNT). Si parte SEMPRE
@@ -2368,11 +2370,33 @@ function carica(doc, path) {
     document.getElementById("labInfo").textContent = "non e' un documento con stream.";
     return;
   }
+  // Un master importa i suoi stream con `file:`: la sua prima voce e' un
+  // rimando, non uno stream, e non c'e' niente da mettere sui breakpoint.
+  // Aperto lo stesso, il master diventava il file del laboratorio, e il primo
+  // render lo riscriveva con quella voce sola: gli altri stream persi, senza
+  // una domanda. Non si apre, e resta aperto il documento di prima.
+  if (rimando(doc.streams[0])) {
+    const f = String(doc.streams[0].file);
+    const n = doc.streams.filter(rimando).length;
+    document.getElementById("labInfo").textContent = (path || "il documento")
+      + " e' un master: importa " + n + " stream con `file:`. Il laboratorio "
+      + "lavora su uno stream per file: apri " + f
+      + " (relativo alla cartella del master).";
+    return;
+  }
+  // Con piu' stream si apre il primo, come sempre, ma il file non resta quello
+  // del laboratorio: riscriverci sopra uno stream solo butterebbe via gli
+  // altri. E' un foglio da salvare con un nome suo.
+  const legato = doc.streams.length === 1;
   // La copia va presa prima di `leggiLoop`, che sul documento ci scrive.
   APERTO = clona(doc.streams[0]);
   // Gli stream non si copiano: in un brano sono dieci, e qui ne resta uno.
-  TESTA = Object.fromEntries(Object.entries(doc).map(([k, v]) =>
-    [k, k === "streams" ? null : clona(v)]));
+  // Con piu' stream la testa e' quella di un documento di uno stream
+  // (`testaDiUnoStream`): la testa del documento intero, accanto a uno
+  // stream solo, direbbe il falso.
+  TESTA = legato
+    ? Object.fromEntries(Object.entries(doc).map(([k, v]) => [k, k === "streams" ? null : clona(v)]))
+    : testaDiUnoStream(doc, APERTO);
   VISTA0 = null;
   // APERTO resta com'e' scritto; si legge da una copia coi tempi in frazioni
   // (#9), che e' quello che il resto della pagina sa leggere.
@@ -2414,9 +2438,15 @@ function carica(doc, path) {
   vociCarica(st);
   for (const [path, v] of Object.entries(fissiLoop)) setSel(path, v);
   SELEZIONE.clear();        // i breakpoint di prima non esistono piu'
-  FILE = path || "";
-  document.getElementById("labName").value =
-    (path || NOME0).split("/").pop().replace(/\.ya?ml$/, "");
+  // Un documento con piu' stream non e' il file del laboratorio (sopra): il
+  // foglio non ha un file.
+  FILE = legato ? path || "" : "";
+  // Il nome di un foglio senza file e' il suo `stream_id`: qui quello dello
+  // stream aperto, che e' anche il nome che il pannello di `salva` propone.
+  // Non il nome del documento, che proporrebbe di salvarci sopra.
+  document.getElementById("labName").value = legato
+    ? (path || NOME0).split("/").pop().replace(/\.ya?ml$/, "")
+    : idDelloStream(APERTO);
   // La durata dello stream, prima di quella del documento: aperto un brano,
   // la `duration` in testa e' quella del brano intero.
   document.getElementById("labDur").value = st.duration || doc.duration || DUR;
@@ -2426,10 +2456,45 @@ function carica(doc, path) {
   VISTA0 = labView();
   storiaReset();
   bpLoad(0);
-  SALVATO = statoOra();
+  // Senza un file, niente e' salvato: `• modificato`, `salva` che apre il
+  // pannello, e la conferma prima di `nuovo`/`apri`, come un foglio nuovo.
+  SALVATO = legato ? statoOra() : "";
   segna();
-  document.getElementById("labInfo").textContent =
-    (path || "documento") + " — " + bps.length + " breakpoint";
+  document.getElementById("labInfo").textContent = legato
+    ? (path || "documento") + " — " + bps.length + " breakpoint"
+    : (path || "il documento") + " contiene " + doc.streams.length + " stream: aperto il primo ("
+      + idDelloStream(APERTO) + ", " + bps.length + " breakpoint). Il laboratorio non riscrive "
+      + "quel file con uno stream solo: salva per dargli un file suo.";
+}
+
+// Una voce di `streams:` che importa lo stream da un altro file (`- file:`,
+// PythonGranularEngine#290): la forma che il motore riconosce, un mapping con
+// la chiave `file`.
+function rimando(voce) {
+  return !!voce && typeof voce === "object" && !Array.isArray(voce) && "file" in voce;
+}
+
+// La testa del documento che nasce dal primo stream di uno che ne ha di piu'
+// (`carica`): quella di un documento del laboratorio, di uno stream solo — il
+// `seed` e il `bpm` del documento, e la durata dello stream (il seed viene
+// prima, come lo scrivera' il foglio bianco con la #89). Il resto e' del
+// documento intero: la sua durata, il titolo,
+// le corsie di PGE-ui (`ui_tracks`), che nominano tutti i suoi stream e che,
+// aperto il file in PGE-ui, diventerebbero corsie vuote.
+function testaDiUnoStream(doc, st) {
+  const t = {};
+  if (doc.seed !== undefined) t.seed = clona(doc.seed);
+  if (st.duration !== undefined && st.duration !== null) t.duration = clona(st.duration);
+  if (doc.bpm !== undefined) t.bpm = clona(doc.bpm);
+  t.streams = null;
+  return t;
+}
+
+// Lo `stream_id` di uno stream come nome di un foglio senza file. Uno stream
+// che non ne dichiara uno prende il nome del foglio bianco.
+function idDelloStream(st) {
+  const id = st && st.stream_id;
+  return id === undefined || id === null || String(id) === "" ? NOME0 : String(id);
 }
 
 // Il valore di un parametro al tempo t: il punto se c'e', altrimenti quello
