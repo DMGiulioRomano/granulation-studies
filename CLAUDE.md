@@ -524,6 +524,17 @@ La durata entra nella storia dell'undo: riportare indietro i breakpoint senza
 di lei lascerebbe i tempi in secondi diversi da quelli ripristinati. Verificato
 in `tests/test_graph_js.py`.
 
+**Limite dichiarato: il lucchetto muove solo i breakpoint.** Quindi solo gli
+inviluppi che il laboratorio riscrive da li'. Quelli che uno stream aperto
+conserva senza leggerli (#87) — `grain.read_direction`, e fino alla #88 un
+`{type, points}` — restano com'erano scritti, nei tempi del loro
+`time_mode`, e in due casi su quattro non vanno piu' d'accordo con gli altri:
+con `time_mode: normalized` e il lucchetto chiuso si stirano con lo stream
+mentre gli altri tengono i secondi; senza `time_mode` (tempi in secondi) e il
+lucchetto aperto tengono i secondi mentre gli altri si stirano. E' lo stesso
+in mare-nostrum: la correzione va decisa li' e poi riportata, come il resto
+della pagina.
+
 **Seguire il render.** Sotto il lucchetto c'e' `segui il render`: acceso,
 mentre suona i parametri smettono di mostrare il breakpoint selezionato e
 mostrano **dove sono adesso** — gli inviluppi letti al tempo del cursore, con
