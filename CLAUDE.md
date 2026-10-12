@@ -92,8 +92,11 @@ non si muove mai resta scalare.
 **Da dove viene.** Il laboratorio e' nato in mare-nostrum ed e' stato
 portato qui per stato finale (#76), a DMGiulioRomano/mare-nostrum@f7fdb58:
 `graph_page.html` e' quella di mare-nostrum, per poterne riportare le
-modifiche successive con un diff, con una sola deviazione (i tempi nella
-convenzione del documento, sotto). Non e' stata portata la griglia delle
+modifiche successive con un diff. La sola deviazione di allora (i tempi nella
+convenzione del documento, sotto) mare-nostrum l'ha ripresa da qui
+(DMGiulioRomano/mare-nostrum#9), e da li' le sue modifiche si riportano una
+issue alla volta: la prima e' lo stream aperto che si conserva (#87, da
+DMGiulioRomano/mare-nostrum#3). Non e' stata portata la griglia delle
 varianti discrete (la pagina si chiama `graph` per lei), che mare-nostrum
 aveva gia' tolto, ne' `make explore`, che serviva a lei.
 
@@ -155,6 +158,69 @@ una rampa ripartirebbe piu' tardi e il file suonerebbe diverso da quello
 aperto. Round-trip verificato. Un preset che non cambiava nulla rispetto al
 precedente non torna: non cambiava il suono.
 
+**Aperto e risalvato, e' lo stesso stream** (#87, da
+DMGiulioRomano/mare-nostrum#3). Il laboratorio non ricostruisce piu' lo
+stream dal `base:` dello studio: parte da quello del documento aperto
+(`APERTO`) e ci scrive sopra **solo cio' che conosce e che e' stato toccato**.
+"Toccato" e' una differenza fra due scritture dello stesso stream: `labView()`
+e' lo stream come lo scriverebbe il laboratorio per intero, `VISTA0` e' quella
+scrittura presa appena aperto il file, e `labDoc()` mette sullo stream aperto
+le sole chiavi in cui la `labView()` di adesso differisce da `VISTA0`
+(`toccati`). Il confronto scende nei blocchi (`grain`, `pointer`,
+`voices.pitch`...) ma non nei valori: un inviluppo cambia o resta tutto
+intero. Cosi' restano com'erano le chiavi che il laboratorio non ha
+(`grain.read_direction`, che nel brano di mare-nostrum hanno 8 stream su 10),
+`stream_id` e `onset`, e i parametri che il documento lascia al default
+dell'engine anche se il laboratorio ha un campo per loro. Prima ne usciva uno
+stream ricostruito sul `base:` dello studio servito, che qui e' quello di uno
+sweep: aperto su `1-10ms`, uno stream del brano perdeva `fill_factor`, `pitch`
+e `distribution`, prendeva una `density` dallo schermo e si fermava
+(`pointer.speed_ratio: 0`). Il loop e' un gruppo (`GRUPPO_LOOP`): se una
+delle sue chiavi cambia, si scrivono tutte come `scriviLoop` le vuole.
+
+Anche la **testa** del documento si conserva (`TESTA`): `seed`, `bpm`, la
+`duration` del tutto, le chiavi di PGE-ui come `ui_tracks` restano com'erano,
+e del laboratorio c'e' solo la durata, che si scrive in testa solo se
+`durata (s)` e' stata toccata. Un parametro che il documento non dichiara si
+mostra al valore che l'engine usa al suo posto (`assente`: il default dello
+schema dei parametri, che `graph` passa alla pagina con
+`engine_bridge.parameter_path_defaults`), non a quello rimasto a schermo dal
+documento aperto prima ne' ai `DEFAULTS` del foglio bianco — che per
+`grain.duration` e `grain.envelope` sono 0.064 e gaussian contro 0.05 e
+hanning: lo schermo direbbe un suono che l'ascolto non ha, e scegliere a mano
+quel valore non scriverebbe niente. Dove l'engine non ha un default si ricade
+su `iniziale`. Nel file non entra finche' non lo si tocca. `APERTO`, `VISTA0`
+e `TESTA` stanno nella storia dell'undo e nella bozza, accanto ai breakpoint.
+Il **foglio bianco** (`nuovo`, o la pagina appena aperta) non ha uno stream
+aperto: nasce da `DEFAULTS` e `base:` e il laboratorio lo scrive per intero,
+come prima.
+
+Un inviluppo `{type, points}` (lo scrive PGE-ui, appena l'interpolazione
+globale di una curva non e' lineare) il laboratorio non lo legge ancora: lo
+legge la #88. Fino ad allora a schermo non ha un valore, nel file resta
+com'era — prima della #87 si perdeva — e una modifica fatta li' non si
+scrive.
+
+L'**anteprima** sotto i breakpoint legge il documento (`labDoc`), non i
+breakpoint: un inviluppo non toccato vi compare com'e' scritto.
+
+**Si salva col piazzamento, si ascolta senza.** `onset`, `mute` e `solo` di uno
+stream preso da un brano (un documento di PGE-ui, o di mare-nostrum) restano
+nel file — sono dello stream. Ma il render del laboratorio e' l'ascolto dello
+stream da solo: `labPost` manda anche un documento `ascolto` con `onset: 0` e
+senza `mute`/`solo` (`perAscolto`), e il server rende quello (scritto in
+`logs/<nome>.ascolto.yml`) accanto allo YAML salvato. Senza, uno stream con
+onset 43 s partirebbe dopo 43 s di silenzio e uno con `mute` non suonerebbe
+affatto.
+
+I test del documento girano sulla pagina intera, non a frammenti
+(`tests/test_lab_documento.py`): `tests/lab_dom.js` e' un DOM finto in node
+(un `<select>` con un valore che non ha vale `""`, come nel browser), e
+`graph.lab_completo` da' loro lo stesso corredo che `make serve` da' alla
+pagina. Sono i test di mare-nostrum, sulle sue fixture
+(`tests/fixtures/mare-nostrum/`: il brano e lo studio `001-41`), piu' gli
+stessi giri sulla pagina di `1-10ms`.
+
 Il lavoro non salvato sopravvive a un refresh (localStorage, per studio): e'
 una rete di sicurezza, non un salvataggio. La verita' e' il file.
 
@@ -209,7 +275,8 @@ stai ascoltando" a chi sta componendo un'altra cosa. Le quattro zone d'ombra
 di `1-10ms` scrivono quattro rampe di `density` sullo stesso asse: insieme
 sono le density che quello studio ha trovato interessanti, che e' esattamente
 cio' che un menu di tacche deve offrire. In piu' cosi' la pagina non cambia, e
-`graph_page.html` resta identica a mare-nostrum (vedi "Da dove viene").
+`graph_page.html` resta quella di mare-nostrum, senza deviazioni sue (vedi
+"Da dove viene").
 
 **L'ordine e' quello di un menu, non di una sequenza.** Nello `study.yml`
 `values:` e' una sequenza da percorrere e puo' tornare sui suoi passi
@@ -378,16 +445,22 @@ file o fare `nuovo` azzera la storia.
 
 **I tempi sul documento seguono il suo `time_mode`.** Nella pagina i tempi
 dei breakpoint sono frazioni dello stream, ma l'engine li legge cosi' solo con
-`time_mode: normalized`; senza, sono secondi. Il documento parte dal `base:`
-dello studio, ed e' lui a decidere: con `normalized` i tempi escono frazioni,
-altrimenti `labDoc` li scrive in secondi (`scalaTempi`, `inSecondi`), e
-riaprendo `carica` li riporta a frazioni (`tempiFrazione`). Cosi' gli
-inviluppi ereditati dal `base:` restano nella loro convenzione. Vale per tutto
-cio' che sta sui breakpoint: numerici, voci, loop, la `curve` di
-`grain.envelope`, la progressione. Prima la pagina contava sul
-`time_mode: normalized` del `base:`, che oggi tutti gli studi dichiarano: su
-uno studio senza, una rampa di 30 s si schiacciava nel primo secondo.
-Deviazione da mare-nostrum, verificata in `tests/test_graph_js.py`.
+`time_mode: normalized`; senza, sono secondi. Decide lo stream: quello
+aperto (#87), o il `base:` dello studio sul foglio bianco. Con `normalized` i
+tempi escono frazioni, altrimenti `labView` li scrive in secondi
+(`scalaTempi`, `inSecondi`), e riaprendo `carica` legge da una copia dello
+stream coi tempi in frazioni (`tempiFrazione`) — lo stream aperto (`APERTO`)
+resta com'e' scritto, e un inviluppo non toccato esce nei suoi secondi di
+prima. Cosi' gli inviluppi che lo stream ha gia' restano nella loro
+convenzione: forzare `time_mode: normalized` sarebbe stato piu' semplice, ma
+li avrebbe riletti in frazioni. Vale per tutto cio' che sta sui breakpoint:
+numerici, voci, loop, la `curve` di `grain.envelope`, la progressione. Prima
+la pagina contava sul `time_mode: normalized` del `base:`, che oggi tutti gli
+studi dichiarano: su uno studio senza, una rampa di 30 s si schiacciava nel
+primo secondo. Nata qui come deviazione da mare-nostrum, che poi l'ha ripresa
+(DMGiulioRomano/mare-nostrum#9); verificata in `tests/test_graph_js.py`
+(foglio bianco) e in `tests/test_lab_documento.py` (uno stream aperto in
+secondi).
 
 **Il tempo di un breakpoint si scrive.** La riga `tempo (0-1)` in cima ai
 parametri mostra la x normalizzata del punto selezionato e la accetta digitata:
@@ -585,9 +658,10 @@ Le curve occupano la frazione di larghezza che lo stream occupa nel file
 (la coda dell'ultimo grano puo' allungarlo), verificata in
 `tests/test_graph_js.py`.
 
-Una cosa non torna esatta: il documento del laboratorio non porta un `seed`,
-quindi le curve di una strategia **stocastica** sono una realizzazione diversa
-da quella che ha suonato. Si aggiusta scrivendo il seed nel documento.
+Una cosa non torna esatta: il foglio bianco non porta un `seed`, quindi le
+curve di una strategia **stocastica** sono una realizzazione diversa da quella
+che ha suonato. Un documento aperto che ne ha uno lo conserva (#87), e li'
+tornano; altrimenti si aggiusta scrivendo il seed nel documento.
 
 **L'altezza dei pannelli di analisi** e' quella dell'attributo `height` del
 canvas e basta: `width:100%` da solo la lascerebbe al rapporto fra gli

@@ -276,10 +276,11 @@ def _analisi(doc_path: str, repo_root: str, live: str) -> dict:
     nel documento non ci sono affatto.
 
     ponytail: un ascolto non deve fallire perche' il disegno non si sa fare,
-    quindi qualunque inciampo qui vale "niente da disegnare". E il documento
-    del laboratorio non porta un ``seed``, quindi le curve di una strategia
-    **stocastica** sono un'altra estrazione rispetto a quella che ha suonato:
-    scrivere il seed nel documento, se dara' fastidio.
+    quindi qualunque inciampo qui vale "niente da disegnare". E il foglio
+    bianco del laboratorio non porta un ``seed`` (un documento aperto conserva
+    il suo), quindi le curve di una strategia **stocastica** sono un'altra
+    estrazione rispetto a quella che ha suonato: scrivere il seed nel
+    documento, se dara' fastidio.
     """
     from . import engine_bridge
 
