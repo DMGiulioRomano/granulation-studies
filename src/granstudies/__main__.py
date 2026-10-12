@@ -878,7 +878,8 @@ def cmd_graph(study: str) -> int:
     esterni compresi, non quelle di una combinazione sola.
     """
     from . import bounds
-    from .graph import campioni, lab_data, write_graph
+    from .engine_bridge import parameter_path_defaults
+    from .graph import campioni, lab_completo, lab_data, write_graph
 
     gen_root = os.path.join(REPO_ROOT, "generated", study)
     out = os.path.join(gen_root, "graph.html")
@@ -890,31 +891,17 @@ def cmd_graph(study: str) -> int:
     # che non ne hanno uno (come in `_load_specs`): senza, le tacche di una
     # banda sarebbero un pescaggio che nessun render fa.
     with open(os.path.join(study_dir(study), "study.yml")) as fh:
-        lab = lab_data(yaml.safe_load(fh), study)
-    lab["envelopes"] = _finestre()
-    noti = {p["path"] for p in lab["params"]}
+        raw = yaml.safe_load(fh)
+    # Il corredo intero — sample, manopole libere, default dell'engine — lo
+    # mette insieme `lab_completo`, lo stesso con cui i test caricano la pagina.
+    lab = lab_completo(raw, campioni(samples_dir(_load_spec(study).samples_dir)),
+                       _finestre(), bounds.bounds_for, parameter_path_defaults(), study)
     # Si contano le TACCHE, non i parametri: un asse senza generatore leggibile
     # e' una manopola a mano come volume e pan (``lab_data``), e contarla
     # renderebbe muto l'avviso qui sotto proprio sugli studi che lo meritano.
-    # E si contano adesso, prima di sample e manopole libere: quelle ci sono
-    # sempre.
-    con_tacche = sum(1 for p in lab["params"] if p["values"])
-    # Il sample e' una manopola fissa come le altre categoriali, ma le sue
-    # tacche non stanno nello study.yml: sono i file della cartella dei sample.
-    camp = campioni(samples_dir(_load_spec(study).samples_dir))
-    if camp and "sample" not in noti:
-        lab["params"].append({"path": "sample", "values": camp, "kind": "cat"})
-    # Volume, pan e pan_range non hanno tacche: sono aggiustamenti continui e
-    # si scrivono a mano. `pan` serve anche come punto da cui partono gli
-    # offset delle voci (voice 0 sta li'), `pan_range` come dispersione del
-    # singolo grano. I limiti li sa l'engine (bounds.bounds_for), non li
-    # riscriviamo qui; dove non li conosce (pan_range) restano None.
-    for path in ("volume", "pan", "pan_range"):
-        if path in noti:
-            continue
-        lo, hi = bounds.bounds_for(path) or (None, None)
-        lab["params"].append({"path": path, "values": [], "kind": "num",
-                              "free": True, "min": lo, "max": hi})
+    # E si contano sullo study.yml (``lab_data``), non sul corredo intero:
+    # sample e manopole libere, che ``lab_completo`` aggiunge, ci sono sempre.
+    con_tacche = sum(1 for p in lab_data(raw, study)["params"] if p["values"])
     os.makedirs(gen_root, exist_ok=True)
     n = write_graph(study, out, lab)
     # Un avviso, non un errore: la pagina si apre lo stesso, e le manopole si
