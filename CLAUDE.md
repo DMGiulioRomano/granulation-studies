@@ -100,7 +100,9 @@ DMGiulioRomano/mare-nostrum#3). Con la #87 sono arrivate anche le due
 correzioni che mare-nostrum ha fatto dopo sullo stesso `carica` (un master non
 si apre, un documento con piu' stream non si riscrive: mare-nostrum@c971ef9 e
 @49a9b2f), senza le righe che dipendono dalle issue dopo nello stack — l'id
-dal nome del file (#89) e la firma (#90), che le riporteranno con le loro.
+dal nome del file (#89) e la firma (#90), che le riporteranno con le loro —
+e senza la terza correzione di c971ef9, l'estensione maiuscola (`risacca.YML`)
+in `idDa` e in `render_doc`, che non riguarda `carica`.
 Non e' stata portata la griglia delle
 varianti discrete (la pagina si chiama `graph` per lei), che mare-nostrum
 aveva gia' tolto, ne' `make explore`, che serviva a lei.
@@ -247,7 +249,14 @@ Ora `carica` distingue due casi:
   il `bpm` del documento e la durata dello stream. Il resto della testa e' del
   documento intero — la durata di tutto,
   il titolo, le corsie di PGE-ui (`ui_tracks`), che in PGE-ui diventerebbero
-  corsie vuote — e non passa.
+  corsie vuote — e non passa. La barra e il `salva` restano cosi' solo fino
+  al primo `rendi e ascolta`: come sul foglio bianco, `labPost` adotta il file
+  scritto in `live/` come file del laboratorio, e da li' `salva` e il render
+  dopo vengono rifiutati (`percorso non scelto da un pannello`) finche' non si
+  fa `salva con nome`.
+  Il documento da cui lo stream viene resta comunque intatto. La correzione e'
+  in DMGiulioRomano/mare-nostrum#5 (mare-nostrum@5dbaece e @e1e5e49), che qui
+  porta la #89.
 
 Verificato in `tests/test_lab_documento.py`.
 
