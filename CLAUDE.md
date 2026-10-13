@@ -206,6 +206,15 @@ legge la #88. Fino ad allora a schermo non ha un valore, nel file resta
 com'era — prima della #87 si perdeva — e una modifica fatta li' non si
 scrive.
 
+Lo stesso vale per le altre forme che l'engine legge e la pagina non scrive:
+il blocco compatto `[pattern, end_time, n_reps]` (l'"add loop" di PGE-ui),
+anche dentro una lista, il gruppo di breakpoint `[punti, interp]`, i punti
+`{t, v}`. La pagina legge solo la lista di punti `[t, v]` / `[t, v, tipo]`
+(`leggibile`), e le altre non portano tempi fra i breakpoint. Prima `carica`
+ci moriva a meta', dopo aver gia' preso lo stream nuovo (`APERTO`) col file
+di prima ancora aperto: il `salva` dopo scriveva lo stream nuovo dentro quel
+file. Verificato in `tests/test_lab_documento.py`.
+
 L'**anteprima** sotto i breakpoint legge il documento (`labDoc`), non i
 breakpoint: un inviluppo non toccato vi compare com'e' scritto.
 

@@ -309,7 +309,7 @@ def _env(bps: str, coda: str, tmp_path) -> str:
     src = "\n".join([
         'const EP = "grain.envelope";',
         _fn(js, "serieEnv"), _fn(js, "envA"),
-        _fn(js, "valoreA"), _fn(js, "tipoDi"),
+        _fn(js, "valoreA"), _fn(js, "leggibile"), _fn(js, "tipoDi"),
         "let bps = " + bps + ";", coda,
     ])
     p = tmp_path / "env.js"

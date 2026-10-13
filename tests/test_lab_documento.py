@@ -556,6 +556,71 @@ def test_lo_stream_preso_da_un_documento_con_piu_stream_ha_la_testa_di_uno_strea
     assert scritto["streams"] == [a]
 
 
+# --- le forme che il laboratorio non legge ---------------------------------------
+# L'engine legge piu' forme di inviluppo di quelle che la pagina scrive: il
+# blocco compatto `[pattern, end_time, n_reps]` (l'"add loop" di PGE-ui), anche
+# dentro una lista, il gruppo di breakpoint `[punti, interp]`, i punti
+# `{t, v}`. La pagina sa leggere solo la lista di punti `[t, v]` /
+# `[t, v, tipo]` (`leggibile`): le altre non portano tempi fra i breakpoint, e
+# nel file restano com'erano, come il `{type, points}` fino alla #88.
+#
+# Prima `carica` ci moriva a meta' (`for (const [t] of v)` su un numero o su un
+# `{t, v}`), e moriva dopo aver gia' preso lo stream nuovo (`APERTO`) col file
+# di prima ancora aperto: il `salva` dopo scriveva lo stream nuovo dentro il
+# file di prima. Su `main`, senza `APERTO`, lo stesso `apri` falliva senza
+# toccare niente.
+
+FORME = {
+    "compatto": [[[0, -6], [50, 0], [100, -6]], 1.0, 4],
+    "compatto_in_lista": [[0, -6], [[[0, -6], [100, 0]], 0.5, 2], [1, 0]],
+    "gruppo": [[[0, -6], [0.5, 0], [1, -6]], "cubic"],
+    "punti_dict": [{"t": 0, "v": -6}, {"t": 1, "v": 0}],
+}
+
+
+@node
+@pytest.mark.parametrize("forma", sorted(FORME))
+def test_un_inviluppo_che_il_laboratorio_non_legge_si_apre_e_resta_com_era(tmp_path, forma):
+    """Si apre, i suoi punti non diventano breakpoint e non danno un tipo, e
+    lo stream risalvato resta com'era — anche toccando un altro parametro."""
+    st = dict(_stream("stream2"), volume=FORME[forma])
+    got = _lab(tmp_path, _apri(_stream("stream2")) + "const ts0 = bps.map(b => b.t);\n"
+               + _apri(st) + """
+const vista = {ts0, ts: bps.map(b => b.t), tipi: bps.map(b => tipoDi(b, 'volume')),
+               intatto: labDoc()};
+""" + _tocca(0, "pitch.ratio", 0.75) + """
+vista.toccato = labDoc();
+console.log(JSON.stringify(vista));
+""")
+    assert got["ts"] == got["ts0"]
+    assert set(got["tipi"]) == {"linear"}
+    assert got["intatto"]["streams"][0] == st
+    out = got["toccato"]["streams"][0]
+    assert out["volume"] == FORME[forma]
+    assert out["pitch"]["ratio"][0] == [0, 0.75]
+
+
+@node
+def test_aperto_dopo_un_altro_non_finisce_nel_file_di_prima(tmp_path):
+    """Il caso vero: aperto un file, poi uno stream di PGE-ui con un blocco
+    compatto, il `salva` scriveva il secondo stream dentro il primo file."""
+    a = _stream("stream2")
+    b = dict(_stream("stream5"), volume=FORME["compatto"])
+    got = _lab(tmp_path, _dischi({"/brano/a.yml": _documento(a),
+                                  "/brano/b.yml": _documento(b)}) + """
+(async () => {
+  await apriPath('/brano/a.yml');
+  await apriPath('/brano/b.yml');
+  const file = FILE;
+  await fSave(false);
+  console.log(JSON.stringify({file, a: DISCHI['/brano/a.yml'], b: DISCHI['/brano/b.yml']}));
+})();
+""")
+    assert got["file"] == "/brano/b.yml"
+    assert got["a"] == _documento(a)
+    assert got["b"] == _documento(b)
+
+
 # --- i tempi in secondi sopra lo stream conservato ------------------------------
 # Senza `time_mode: normalized` l'engine legge i tempi in secondi (93f201c):
 # il laboratorio li porta a frazioni per leggerli (`tempiFrazione`, su una

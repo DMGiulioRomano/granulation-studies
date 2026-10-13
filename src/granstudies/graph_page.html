@@ -2403,14 +2403,19 @@ function carica(doc, path) {
   const st = tempiFrazione(clona(APERTO), APERTO.duration || doc.duration || DUR);
   const fissiLoop = leggiLoop(st);
   const ts = new Set([0]);
+  // Solo dalle forme che la pagina sa leggere (`leggibile`): un blocco
+  // compatto, un gruppo, i punti `{t, v}` non portano tempi, e restano
+  // com'erano. Prima qui si moriva a meta', con APERTO gia' preso e il file di
+  // prima ancora aperto: il `salva` dopo scriveva lo stream nuovo dentro quel
+  // file.
   for (const p of NUM) {
     const v = leggiPath(st, p.path);
-    if (Array.isArray(v)) for (const [t] of v) ts.add(t);
+    if (leggibile(v)) for (const [t] of v) ts.add(t);
   }
   // I tempi della curve dell'envelope sono breakpoint come gli altri: e' la
   // stessa unione, altrimenti riaprendo un cambio di finestra sparirebbe.
   const espec = ENVP ? leggiPath(st, EP) : null;
-  if (espec && Array.isArray(espec.curve)) for (const [t] of espec.curve) ts.add(t);
+  if (espec && leggibile(espec.curve)) for (const [t] of espec.curve) ts.add(t);
   // E i tempi della progressione di accordi, per la stessa ragione.
   const prog = leggiPath(st, "voices.pitch.progression");
   if (Array.isArray(prog)) for (const passo of prog)
@@ -2505,6 +2510,7 @@ function idDelloStream(st) {
 // aperto. Un gradino dichiarato (terzo elemento `step`) invece tiene.
 function valoreA(v, t) {
   if (!Array.isArray(v)) return v;
+  if (!leggibile(v)) return NaN;          // una forma che qui non si legge
   let prev = v[0];
   for (const pt of v) {
     if (pt[0] >= t - 1e-9) {
@@ -2519,13 +2525,27 @@ function valoreA(v, t) {
 
 // Il tipo del segmento che contiene t (l'ultimo punto non ne ha: vale linear).
 function tipoA(v, t) {
-  if (!Array.isArray(v)) return "linear";
+  if (!leggibile(v)) return "linear";
   let tipo = "linear";
   for (const pt of v) {
     if (pt[0] > t + 1e-9) break;
     tipo = pt[2] || "linear";
   }
   return tipo;
+}
+
+// Un inviluppo che la pagina sa leggere: la lista di punti `[t, v]` o
+// `[t, v, tipo]`, che e' quella che scrive. L'engine ne legge altre — il
+// blocco compatto `[pattern, end_time, n_reps]` (l'"add loop" di PGE-ui),
+// anche dentro una lista, il gruppo `[punti, interp]`, i punti `{t, v}` — e
+// qui, come il `{type, points}` fino alla #88, non portano tempi fra i
+// breakpoint (`carica`), a schermo non hanno un valore ne' un tipo, e nel
+// file restano com'erano perche' nessuno le tocca (#87).
+function leggibile(v) {
+  return Array.isArray(v) && v.length > 0 && v.every(p =>
+    Array.isArray(p) && (p.length === 2 || p.length === 3) &&
+    typeof p[0] === "number" && typeof p[1] === "number" &&
+    (p[2] == null || typeof p[2] === "string"));
 }
 
 function leggiPath(st, path) {
