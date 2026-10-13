@@ -97,6 +97,22 @@ def test_graph_scrive_una_pagina_sola_anche_con_for_each(tmp_path, monkeypatch):
         assert params[libero]["free"] is True and params[libero]["values"] == []
 
 
+def test_graph_da_alla_pagina_i_default_dell_engine(tmp_path, monkeypatch):
+    """Un parametro che il documento aperto non dichiara si mostra al valore
+    che l'engine usa al suo posto (#87): `graph` lo mette nel payload, preso
+    dall'engine (`parameter_path_defaults`) e non riscritto qui."""
+    from granstudies.engine_bridge import parameter_path_defaults
+
+    study = _studio(tmp_path, monkeypatch, DOC)
+    assert cli.main(["graph", study]) == 0
+    params = {p["path"]: p for p in
+              _payload((tmp_path / "generated" / study / "graph.html").read_text())["lab"]["params"]}
+    motore = parameter_path_defaults()
+    for path in ("grain.duration", "distribution", "volume", "pan"):
+        assert params[path]["engine"] == motore[path]
+    assert "engine" not in params["sample"]          # l'engine non ne ha uno
+
+
 def test_graph_senza_tacche_lo_dice_ma_scrive_la_pagina(tmp_path, monkeypatch, capsys):
     """L'avviso guarda le TACCHE, non i parametri. Sample, volume e pan ci sono
     sempre, e da #77 anche un asse senza generatore leggibile e' una manopola:

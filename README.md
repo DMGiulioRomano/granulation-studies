@@ -169,7 +169,10 @@ non si tocca, e il messaggio dice chi la tiene.
 - **File.** Il progetto è lo YAML stesso, un documento engine puro: `nuovo`,
   `apri…`, `apri recente…`, `salva`, `salva con nome…` con i pannelli nativi di
   macOS, dove si vuole sul disco; l'audio (`.aif`) nasce accanto, con lo stesso
-  nome. Senza un file scelto, tutto va in `generated/<studio>/live/`.
+  nome. Senza un file scelto, tutto va in `generated/<studio>/live/`. Aperto e
+  risalvato, uno stream resta lo stesso: il laboratorio ci scrive sopra solo
+  cio' che conosce e che e' stato toccato, e il `base:` dello studio vale solo
+  per il foglio bianco.
 
 Dopo il render, a destra:
 
@@ -190,9 +193,10 @@ laboratorio non dipende da quel processo, compone da zero e rende per conto
 suo — li' mancano le tacche, non le manopole.
 
 Vincoli: **solo macOS** (`osascript` per i pannelli, Safari che decodifica
-AIFF). Il documento del laboratorio non porta un `seed`: le curve di una
-strategia stocastica sono un'altra realizzazione rispetto a quella che ha
-suonato. La descrizione completa, pezzo per pezzo, è in `CLAUDE.md`.
+AIFF). Il foglio bianco non porta un `seed` (un documento aperto conserva il
+suo): le curve di una strategia stocastica sono un'altra realizzazione
+rispetto a quella che ha suonato. La descrizione completa, pezzo per pezzo, è
+in `CLAUDE.md`.
 
 ## Struttura
 

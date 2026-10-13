@@ -1,0 +1,99 @@
+# gl-ls
+# Fixture dei test del laboratorio (tests/test_lab_documento.py): lo studio
+# di mare-nostrum com'era a DMGiulioRomano/mare-nostrum@d2fd294, quello da cui
+# si fa la pagina su cui sono scritti i test di DMGiulioRomano/mare-nostrum#3
+# (portati qui con la #87). Contano il suo `base:` (stream2 del brano senza
+# `grain.read_direction`) e le sue manopole (assi e `for_each: base.*`), che
+# danno alla pagina un campo per quasi tutto. Non si tocca a mano.
+#
+# Studio della grana su 001-41_5-5_5.wav — il sample piu' ricorrente nel brano.
+#
+# UNA coppia sola di assi interni — grain.duration x fill_factor — e tutto il
+# resto a manopola. Prima le coppie erano cinque e cambiare pitch voleva dire
+# cambiare griglia; ora la griglia e' sempre la stessa e pitch, speed,
+# envelope sono selettori accanto a distribution e offset_range: si tiene
+# ferma la cella e si gira una manopola sola.
+#
+#   COMBO=grain.envelope=hanning__pitch.ratio=1__pointer.speed_ratio=0.1__distribution=0.3__pointer.offset_range=0.001__grain.duration_range=0__pitch.range=0 make explore STUDY=001-41
+#
+# Senza COMBO le combinazioni sono 16 x 4 x 6 x 3 x 9 x 2 x 2 = 41472, a 120
+# file da 8s l'una: irrealizzabile per intero, e non e' il modo di usarlo.
+# Restringi SEMPRE con COMBO a una fetta che vuoi davvero ascoltare.
+
+study_id: 001-41
+title: "001-41 — matrice degli assi"
+seed: 1441
+samples_dir: samples
+
+# Da mare-nostrum.yml, stream2. Escluso `grain.read_direction` (envelope
+# scritto sul brano: qui falserebbe l'ascolto, resta al default 1). I valori a
+# riposo dei parametri che sono assi stanno qui: quando un asse li muove, la
+# patch della combinazione li sovrascrive.
+base:
+  onset: 0
+  duration: 8     # durata del singolo grano-file, in secondi
+  sample: 001-41_5-5_5.wav   # crudo, peak -26 dBFS: compensato da volume: 12
+  time_mode: normalized
+  distribution_mode: uniform
+  # fill_factor non e' scritto: e' asse interno, lo muove la griglia.
+  grain:
+    duration: 0.001          # a riposo: meta' della banda dell'asse
+    envelope: hanning
+  pointer:
+    start: 0
+    speed_ratio: 0.1         # a riposo
+    loop_unit: normalized
+    loop_start: 0
+    # ponytail: loop_end era sincronizzato allo step di sweep assumendo
+    # speed_ratio fisso a 0.1 (loop_end_norm*5.5s/speed_ratio = 20s). Ora
+    # speed_ratio e' una manopola: il sync vale solo alla tacca 0.1. Valore
+    # lasciato com'era, da correggere ascoltando.
+    loop_end: 0.363636363636
+  pitch:
+    ratio: 1.0               # a riposo
+  pan: 0
+  volume: 12
+
+sweep:
+  # Un file per punto della griglia invece di un unico envelope lungo: il nome
+  # del file porta le coordinate (o2__grain.duration=...__fill_factor=...) e
+  # `graph` ne fa una rete navigabile. `orders: [2]` = solo la griglia piena,
+  # niente varianti a un asse solo (le baseline non stanno nei values).
+  mode: discrete
+  orders: [2]
+
+# L'unica coppia: la griglia della pagina, sempre questa.
+axes:
+  interpolation: step
+  grain.duration:
+    baseline: 0.05
+    # Da 1 campione (floor dinamico, 1/48000 s) a mezzo secondo. Passo x2
+    # (ottava) fuori dalla banda 500-5000 Hz; dentro quella banda passo piu'
+    # fitto (fino a ~x1.13) perche' li' la discriminazione di altezza
+    # dell'orecchio e' piu' fine e un salto di ottava si sente come un buco.
+    values: [0.000020833333333333333, 0.00004, 0.00008, 0.00016,
+             0.00025, 0.00035, 0.0004, 0.00045, 0.0005, 0.0006, 0.0007, 0.0008,
+             0.0009, 0.001, 0.0014, 0.002,
+             0.004, 0.008, 0.016, 0.032, 0.064, 0.128, 0.256, 0.512]
+  fill_factor:
+    baseline: 2
+    values: [0.5, 0.7, 0.85, 1, 2]
+
+# --- assi esterni ----------------------------------------------------------
+# Le manopole. Ognuna e' un selettore in cima alla pagina: la cella resta la
+# stessa e cambia solo il parametro girato, cosi' il confronto e' un A/B sullo
+# stesso punto della griglia. I primi tre erano assi interni delle vecchie
+# coppie (duration-pitch, duration-speed, speed-pitch, duration-envelope).
+for_each:
+  base.grain.envelope:
+    values: [bartlett, gaussian, rectangle, expodec, exporise, rexpodec, rexporise]
+  base.pitch.ratio: {values: [0.2, 0.447, 0.75, 1.0]}
+  base.pointer.speed_ratio: {values: [0.025, 0.05, 0.1, 0.25, 0.5, 1]}
+  base.distribution: {values: [0, 0.3, .5, .75, 1]}
+  # 0.0001 -> 0.01 in passi geometrici (~x3.16), infittiti a ~x1.33 sopra
+  # 0.003: e' li' che si e' deciso di guardare da vicino.
+  base.pointer.offset_range:
+    values: [0, 0.0001, 0.000316, 0.001,
+             0.00316, 0.0042, 0.0056, 0.0075, 0.01]
+  base.grain.duration_range: {values: [0, 0.0001, 0.0003, 0.0006, 0.0008, 0.001, 0.003, 0.005, 0.007, 0.0085, 0.01, 0.02]}
+  base.pitch.range: {values: [0, 0.05, 0.075, 0.09, 0.1]}
