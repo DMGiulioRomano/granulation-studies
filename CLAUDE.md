@@ -380,6 +380,20 @@ Ora `carica` distingue due casi:
 
 Verificato in `tests/test_lab_documento.py`.
 
+**Un master lo rende il motore.** Dalla #91 il submodule `engine/` risolve
+`- file: <path>` negli stream di un master
+(DMGiulioRomano/PythonGranularEngine#290): il master tiene il piazzamento
+(`onset`, `mute`, `solo`, e lo `stream_id`, che di default e' il nome del
+file), il file tutto lo stream. La testa del file e il piazzamento scritto
+dentro il suo stream non arrivano, e il seed che conta e' quello del master:
+uno diverso nel file il motore lo ignora e lo dice (`[SEED]`). La promessa che
+ne viene, un documento del laboratorio importato da un master suona come lo
+stesso stream scritto dentro, e' un test (`tests/test_stream_come_file.py`),
+sulla fixture di mare-nostrum (`tests/fixtures/mare-nostrum/stream_come_file/`):
+a seed fisso gli stessi grani, campo per campo. Il documento importato l'ha
+scritto la pagina, e lo stesso test lo riapre su `001-41` e su `1-10ms` e lo
+ritrova identico e gia' salvato.
+
 I test del documento girano sulla pagina intera, non a frammenti
 (`tests/test_lab_documento.py`): `tests/lab_dom.js` e' un DOM finto in node
 (un `<select>` con un valore che non ha vale `""`, come nel browser), e
