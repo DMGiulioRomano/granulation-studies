@@ -609,6 +609,52 @@ console.log(localStorage.getItem('lab:001-41'));
     assert got["name"] == "risacca"
 
 
+def _refresh(tmp_path, scenario):
+    """Lo scenario (asincrono: puo' aspettare le sue scritture), poi la pagina
+    riaperta sulla bozza che ha lasciato (stessa sessione del server, quindi la
+    bozza torna): cosa dice la barra dei file e che documento scriverebbe."""
+    bozza = _lab(tmp_path, "(async () => {\n" + scenario
+                 + "console.log(localStorage.getItem('lab:001-41'));\n})();\n")
+    bozza["sess"] = "S"
+    prima = """
+localStorage.setItem('lab:001-41', %s);
+fetch = async () => ({ok: true, json: async () => ({ok: true, sessione: 'S', recenti: []})});
+""" % json.dumps(json.dumps(bozza))
+    return _lab(tmp_path, "console.log(JSON.stringify(Object.assign(%s, {file: FILE, "
+                          "nome: document.getElementById('labName').value, doc: labDoc()})));\n"
+                % STATO_FILE, prima=prima)
+
+
+@node
+def test_aperto_e_poi_un_refresh_resta_pulito(tmp_path):
+    """La bozza di `drawTl`, dentro il `bpLoad` di `carica`, veniva scritta
+    prima di `SALVATO`, e si portava dietro quello del documento di prima: un
+    refresh subito dopo aver aperto un file dava `• modificato` su un file che
+    nessuno aveva toccato. `carica` riscrive la bozza a caricamento finito
+    (come in mare-nostrum, dove la riga e' arrivata con la sua #6)."""
+    doc = _con_testa(_stream("stream2"))
+    got = _refresh(tmp_path, "carica(%s, '/brano/stream2.yml');\n" % json.dumps(doc))
+    assert got["file"] == "/brano/stream2.yml"
+    assert (got["sporco"], got["dirty"], got["salva"]) == (False,) * 3
+    assert got["doc"] == doc
+
+
+@node
+def test_salvato_con_nome_e_poi_un_refresh_resta_sul_file_nuovo(tmp_path):
+    """Dopo un `salva con nome` `FILE`, il nome e `SALVATO` cambiano, e dalla
+    #89 `FILE` e' anche l'id. Senza riscrivere la bozza, un refresh subito
+    dopo riprendeva il file di prima: il suo id, e il percorso su cui il
+    `salva` dopo avrebbe scritto."""
+    got = _refresh(tmp_path, _apri(_stream("stream2"), "/brano/a.yml") + """
+fetch = async (rotta, opt) => ({ok: true, json: async () => ({ok: true, yaml: 'b.yml',
+  path: JSON.parse(opt.body).path})});
+await labPost(false, '/brano/b.yml');
+""")
+    assert (got["file"], got["nome"]) == ("/brano/b.yml", "b")
+    assert got["doc"]["streams"][0]["stream_id"] == "b"
+    assert (got["sporco"], got["dirty"], got["salva"]) == (False,) * 3
+
+
 # Il criterio della #89 dal lato del laboratorio: il documento che la pagina
 # scrive, reso come lo rende `make serve` (`render_doc`, che chiama l'engine e
 # poi `_analisi`), suona sempre uguale, e il disegno e' quello che ha suonato.

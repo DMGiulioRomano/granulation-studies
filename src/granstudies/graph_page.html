@@ -2579,6 +2579,12 @@ function carica(doc, path) {
       + idDelloStream(APERTO) + ", " + bps.length + " breakpoint). Il laboratorio non riscrive "
       + "quel file con uno stream solo: salva per dargli un file suo.")
     + notaIdentita(scritto, APERTO.stream_id, TESTA.seed === undefined || TESTA.seed === null);
+  // La bozza va riscritta a caricamento finito. Quella di `drawTl`, dentro
+  // `bpLoad` qui sopra, l'ha scritta prima che `SALVATO` esistesse, e si
+  // portava dietro quello del documento di prima (sul primo caricamento:
+  // vuoto). Un refresh lo rileggeva da li': il file appena aperto risultava
+  // `• modificato` senza che nessuno avesse toccato niente.
+  bozzaSalva();
 }
 
 // Una voce di `streams:` che importa lo stream da un altro file (`- file:`,
@@ -2840,6 +2846,11 @@ async function labPost(render, path) {
     // non c'e' un file, e `nuovo`/`apri` buttavano il lavoro senza chiedere.
     if (dest) SALVATO = statoOra();
     segna();
+    // `FILE`, `SALVATO` e il nome stanno nella bozza, e qui sono appena
+    // cambiati: senza riscriverla un refresh riprendeva quelli di prima — il
+    // file di prima, cioe' il suo id e il percorso su cui il `salva` dopo
+    // avrebbe scritto.
+    bozzaSalva();
     info.textContent = out.yaml + (render ? "" : "  (salvato)") + notaIdentita(doc, prima);
     if (!render) return;
     // `?t=` perche' rirendendo con lo stesso nome il browser servirebbe il
