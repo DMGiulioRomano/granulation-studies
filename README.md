@@ -172,7 +172,8 @@ non si tocca, e il messaggio dice chi la tiene.
   nome. Senza un file scelto, tutto va in `generated/<studio>/live/`. Aperto e
   risalvato, uno stream resta lo stesso: il laboratorio ci scrive sopra solo
   cio' che conosce e che e' stato toccato, e il `base:` dello studio vale solo
-  per il foglio bianco.
+  per il foglio bianco. Gli inviluppi si leggono come li legge l'engine, il
+  `{type, points}` di PGE-ui compreso.
 
 Dopo il render, a destra:
 

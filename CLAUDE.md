@@ -102,7 +102,12 @@ si apre, un documento con piu' stream non si riscrive: mare-nostrum@c971ef9 e
 @49a9b2f), senza le righe che dipendono dalle issue dopo nello stack — l'id
 dal nome del file (#89) e la firma (#90), che le riporteranno con le loro —
 e senza la terza correzione di c971ef9, l'estensione maiuscola (`risacca.YML`)
-in `idDa` e in `render_doc`, che non riguarda `carica`.
+in `idDa` e in `render_doc`, che non riguarda `carica`. La seconda e' la
+lettura degli inviluppi `{type, points}` (#88, da DMGiulioRomano/mare-nostrum#4,
+071683c, e la sua parte del merge e3c02f5 coi tempi in secondi): il codice e'
+quello di mare-nostrum alla lettera, e `curva` prende il posto di
+`leggibile`, che la #87 aveva scritto qui per le forme che la pagina non
+leggeva.
 Non e' stata portata la griglia delle
 varianti discrete (la pagina si chiama `graph` per lei), che mare-nostrum
 aveva gia' tolto, ne' `make explore`, che serviva a lei.
@@ -202,20 +207,69 @@ Il **foglio bianco** (`nuovo`, o la pagina appena aperta) non ha uno stream
 aperto: nasce da `DEFAULTS` e `base:` e il laboratorio lo scrive per intero,
 come prima.
 
-Un inviluppo `{type, points}` (lo scrive PGE-ui, appena l'interpolazione
-globale di una curva non e' lineare) il laboratorio non lo legge ancora: lo
-legge la #88. Fino ad allora a schermo non ha un valore, nel file resta
-com'era — prima della #87 si perdeva — e una modifica fatta li' non si
-scrive.
+**Gli inviluppi `{type, points}`** (#88, da DMGiulioRomano/mare-nostrum#4).
+L'interpolazione globale di un inviluppo si scrive `{type: cubic, points:
+[...]}`: la scrive PGE-ui da solo, appena l'interpolazione globale di una
+curva di soli breakpoint non e' lineare, e nel brano di mare-nostrum (la
+fixture) la portano `grain.duration` (stream6, stream8), `fill_factor`
+(stream4) e `voices.pitch.pitch_range` (stream10, `step`). Il laboratorio li
+legge (`curva`): `type` e' il tipo di ogni segmento che non ne dichiara uno
+sul punto, e il menu di interpolazione di ogni breakpoint lo mostra. **I
+valori si leggono come li legge l'engine**, non in linea: `valoreA` e'
+`Envelope.evaluate` rifatto passo per passo — un segmento solo se nessun punto
+dichiara un tipo, uno per coppia altrimenti, e la cubica e' la PCHIP di
+Fritsch-Carlson con le tangenti calcolate su **tutti** i punti (`tangenti`,
+`hermite`). Conta perche' riaprendo ogni inviluppo prende un punto anche dove
+il breakpoint e' di un altro parametro: li' il valore a schermo e' quello che
+l'engine suona. Sul tempo di un punto vale il punto, senza l'arrotondamento
+della formula (`0.009`, non `0.009000000000000001`). La stessa lettura la
+usano `segui il render` e il lucchetto (`bpFra`), sulla curva dei breakpoint.
+Prima a schermo un `{type, points}` non aveva un valore, e una modifica fatta
+li' non si scriveva.
 
-Lo stesso vale per le altre forme che l'engine legge e la pagina non scrive:
-il blocco compatto `[pattern, end_time, n_reps]` (l'"add loop" di PGE-ui),
-anche dentro una lista, il gruppo di breakpoint `[punti, interp]`, i punti
-`{t, v}`. La pagina legge solo la lista di punti `[t, v]` / `[t, v, tipo]`
-(`leggibile`), e le altre non portano tempi fra i breakpoint. Prima `carica`
-ci moriva a meta', dopo aver gia' preso lo stream nuovo (`APERTO`) col file
-di prima ancora aperto: il `salva` dopo scriveva lo stream nuovo dentro quel
-file. Verificato in `tests/test_lab_documento.py`.
+Non toccato, un `{type, points}` resta com'era (#87). **Toccato, resta un
+`{type: T, points}` finche' i suoi segmenti sono tutti T** (`forma`); con i
+tipi mescolati diventa la lista del laboratorio, col tipo sui punti da cui
+parte un segmento non lineare. Per l'engine le due forme sono lo stesso
+inviluppo, bit per bit, integrale compreso: le tangenti della cubica le
+calcola sempre su tutti i punti, che il tipo sia globale o scritto su ogni
+punto. Non e' un'ipotesi: lo prova
+`test_type_points_e_tipo_su_ogni_punto_sono_lo_stesso_inviluppo` sui quattro
+inviluppi del brano. La terza forma — il dict col tipo globale e le eccezioni
+sul punto — l'engine la legge uguale, ma il laboratorio non la scrive. La
+ragione era PGE-ui, che non la rileggeva intatta (`wrapEnv`, appena un punto
+aveva un tipo suo, scriveva la lista piatta e il `type` globale si perdeva:
+la cubica degli altri segmenti diventava una retta alla prima modifica fatta
+li'); da DMGiulioRomano/PGE-ui#189 la riscrive com'e', quindi scriverla e'
+diventata una scelta, non ancora fatta in mare-nostrum, da cui la pagina viene
+(il commento di `forma` nella pagina dice ancora la ragione di prima, come
+la'). Le due forme che il laboratorio scrive PGE-ui le riapre e le riscrive
+uguali. Il prezzo di un inviluppo toccato e' quello di sempre del
+laboratorio: prende un punto a ogni breakpoint dove il suo valore cambia,
+anche a quelli di altri parametri, e una cubica con un punto in piu' ha
+tangenti diverse — fra due punti la curva puo' muoversi di poco, mentre su
+ogni breakpoint l'engine vale quanto il laboratorio mostra.
+
+I punti `{t, v, type}` sono un'altra scrittura della lista (l'`EnvelopeBuilder`
+dell'engine li normalizza in `[t, v, type]`), e `curva` li legge come la
+lista: fino alla #88 stavano fra le forme che la pagina non legge. Non
+toccati restano come sono scritti, toccati diventano la lista del
+laboratorio.
+
+Le forme che restano non lette sono il blocco compatto `[pattern, end_time,
+n_reps]` (l'"add loop" di PGE-ui), anche dentro una lista, e il gruppo di
+breakpoint `[punti, interp]`: `curva` non le conosce, e non portano tempi fra
+i breakpoint. Prima della #87 `carica` ci moriva a meta', dopo aver gia'
+preso lo stream nuovo (`APERTO`) col file di prima ancora aperto: il `salva`
+dopo scriveva lo stream nuovo dentro quel file. Verificato in
+`tests/test_lab_documento.py`.
+
+Il criterio del passo 1 del piano di mare-nostrum
+(`docs/plans/stream-come-file.md`, la') e' un test: ognuno dei 10 stream della
+fixture del brano, aperto e risalvato senza toccare niente, da' all'engine lo
+stesso fingerprint (`StreamCacheManager.compute_fingerprint`), sulla pagina di
+`001-41` e su quella di `1-10ms`
+(`test_criterio_del_piano_ogni_stream_del_brano_risalvato_e_lo_stesso`).
 
 L'**anteprima** sotto i breakpoint legge il documento (`labDoc`), non i
 breakpoint: un inviluppo non toccato vi compare com'e' scritto.
@@ -501,13 +555,14 @@ resta com'e' scritto, e un inviluppo non toccato esce nei suoi secondi di
 prima. Cosi' gli inviluppi che lo stream ha gia' restano nella loro
 convenzione: forzare `time_mode: normalized` sarebbe stato piu' semplice, ma
 li avrebbe riletti in frazioni. Vale per tutto cio' che sta sui breakpoint:
-numerici, voci, loop, la `curve` di `grain.envelope`, la progressione. Prima
+numerici, voci, loop, la `curve` di `grain.envelope`, la progressione, e i
+punti di un `{type, points}` (#88). Prima
 la pagina contava sul `time_mode: normalized` del `base:`, che oggi tutti gli
 studi dichiarano: su uno studio senza, una rampa di 30 s si schiacciava nel
 primo secondo. Nata qui come deviazione da mare-nostrum, che poi l'ha ripresa
 (DMGiulioRomano/mare-nostrum#9); verificata in `tests/test_graph_js.py`
 (foglio bianco) e in `tests/test_lab_documento.py` (uno stream aperto in
-secondi).
+secondi, anche col suo `{type: cubic}`).
 
 **Il tempo di un breakpoint si scrive.** La riga `tempo (0-1)` in cima ai
 parametri mostra la x normalizzata del punto selezionato e la accetta digitata:
@@ -535,8 +590,10 @@ cosa deve succedere.
 Accorciando, i punti che finiscono oltre la nuova fine escono, ma lasciano il
 punto in cui l'inviluppo **tagliava** il bordo, interpolato (`bpFra`) — se no
 la coda resterebbe piatta sull'ultimo valore rimasto; è la stessa cura del
-`truncateEnvArray` di PGE-ui. Un `step` sul punto di partenza tiene il suo
-valore invece di interpolare. Quanti ne sono usciti lo dice la riga di stato.
+`truncateEnvArray` di PGE-ui. Il valore del punto di chiusura e' quello della
+curva dei breakpoint letta come l'engine (`valoreA`): un `step` sul punto di
+partenza tiene il suo valore, una `cubic` resta la cubica. Quanti ne sono
+usciti lo dice la riga di stato.
 
 La durata entra nella storia dell'undo: riportare indietro i breakpoint senza
 di lei lascerebbe i tempi in secondi diversi da quelli ripristinati. Verificato
@@ -544,9 +601,10 @@ in `tests/test_graph_js.py`.
 
 **Limite dichiarato: il lucchetto muove solo i breakpoint.** Quindi solo gli
 inviluppi che il laboratorio riscrive da li'. Quelli che uno stream aperto
-conserva senza leggerli (#87) — `grain.read_direction`, e fino alla #88 un
-`{type, points}` — restano com'erano scritti, nei tempi del loro
-`time_mode`, e in due casi su quattro non vanno piu' d'accordo con gli altri:
+conserva senza leggerli (#87) — `grain.read_direction`, un parametro che su
+quella pagina non e' una manopola (il `fill_factor` del brano aperto su
+`1-10ms`), le forme che `curva` non legge — restano com'erano scritti, nei
+tempi del loro `time_mode`, e in due casi su quattro non vanno piu' d'accordo con gli altri:
 con `time_mode: normalized` e il lucchetto chiuso si stirano con lo stream
 mentre gli altri tengono i secondi; senza `time_mode` (tempi in secondi) e il
 lucchetto aperto tengono i secondi mentre gli altri si stirano. E' lo stesso
@@ -556,7 +614,8 @@ della pagina.
 **Seguire il render.** Sotto il lucchetto c'e' `segui il render`: acceso,
 mentre suona i parametri smettono di mostrare il breakpoint selezionato e
 mostrano **dove sono adesso** — gli inviluppi letti al tempo del cursore, con
-la stessa interpolazione dei breakpoint (`bpFra`, via `bpA`), l'estremo fuori
+la stessa interpolazione dei breakpoint (`bpFra`, via `bpA`: la curva dei
+breakpoint letta come l'engine, cubica compresa), l'estremo fuori
 dagli estremi. E' una lettura: non tocca i breakpoint, non entra nell'undo, e
 spegnendolo si torna al punto selezionato (`mostraBp`). Vale solo sul render
 dello stream, non sull'ascolto di un sample. Verificato in
