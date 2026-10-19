@@ -559,22 +559,21 @@ def test_lo_stream_preso_da_un_documento_con_piu_stream_ha_la_testa_di_uno_strea
 # --- le forme che il laboratorio non legge ---------------------------------------
 # L'engine legge piu' forme di inviluppo di quelle che la pagina scrive: il
 # blocco compatto `[pattern, end_time, n_reps]` (l'"add loop" di PGE-ui), anche
-# dentro una lista, il gruppo di breakpoint `[punti, interp]`, i punti
-# `{t, v}`. La pagina sa leggere solo la lista di punti `[t, v]` /
-# `[t, v, tipo]` (`leggibile`): le altre non portano tempi fra i breakpoint, e
-# nel file restano com'erano, come il `{type, points}` fino alla #88.
+# dentro una lista, e il gruppo di breakpoint `[punti, interp]`. La pagina
+# legge la lista di punti `[t, v]` / `[t, v, tipo]` — anche coi punti
+# `{t, v, type}` — e il `{type, points}` (`curva`, #88, sotto): le altre non
+# portano tempi fra i breakpoint, e nel file restano com'erano.
 #
 # Prima `carica` ci moriva a meta' (`for (const [t] of v)` su un numero o su un
 # `{t, v}`), e moriva dopo aver gia' preso lo stream nuovo (`APERTO`) col file
 # di prima ancora aperto: il `salva` dopo scriveva lo stream nuovo dentro il
 # file di prima. Su `main`, senza `APERTO`, lo stesso `apri` falliva senza
-# toccare niente.
+# toccare niente. I punti `{t, v}` stavano qui fino alla #88, che li legge.
 
 FORME = {
     "compatto": [[[0, -6], [50, 0], [100, -6]], 1.0, 4],
     "compatto_in_lista": [[0, -6], [[[0, -6], [100, 0]], 0.5, 2], [1, 0]],
     "gruppo": [[[0, -6], [0.5, 0], [1, -6]], "cubic"],
-    "punti_dict": [{"t": 0, "v": -6}, {"t": 1, "v": 0}],
 }
 
 
@@ -621,12 +620,368 @@ def test_aperto_dopo_un_altro_non_finisce_nel_file_di_prima(tmp_path):
     assert got["b"] == _documento(b)
 
 
+# --- #88: gli inviluppi {type, points} ------------------------------------------
+# `{type: cubic, points: [...]}` e' l'interpolazione globale di un inviluppo:
+# la scrive PGE-ui appena quella di una curva di soli breakpoint non e'
+# lineare, e nel brano di mare-nostrum la portano grain.duration (stream6,
+# stream8), fill_factor (stream4) e voices.pitch.pitch_range (stream10, step).
+# Portati da DMGiulioRomano/mare-nostrum#4 (071683c), sulle stesse fixture.
+
+STREAMS = [s["stream_id"] for s in _brano()["streams"]]
+
+
+def _motore(tmp_path):
+    from granstudies import engine_bridge
+    engine_bridge._ensure_engine_on_path()
+    engine_bridge._silence_loggers(str(tmp_path / "logs"))
+    from pge.envelopes.envelope import Envelope
+    return Envelope
+
+
+_TIPI = {"LinearInterpolation": "linear", "CubicInterpolation": "cubic",
+         "StepInterpolation": "step"}
+
+
+def _tipo_motore(env, t):
+    """Il tipo del segmento che parte da t, per l'engine; None fuori dai punti."""
+    segs = env.segments
+    if not segs[0].start_time <= t < segs[-1].end_time:
+        return None
+    for s in segs:
+        if s.start_time <= t < s.end_time:
+            return _TIPI[type(s.strategy).__name__]
+    return None
+
+
+def _inviluppo(v):
+    return isinstance(v, list) or (isinstance(v, dict) and "points" in v)
+
+
+def _leggi(st, path):
+    for k in path.split("."):
+        if not isinstance(st, dict):
+            return None
+        st = st.get(k)
+    return st
+
+
+def _vicini(a, b):
+    return abs(a - b) <= 1e-12 * max(1.0, abs(a), abs(b))
+
+
+@node
+@engine
+@pytest.mark.parametrize("sid", STREAMS)
+def test_ogni_breakpoint_si_apre_col_valore_e_il_tipo_del_motore(tmp_path, sid):
+    """Niente NaN, e non un'approssimazione: su ogni breakpoint ogni inviluppo
+    vale quanto lo valuta l'engine, anche dove il breakpoint e' di un altro
+    parametro e il segmento e' `cubic` (PCHIP di Fritsch-Carlson, con le
+    tangenti calcolate su tutti i punti) o `step`. E il menu di
+    interpolazione di quel breakpoint mostra il tipo del segmento che ne parte.
+    """
+    Envelope = _motore(tmp_path)
+    st = _stream(sid)
+    got = _lab(tmp_path, _apri(st)
+               + "console.log(JSON.stringify({bps, num: NUM.map(p => p.path)}));\n")
+    visti = 0
+    for path in got["num"]:
+        raw = _leggi(st, path)
+        if not _inviluppo(raw):
+            continue
+        env = Envelope(raw)
+        for b in got["bps"]:
+            v = b["vals"][path]
+            assert isinstance(v, (int, float)), (path, b["t"], v)
+            assert _vicini(v, env.evaluate(b["t"])), (path, b["t"], v, env.evaluate(b["t"]))
+            tipo = _tipo_motore(env, b["t"])
+            if tipo:
+                assert b["ints"][path] == tipo, (path, b["t"])
+            visti += 1
+    assert visti
+
+
+def _impronte(tmp_path, path):
+    """Il fingerprint di ogni stream di un documento, per l'engine
+    (`StreamCacheManager.compute_fingerprint`, quello che decide se uno stem
+    va rifatto)."""
+    _motore(tmp_path)
+    from pge.engine.generator import Generator
+    from pge.rendering.stream_cache_manager import StreamCacheManager
+
+    g = Generator(str(path))
+    g.load_yaml()
+    m = StreamCacheManager(str(tmp_path / "manifest.json"), renderer_type="numpy")
+    return {s["stream_id"]: m.compute_fingerprint(s) for s in g.data["streams"]}
+
+
+@node
+@engine
+@pytest.mark.parametrize("study, radice", [("001-41", MARE_NOSTRUM), ("1-10ms", ROOT)],
+                         ids=["001-41", "1-10ms"])
+@pytest.mark.parametrize("sid", STREAMS)
+def test_criterio_del_piano_ogni_stream_del_brano_risalvato_e_lo_stesso(
+        tmp_path, sid, study, radice):
+    """Passo 1 di `docs/plans/stream-come-file.md` di mare-nostrum.
+
+    Ogni stream del brano, aperto nel laboratorio e risalvato senza toccare
+    niente, da' all'engine lo stesso stream: stesso fingerprint. Il giro e'
+    quello vero: YAML -> JSON del server -> pagina -> JSON -> YAML scritto
+    come lo scrive `render_doc`. Sulla pagina di 001-41, dove nasce il
+    criterio, e su quella di `1-10ms`, dove le manopole sono altre: li'
+    `fill_factor` non e' una manopola e resta come scritto, `grain.duration`
+    si'.
+    """
+    from granstudies import serve as S
+    doc = _lab(tmp_path, _apri(_stream(sid)) + STAMPA, study=study, radice=radice,
+               campioni=["silenzi.wav"] + CAMPIONI)
+    salvato = tmp_path / (sid + ".yml")
+    with open(salvato, "w") as fh:
+        yaml.dump(doc, fh, Dumper=S._Dumper, sort_keys=False, allow_unicode=True)
+    brano = os.path.join(MARE_NOSTRUM, "mare-nostrum.yml")
+    assert _impronte(tmp_path, salvato)[sid] == _impronte(tmp_path, brano)[sid]
+
+
+@node
+@pytest.mark.parametrize("sid,path", [("stream4", "fill_factor"),
+                                      ("stream6", "grain.duration"),
+                                      ("stream8", "grain.duration"),
+                                      ("stream10", "voices.pitch.pitch_range")])
+def test_un_type_points_non_toccato_si_riscrive_nella_sua_forma(tmp_path, sid, path):
+    st = _stream(sid)
+    doc = _lab(tmp_path, _apri(st) + STAMPA)
+    assert _leggi(doc["streams"][0], path) == _leggi(st, path)
+
+
+@engine
+def test_type_points_e_tipo_su_ogni_punto_sono_lo_stesso_inviluppo(tmp_path):
+    """La prova che decide la forma di riscrittura, fatta sull'engine.
+
+    `{type: T, points}` (un segmento solo, strategia T su tutti i punti) e la
+    lista con T scritto su ogni punto (un segmento per coppia) potrebbero non
+    coincidere: le tangenti della cubica si calcolano sui punti del segmento.
+    Non e' cosi': l'engine le calcola sempre su TUTTI i punti, e i due
+    inviluppi valgono uguale ovunque, integrale compreso (il pointer integra
+    speed_ratio), sui quattro `{type, points}` del brano. Per questo un
+    `{type, points}` toccato puo' restare tale (tutti i segmenti T) o
+    diventare la lista del laboratorio (tipi mescolati) senza che il suono
+    cambi. Vale anche col tipo globale e le eccezioni per punto insieme, la
+    forma scritta a mano che il laboratorio legge (`curva`) come una lista.
+    """
+    Envelope = _motore(tmp_path)
+    casi = []
+    for st in _brano()["streams"]:
+        for path in ("grain.duration", "fill_factor", "voices.pitch.pitch_range"):
+            d = _leggi(st, path)
+            if isinstance(d, dict) and "points" in d:
+                casi.append(d)
+    assert len(casi) == 4
+    # Un toccato: tipo globale cubic, un segmento `linear` e uno `step`.
+    casi.append({"type": "cubic", "points": [[0, 2], [0.2, 0.5, "linear"], [0.4, 3],
+                                             [0.6, 1, "step"], [0.8, 2.5], [1, 1]]})
+    for d in casi:
+        P = d["points"]
+        lista = [[p[0], p[1], p[2] if len(p) > 2 else d["type"]] for p in P[:-1]] + [P[-1][:2]]
+        a, b = Envelope(d), Envelope(lista)
+        for i in range(2401):
+            t = -0.1 + 1.2 * i / 2400
+            assert a.evaluate(t) == b.evaluate(t), (d, t)
+        for k in range(1, 41):
+            assert _vicini(a.integrate(0, k / 40), b.integrate(0, k / 40)), (d, k)
+
+
+def _toccato(tmp_path, js):
+    """stream4 aperto, `fill_factor` toccato; il documento e i breakpoint."""
+    return _lab(tmp_path, _apri(_stream("stream4")) + """
+const at = t => bps.findIndex(b => Math.abs(b.t - t) < 1e-9);
+""" + js + "console.log(JSON.stringify({doc: labDoc(), bps}));\n")
+
+
+def _riceve_cio_che_si_vede(Envelope, inv, bps):
+    """L'engine, letto il documento, vale su ogni breakpoint quanto il
+    laboratorio mostra li', col tipo di segmento che il menu mostra."""
+    env = Envelope(inv)
+    for b in bps:
+        assert _vicini(env.evaluate(b["t"]), b["vals"]["fill_factor"]), b["t"]
+        tipo = _tipo_motore(env, b["t"])
+        if tipo:
+            assert tipo == b["ints"]["fill_factor"], b["t"]
+
+
+@node
+@engine
+def test_un_type_points_toccato_resta_type_points(tmp_path):
+    """Toccato un valore, i segmenti restano tutti `cubic`: si riscrive
+    `{type: cubic, points}`, la forma in cui era arrivato. Il resto dello
+    stream non e' stato toccato."""
+    Envelope = _motore(tmp_path)
+    got = _toccato(tmp_path, "bpLoad(at(0.1631)); "
+                             "document.getElementById('P:fill_factor').value = '0.9'; bpSave();\n")
+    out = got["doc"]["streams"][0]
+    ff = out["fill_factor"]
+    assert isinstance(ff, dict) and ff["type"] == "cubic"
+    assert all(len(p) == 2 for p in ff["points"])
+    assert [0.1631, 0.9] in ff["points"]
+    _riceve_cio_che_si_vede(Envelope, ff, got["bps"])
+    st = _stream("stream4")
+    out["fill_factor"] = st["fill_factor"]
+    assert out == st
+
+
+@node
+@engine
+def test_un_type_points_coi_tipi_mescolati_si_riscrive_lista(tmp_path):
+    """Un segmento passato a `linear` in un `{type: cubic}`: si riscrive la
+    lista del laboratorio, col tipo su ogni punto da cui parte una cubica.
+
+    Il dict col tipo globale e le eccezioni sul punto sarebbe per l'engine lo
+    stesso inviluppo, ma il laboratorio non lo scrive: PGE-ui non lo
+    rileggeva intatto (`wrapEnv`, appena un punto aveva un tipo suo, riscriveva
+    la lista piatta e il `type` globale si perdeva). Da DMGiulioRomano/PGE-ui#189
+    lo riscrive com'e', ma scriverlo e' una scelta che mare-nostrum, da cui la
+    pagina viene, non ha ancora fatto. La lista coi tipi sul punto PGE-ui la
+    tiene.
+    """
+    Envelope = _motore(tmp_path)
+    got = _toccato(tmp_path, "bpLoad(at(0.1631)); "
+                             "document.getElementById('P:fill_factor').value = '0.9'; bpSave();\n"
+                             "bpLoad(at(0.2586)); "
+                             "document.getElementById('I:fill_factor').value = 'linear'; bpSave();\n")
+    ff = got["doc"]["streams"][0]["fill_factor"]
+    assert isinstance(ff, list)
+    assert [0.1631, 0.9, "cubic"] in ff and [0.2586, 0.4] in ff
+    assert len(ff[-1]) == 2
+    _riceve_cio_che_si_vede(Envelope, ff, got["bps"])
+
+
+@node
+def test_un_type_points_che_non_usa_piu_il_suo_tipo_torna_lista(tmp_path):
+    """Se nessun segmento e' piu' del tipo globale, `{type: step}` non dice
+    piu' niente: torna la lista, che e' la forma di sempre del laboratorio."""
+    got = _lab(tmp_path, _apri(_stream("stream10")) + """
+for (const b of bps) b.ints['voices.pitch.pitch_range'] = 'linear';
+drawTl();
+console.log(JSON.stringify(labDoc()));
+""")
+    pr = got["streams"][0]["voices"]["pitch"]["pitch_range"]
+    assert isinstance(pr, list) and all(len(p) == 2 for p in pr)
+
+
+@node
+@engine
+def test_segui_il_render_legge_gli_inviluppi_come_il_motore(tmp_path):
+    """Fra due breakpoint `segui` mostra il valore della curva dei breakpoint
+    come la valuterebbe l'engine: il gradino tiene, la cubica e' una cubica."""
+    Envelope = _motore(tmp_path)
+    xs = [0.05, 0.12, 0.2, 0.3, 0.33, 0.5, 0.9]
+    got = _lab(tmp_path, _apri(_stream("stream4")) + """
+const xs = %s;
+console.log(JSON.stringify({bps, a: xs.map(x => bpA(x).vals)}));
+""" % json.dumps(xs))
+    curva = [[b["t"], b["vals"]["fill_factor"], b["ints"]["fill_factor"]] for b in got["bps"]]
+    env = Envelope(curva)
+    for x, vals in zip(xs, got["a"]):
+        assert _vicini(vals["fill_factor"], env.evaluate(x)), x
+    step = _lab(tmp_path, _apri(_stream("stream10")) + """
+console.log(JSON.stringify([0.2, 0.5].map(x => bpA(x).vals['voices.pitch.pitch_range'])));
+""")
+    assert step == [0.5, 0]
+
+
+@node
+@engine
+def test_il_lucchetto_taglia_un_type_points_dove_la_curva_passa(tmp_path):
+    """Lucchetto chiuso, durata dimezzata: i punti tengono il loro tempo in
+    secondi, quelli oltre la nuova fine escono, e il punto di chiusura sta
+    dove la curva (cubica) passava a meta' della durata vecchia."""
+    Envelope = _motore(tmp_path)
+    st = _stream("stream4")
+    got = _lab(tmp_path, _apri(st) + """
+const prima = bps.map(b => [b.t, b.vals['fill_factor'], b.ints['fill_factor']]);
+LUCCHETTO = true;
+const d = document.getElementById('labDur');
+d.value = String(%s / 2);
+d.onchange();
+console.log(JSON.stringify({prima, doc: labDoc()}));
+""" % st["duration"])
+    ff = got["doc"]["streams"][0]["fill_factor"]
+    assert isinstance(ff, dict) and ff["type"] == "cubic"
+    assert ff["points"][-1][0] == 1
+    attesa = Envelope(got["prima"]).evaluate(0.5)
+    assert _vicini(ff["points"][-1][1], attesa)
+    assert got["doc"]["streams"][0]["duration"] == st["duration"] / 2
+
+
+@node
+def test_genera_breakpoint_su_un_type_points(tmp_path):
+    """I punti generati prendono i valori a schermo e i tipi dei menu: niente
+    NaN, e l'inviluppo resta `{type: cubic}` con i tempi nuovi dentro."""
+    got = _lab(tmp_path, _apri(_stream("stream4")) + """
+document.getElementById('gN').value = '3';
+document.getElementById('gDa').value = '0.4';
+document.getElementById('gA').value = '0.6';
+genBps();
+console.log(JSON.stringify(labDoc()));
+""")
+    ff = got["streams"][0]["fill_factor"]
+    assert isinstance(ff, dict) and ff["type"] == "cubic"
+    assert all(isinstance(p[1], (int, float)) for p in ff["points"])
+    # Tutti e tre col valore a schermo (quello del primo breakpoint, 2): il
+    # punto di mezzo, uguale ai due vicini e dello stesso tipo, non dice
+    # niente e `serie` lo lascia fuori, come per ogni inviluppo.
+    punti = {p[0]: p[1] for p in ff["points"]}
+    assert punti[0.4] == punti[0.6] == 2 and 0.5 not in punti
+
+
+# I punti `{t, v}` (con `type` facoltativo) sono un'altra scrittura della lista:
+# l'`EnvelopeBuilder` dell'engine li normalizza in `[t, v, type]`. Fino alla
+# #88 la pagina non li leggeva (stavano fra le forme qui sopra); `curva` li
+# legge come la lista, e il gesto e' lo stesso: non toccati restano come sono
+# scritti, toccati si riscrivono nella lista del laboratorio — per l'engine lo
+# stesso inviluppo.
+PUNTI_DICT = [{"t": 0, "v": -6, "type": "step"}, {"t": 0.5, "v": 3}, {"t": 1, "v": 0}]
+
+
+@node
+@engine
+def test_i_punti_t_v_si_leggono_come_li_legge_il_motore(tmp_path):
+    Envelope = _motore(tmp_path)
+    st = dict(_stream("stream2"), volume=PUNTI_DICT)
+    got = _lab(tmp_path, _apri(st) + """
+const vista = {bps: bps.map(b => [b.t, b.vals['volume'], tipoDi(b, 'volume')]),
+               intatto: labDoc()};
+""" + _tocca(0, "pitch.ratio", 0.75) + """
+vista.altro = labDoc();
+""" + _tocca(0, "volume", -9) + """
+vista.toccato = labDoc();
+console.log(JSON.stringify(vista));
+""")
+    env = Envelope(PUNTI_DICT)
+    ts = [t for t, _v, _tipo in got["bps"]]
+    assert 0.5 in ts and 1 in ts                  # i suoi tempi sono breakpoint
+    for t, v, tipo in got["bps"]:
+        assert _vicini(v, env.evaluate(t)), t
+        atteso = _tipo_motore(env, t)
+        if atteso:
+            assert tipo == atteso, t
+    assert got["intatto"]["streams"][0] == st
+    # Un altro parametro toccato: i punti `{t, v}` restano come sono scritti.
+    assert got["altro"]["streams"][0]["volume"] == PUNTI_DICT
+    # Toccati, la lista del laboratorio: per l'engine lo stesso inviluppo, a
+    # meno del primo punto, che e' quello toccato.
+    vol = got["toccato"]["streams"][0]["volume"]
+    assert isinstance(vol, list) and vol[0] == [0, -9, "step"]
+    nuovo = Envelope(vol)
+    for i in range(1, 101):
+        t = 0.5 + 0.5 * i / 100
+        assert _vicini(nuovo.evaluate(t), env.evaluate(t)), t
+
+
 # --- i tempi in secondi sopra lo stream conservato ------------------------------
 # Senza `time_mode: normalized` l'engine legge i tempi in secondi (93f201c):
 # il laboratorio li porta a frazioni per leggerli (`tempiFrazione`, su una
 # copia: lo stream aperto resta com'e' scritto) e li riscrive in secondi
-# (`scalaTempi`) solo dove ha toccato. Gli inviluppi `{type, points}` in secondi
-# sono della #88.
+# (`scalaTempi`) solo dove ha toccato — anche dentro un `{type, points}`, che
+# la #88 legge e scala nei suoi punti (sotto).
 
 DUR_S = 100.0
 
@@ -667,6 +1022,70 @@ def test_in_secondi_un_parametro_toccato_si_scrive_in_secondi(tmp_path):
     assert "time_mode" not in out
     out["pitch"]["ratio"] = st["pitch"]["ratio"]
     assert out == st
+
+
+def _in_secondi_tp(st):
+    """stream4 com'e' scritto senza `time_mode`: gli inviluppi in secondi,
+    `fill_factor` che e' un `{type: cubic}` compreso. Prima della #88 la sola
+    conversione dei tempi lasciava il dict com'era, cioe' in secondi letti come
+    frazioni."""
+    st = json.loads(json.dumps(st))
+    st.pop("time_mode", None)
+    st["duration"] = DUR_S
+
+    def sec(v):
+        if isinstance(v, dict):
+            return dict(v, points=sec(v["points"]))
+        return [[round(p[0] * DUR_S, 6)] + p[1:] for p in v]
+
+    st["fill_factor"] = sec(st["fill_factor"])
+    st["grain"]["duration"] = sec(st["grain"]["duration"])
+    return st
+
+
+@node
+def test_in_secondi_un_type_points_aperto_e_risalvato_e_lo_stesso_stream(tmp_path):
+    st = _in_secondi_tp(_stream("stream4"))
+    got = _lab(tmp_path, _apri(st) + "console.log(JSON.stringify({ts: bps.map(b => b.t), "
+                                     "doc: labDoc()}));\n")
+    assert got["doc"]["streams"][0] == st
+    assert all(0 <= t <= 1 for t in got["ts"]) and 0.0926 in got["ts"]
+
+
+@node
+@engine
+def test_in_secondi_ogni_breakpoint_vale_quanto_per_il_motore(tmp_path):
+    Envelope = _motore(tmp_path)
+    st = _in_secondi_tp(_stream("stream4"))
+    got = _lab(tmp_path, _apri(st) + "console.log(JSON.stringify(bps));\n")
+    for path in ("fill_factor", "grain.duration"):
+        env = Envelope(_leggi(st, path))
+        for b in got:
+            assert _vicini(b["vals"][path], env.evaluate(b["t"] * DUR_S)), (path, b["t"])
+
+
+@node
+@engine
+def test_in_secondi_un_type_points_toccato_si_scrive_in_secondi(tmp_path):
+    """Toccato resta `{type: cubic}`, coi tempi in secondi, e l'engine vale su
+    ogni breakpoint quanto il laboratorio mostra. `grain.duration`, non
+    toccato, resta com'era."""
+    Envelope = _motore(tmp_path)
+    st = _in_secondi_tp(_stream("stream4"))
+    got = _lab(tmp_path, _apri(st) + """
+const i = bps.findIndex(b => Math.abs(b.t - 0.1631) < 1e-9);
+bpLoad(i); document.getElementById('P:fill_factor').value = '0.9'; bpSave();
+console.log(JSON.stringify({doc: labDoc(), bps}));
+""")
+    out = got["doc"]["streams"][0]
+    ff = out["fill_factor"]
+    assert isinstance(ff, dict) and ff["type"] == "cubic"
+    assert [16.31, 0.9] in ff["points"] and ff["points"][-1][0] == DUR_S
+    env = Envelope(ff)
+    for b in got["bps"]:
+        assert _vicini(env.evaluate(b["t"] * DUR_S), b["vals"]["fill_factor"]), b["t"]
+    assert out["grain"]["duration"] == st["grain"]["duration"]
+    assert "time_mode" not in out
 
 
 # --- su una pagina di questo repo -----------------------------------------------
