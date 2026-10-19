@@ -107,7 +107,14 @@ lettura degli inviluppi `{type, points}` (#88, da DMGiulioRomano/mare-nostrum#4,
 071683c, e la sua parte del merge e3c02f5 coi tempi in secondi): il codice e'
 quello di mare-nostrum alla lettera, e `curva` prende il posto di
 `leggibile`, che la #87 aveva scritto qui per le forme che la pagina non
-leggeva.
+leggeva. La terza e' l'identita' dello stream (#89, da
+DMGiulioRomano/mare-nostrum#5, 5dbaece e e1e5e49), con le righe di c971ef9 e
+49a9b2f che la #87 aveva lasciato fuori per lei e l'estensione maiuscola di
+c971ef9, che riguarda `idDa`. Con la #89 sono arrivate anche due righe che in
+mare-nostrum stanno nei commit della #6 (74a8290, 5c8f1ea), senza la firma: la
+bozza riscritta a fine `carica` e dopo ogni scrittura, perche' dalla #89
+`FILE` e' anche l'id, e un refresh che riprende il file di prima riprende un
+altro stream.
 Non e' stata portata la griglia delle
 varianti discrete (la pagina si chiama `graph` per lei), che mare-nostrum
 aveva gia' tolto, ne' `make explore`, che serviva a lei.
@@ -182,8 +189,9 @@ le sole chiavi in cui la `labView()` di adesso differisce da `VISTA0`
 `voices.pitch`...) ma non nei valori: un inviluppo cambia o resta tutto
 intero. Cosi' restano com'erano le chiavi che il laboratorio non ha
 (`grain.read_direction`, che nel brano di mare-nostrum hanno 8 stream su 10),
-`stream_id` e `onset`, e i parametri che il documento lascia al default
-dell'engine anche se il laboratorio ha un campo per loro. Prima ne usciva uno
+`onset`, e i parametri che il documento lascia al default dell'engine anche se
+il laboratorio ha un campo per loro. Lo `stream_id` no: dalla #89 e' il nome
+del file, e l'identita' non passa dal "toccato" (sotto). Prima ne usciva uno
 stream ricostruito sul `base:` dello studio servito, che qui e' quello di uno
 sweep: aperto su `1-10ms`, uno stream del brano perdeva `fill_factor`, `pitch`
 e `distribution`, prendeva una `density` dallo schermo e si fermava
@@ -283,6 +291,64 @@ senza `mute`/`solo` (`perAscolto`), e il server rende quello (scritto in
 onset 43 s partirebbe dopo 43 s di silenzio e uno con `mute` non suonerebbe
 affatto.
 
+**L'identita' dello stream: il nome del file e il seed** (#89, da
+DMGiulioRomano/mare-nostrum#5). L'RNG dell'engine e' `(seed, rng_group o
+stream_id, componente)` (`shared/seeding.py`), quindi lo stesso stream suona
+uguale in due posti solo con lo stesso seed e lo stesso id. Nessuno dei due e'
+una manopola del laboratorio: non si scelgono, si leggono. Prima il
+laboratorio scriveva `stream_id: lab` e, sul foglio bianco, nessun seed.
+
+- **`stream_id` = il nome del file**, senza estensione (`idDa`), che e' anche
+  il modo in cui un master nomina uno stream importato (`file:`, il piano di
+  mare-nostrum, regola 3). L'estensione si riconosce anche in maiuscolo, come
+  la toglie il motore (`os.path.splitext`): `risacca.YML` e' lo stream
+  `risacca`. Un foglio mai salvato non ha un nome di file: vale il campo
+  `nome`, che e' poi quello che il pannello di salvataggio propone.
+  **`salva con nome` cambia il nome, quindi l'id, quindi la realizzazione**:
+  e' accettato, e la riga di stato lo dice (`notaIdentita`) — a orecchio non
+  si capirebbe da dove viene.
+- **`seed`**: si conserva quello del documento aperto; se il documento non ne
+  ha, vale il `seed:` dello `study.yml` servito, che `lab_data` passa alla
+  pagina (gli studi a scala di qui hanno `seed: 1988`, i `brano*` `5`). Se
+  nemmeno lo studio ne ha uno il laboratorio **non lo inventa** — un numero
+  scelto qui non e' il seed di nessuno — e lo dice nella riga di stato e nel
+  chip. `seed: 0` e' un seed come gli altri (l'engine deriva su sha256),
+  quindi il controllo e' su null/undefined. Il seed e' quello scritto in
+  testa allo `study.yml`: la pagina e' una per studio, e un `for_each:` che
+  patcha `seed` non le arriva (nessuno studio di qui lo fa).
+- **Il seed si mostra e non si cambia**, in un testo accanto al nome del file
+  e non in un campo: cambiarlo qui romperebbe l'identita' col brano, dove il
+  master usa il proprio seed e ignora quello del file importato (regola 3).
+
+Da qui viene che **due render dello stesso documento danno lo stesso audio**, e
+che le curve realizzate e il piano dei grani sono la realizzazione che ha
+suonato anche con una strategia stocastica (vedi "Gli inviluppi realizzati").
+Misurato in `tests/test_engine_bridge.py` sull'engine, e in
+`tests/test_lab_documento.py` sul documento che scrive la pagina, reso due
+volte da `render_doc` come lo rende `make serve`.
+
+Il corollario e' su `FILE`, il file su cui si lavora: e' quello scelto in un
+pannello, non quello che il server scrive. Un `rendi e ascolta` su un foglio
+mai salvato scrive in `live/` col nome ripulito (`_SAFE` in `serve.py`), e
+adottarlo faceva due cose sbagliate — `salva` provava a riscrivere un percorso
+che nessun pannello aveva autorizzato, e l'id cambiava fra il primo render e il
+secondo, cioe' lo stesso documento dava due audio. Dopo un salvataggio invece
+il campo `nome` segue il file, come fa `carica` aprendo. Per la stessa ragione
+**salvato vuol dire scritto su `FILE`**: un render del foglio mai salvato
+lascia il `• modificato`, il `salva` acceso e la conferma prima di `nuovo` e
+`apri`. E la bozza si riscrive dopo ogni scrittura e a fine `carica`: un
+refresh subito dopo riprendeva il file di prima (il suo id, e il percorso su
+cui il `salva` avrebbe scritto) o lo `SALVATO` del documento di prima, cioe' un
+`• modificato` su un file che nessuno aveva toccato.
+
+E un file **aperto** il cui `stream_id` non e' il suo nome, o che non ha un
+seed mentre lo studio si', non e' gia' il documento che il laboratorio
+scriverebbe: `SALVATO` e' preso con l'identita' che il file aveva su disco
+(`comeLetto`), quindi si apre gia' `• modificato`, e la riga di stato dice
+perche' (`stream_id: risacca (era stream2)`, `seed 1441 dallo study.yml`).
+Senza, il `salva` restava spento e il primo render suonava diverso dal file
+aperto senza che niente l'avesse detto.
+
 **Un master non si apre, e un documento con piu' stream non si riscrive.** Il
 laboratorio scrive un documento con uno stream solo, quindi riscriverlo sul
 file aperto butterebbe via tutti gli altri stream di quel file: succedeva al
@@ -298,19 +364,19 @@ Ora `carica` distingue due casi:
   documento di uno studio con `stack` o `versions` — si apre sul primo, come
   sempre, ma senza file. Nella barra c'e' `(non salvato)` con `• modificato`,
   `salva` apre il pannello e `rendi e ascolta` scrive in `live/`. Il nome
-  proposto e' lo `stream_id` di quello stream (`idDelloStream`). La testa e'
+  proposto e' lo `stream_id` di quello stream (`idDelloStream`), che e' il
+  nome che lo fa suonare come nel documento da cui viene. La testa e'
   quella di un documento di uno stream solo (`testaDiUnoStream`): il `seed` e
   il `bpm` del documento e la durata dello stream. Il resto della testa e' del
   documento intero — la durata di tutto,
   il titolo, le corsie di PGE-ui (`ui_tracks`), che in PGE-ui diventerebbero
-  corsie vuote — e non passa. La barra e il `salva` restano cosi' solo fino
-  al primo `rendi e ascolta`: come sul foglio bianco, `labPost` adotta il file
-  scritto in `live/` come file del laboratorio, e da li' `salva` e il render
-  dopo vengono rifiutati (`percorso non scelto da un pannello`) finche' non si
-  fa `salva con nome`.
-  Il documento da cui lo stream viene resta comunque intatto. La correzione e'
-  in DMGiulioRomano/mare-nostrum#5 (mare-nostrum@5dbaece e @e1e5e49), che qui
-  porta la #89.
+  corsie vuote — e non passa. Dalla #89 la testa porta il `seed` dello
+  studio se il documento non ne ha, come quella del foglio bianco, e il foglio
+  resta senza file anche dopo un `rendi e ascolta`: il render va in `live/`, ma
+  quel file non e' `FILE` (sopra, «L'identita' dello stream»). Prima `labPost`
+  lo adottava, e da li' `salva` e il render dopo venivano rifiutati
+  (`percorso non scelto da un pannello`) finche' non si faceva `salva con
+  nome`. Il documento da cui lo stream viene resta comunque intatto.
 
 Verificato in `tests/test_lab_documento.py`.
 
@@ -775,10 +841,13 @@ Le curve occupano la frazione di larghezza che lo stream occupa nel file
 (la coda dell'ultimo grano puo' allungarlo), verificata in
 `tests/test_graph_js.py`.
 
-Una cosa non torna esatta: il foglio bianco non porta un `seed`, quindi le
-curve di una strategia **stocastica** sono una realizzazione diversa da quella
-che ha suonato. Un documento aperto che ne ha uno lo conserva (#87), e li'
-tornano; altrimenti si aggiusta scrivendo il seed nel documento.
+Sono la realizzazione **che ha suonato**, non un'altra estrazione, anche con
+una strategia stocastica: il documento porta un `seed` e lo `stream_id` del
+file (#89) e l'analisi ricarica quello stesso YAML, quindi l'RNG
+`(seed, stream_id, componente)` ripesca le stesse sequenze. L'unico caso in cui
+non torna e' un documento senza seed su uno studio senza seed, dove il
+laboratorio non ne inventa uno: li' lo dice la riga di stato, e il chip accanto
+al nome del file legge `senza seed`.
 
 **L'altezza dei pannelli di analisi** e' quella dell'attributo `height` del
 canvas e basta: `width:100%` da solo la lascerebbe al rapporto fra gli

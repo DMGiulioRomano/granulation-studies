@@ -194,10 +194,11 @@ laboratorio non dipende da quel processo, compone da zero e rende per conto
 suo — li' mancano le tacche, non le manopole.
 
 Vincoli: **solo macOS** (`osascript` per i pannelli, Safari che decodifica
-AIFF). Il foglio bianco non porta un `seed` (un documento aperto conserva il
-suo): le curve di una strategia stocastica sono un'altra realizzazione
-rispetto a quella che ha suonato. La descrizione completa, pezzo per pezzo, è
-in `CLAUDE.md`.
+AIFF). L'identità dello stream non è una manopola: lo `stream_id` è il nome
+del file, il `seed` quello del documento aperto o, se non ne ha, quello dello
+`study.yml` (mostrato accanto al nome del file, non modificabile). Così due
+render dello stesso documento sono lo stesso audio, e curve e grani sono quelli
+che hanno suonato. La descrizione completa, pezzo per pezzo, è in `CLAUDE.md`.
 
 ## Struttura
 
