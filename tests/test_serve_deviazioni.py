@@ -100,6 +100,23 @@ def test_salva_con_nome_senza_estensione_resta_autorizzato(monkeypatch, tmp_path
     assert S._RECENTI[0] == scelto + ".yml"
 
 
+def test_salva_con_nome_con_l_estensione_maiuscola_non_la_raddoppia(monkeypatch, tmp_path):
+    """`risacca.YML` ha gia' l'estensione: diventava `risacca.YML.yml`, cioe'
+    un file accanto a quello scelto, con un altro id (#89: `stream_id` e' il
+    nome del file senza estensione, e la pagina la toglie anche in maiuscolo,
+    come il motore). E' la regola di `render_doc` (mare-nostrum@c971ef9)
+    portata al pannello, che qui torna gia' il path che si scrivera'."""
+    scelto = str(tmp_path / "risacca.YML")
+    monkeypatch.setattr(S.subprocess, "run",
+                        lambda *a, **k: subprocess.CompletedProcess(a, 0, scelto + "\n", ""))
+    path, err = S.pannello("save", "stream.yml")
+    assert (path, err) == (scelto, "")
+    out = S.render_doc(DOC, "x", str(tmp_path / "gen"), str(tmp_path),
+                       render=False, path=path)
+    assert out["ok"] and out["path"] == scelto
+    assert not os.path.exists(scelto + ".yml")
+
+
 # --- l'audio di uno stream salvato fuori dallo studio ----------------------
 
 def test_l_audio_reso_fuori_dallo_studio_si_puo_ascoltare(server, monkeypatch, tmp_path):

@@ -121,7 +121,9 @@ def pannello(mode: str, name: str = "stream.yml", start: str = "") -> Tuple[str,
     # scriverebbe `brano.yml` ma l'autorizzazione (e il recente) resterebbe su
     # `brano`, e il salvataggio dopo — sul path che la pagina ha tenuto —
     # verrebbe rifiutato. Il path che torna e' quello che si scrivera'.
-    if path and mode == "save" and not path.endswith((".yml", ".yaml")):
+    # L'estensione anche in maiuscolo, come in `render_doc`: `risacca.YML` e'
+    # gia' un documento YAML, e diventava `risacca.YML.yml`.
+    if path and mode == "save" and not path.lower().endswith((".yml", ".yaml")):
         path += ".yml"
     if path:
         _AUTORIZZATI.add(os.path.abspath(path))
@@ -219,7 +221,9 @@ def render_doc(doc: dict, name: str, gen_root: str, repo_root: str,
         if not autorizzato(path):
             return {"ok": False, "error": "percorso non scelto da un pannello: "
                                           "usa 'salva con nome'."}
-        doc_path = path if path.endswith((".yml", ".yaml")) else path + ".yml"
+        # L'estensione anche in maiuscolo: `risacca.YML` e' gia' un documento
+        # YAML, e scriverlo in `risacca.YML.yml` lascerebbe il file aperto com'era.
+        doc_path = path if path.lower().endswith((".yml", ".yaml")) else path + ".yml"
         base = os.path.dirname(doc_path)
         out_path = os.path.splitext(doc_path)[0] + ".aif"
         os.makedirs(os.path.join(base, "logs"), exist_ok=True)
