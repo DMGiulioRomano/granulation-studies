@@ -333,8 +333,9 @@ def test_fuori_da_normalized_nessun_rilievo(time_mode):
 
 def test_lo_zero_non_produce_rilievi():
     """Uno zero e' zero sotto qualunque fattore di scala: senza questo filtro
-    sarebbero undici avvisi su stream in cui non si muove un campione (e' lo
-    stesso filtro del ``_warn_loop_unit_migration`` dell'engine)."""
+    sarebbero undici avvisi su stream in cui non si muove un campione (era lo
+    stesso filtro dell'avviso ``[LOOP_UNIT]`` dell'engine, tolto con la
+    PGE #242)."""
     assert check_loop_unit(_ptr({"speed_ratio": 0, "start": 0})) == []
 
 

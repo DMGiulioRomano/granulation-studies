@@ -882,8 +882,10 @@ Sono decine di migliaia di grani, e per questo:
   centomillesimo grano;
 - il grano e' una **colonna**, non la freccia ne' la silhouette della finestra:
   a questa scala e' largo un paio di pixel, e la partitura stessa ripiega sulla
-  freccia sotto i tre (`window_shape_min_px`). La freccia tornerebbe utile solo
-  con uno zoom sull'asse dei tempi, che il pannello non ha;
+  freccia sotto i tre a 100 dpi (`window_shape_min_mm`, 0.762 mm sulla pagina;
+  fino alla PGE #280 si contava in pixel, `window_shape_min_px`). La freccia
+  tornerebbe utile solo con uno zoom sull'asse dei tempi, che il pannello non
+  ha;
 - si disegna **un `Path2D` per tinta**, non per grano: `fillStyle` cambia 128
   volte invece di 40000, ed e' li' che sta il costo di un canvas 2D.
 
