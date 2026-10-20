@@ -1469,6 +1469,76 @@ console.log(JSON.stringify({doc: labDoc(), bps}));
     assert "time_mode" not in out
 
 
+# I punti `{t, v}` e la `curve` della finestra scritta `{type, points}` (la
+# scrive PGE-ui appena il tipo globale di quella curva non e' lineare) sono
+# forme che la pagina legge dalla #88, e in secondi i loro tempi vanno portati
+# a frazioni come quelli di ogni altro punto. `scalaTempi` scendeva solo nei
+# punti `[t, v]` e `tempiFrazione` solo in una `curve` lista: aperti, i loro
+# secondi si leggevano come frazioni — breakpoint a t = 50 su una linea che va
+# da 0 a 1 — e, toccato il parametro, il salvataggio li moltiplicava di nuovo
+# per la durata.
+
+def _in_secondi_dict(st):
+    """stream2 in secondi (`_in_secondi`), col `volume` in punti `{t, v}` e la
+    finestra a stati con la `curve` in forma `{type, points}`. Le due finestre
+    sono fra le tacche di 001-41, cosi' il menu le tiene."""
+    st = _in_secondi(st)
+    st["volume"] = [dict(p, t=round(p["t"] * DUR_S, 6)) for p in PUNTI_DICT]
+    st["grain"]["envelope"] = {"states": [[0, "bartlett"], [1, "gaussian"]],
+                               "curve": {"type": "cubic",
+                                         "points": [[0, 0], [25, 0.3], [100, 1]]}}
+    return st
+
+
+@node
+@engine
+def test_in_secondi_i_punti_t_v_e_la_curve_a_dict_si_aprono_in_frazioni(tmp_path):
+    """I loro tempi sono breakpoint della linea, fra 0 e 1, e su ognuno il
+    laboratorio vale quanto l'engine all'istante in secondi; non toccati
+    restano come sono scritti."""
+    Envelope = _motore(tmp_path)
+    st = _in_secondi_dict(_stream("stream2"))
+    got = _lab(tmp_path, _apri(st) + "console.log(JSON.stringify({bps, doc: labDoc()}));\n")
+    ts = [b["t"] for b in got["bps"]]
+    assert all(0 <= t <= 1 for t in ts), ts
+    assert 0.25 in ts and 0.5 in ts and 1 in ts
+    vol = Envelope(st["volume"])
+    curve = Envelope(st["grain"]["envelope"]["curve"])
+    stati = st["grain"]["envelope"]["states"]
+    for b in got["bps"]:
+        s = b["t"] * DUR_S
+        assert _vicini(b["vals"]["volume"], vol.evaluate(s)), b["t"]
+        tipo = _tipo_motore(vol, s)
+        if tipo:
+            assert b["ints"]["volume"] == tipo, b["t"]
+        # La finestra del breakpoint e' lo stato piu' vicino al valore della
+        # curve (`envA`): quello che conta qui e' l'istante in cui la si legge.
+        attesa = min(stati, key=lambda x: abs(x[0] - curve.evaluate(s)))[1]
+        assert b["vals"]["grain.envelope"] == attesa, b["t"]
+    assert got["doc"]["streams"][0] == st
+
+
+@node
+@engine
+def test_in_secondi_i_punti_t_v_toccati_si_scrivono_in_secondi(tmp_path):
+    """Toccato il `volume`, la lista del laboratorio coi tempi in secondi,
+    fino alla durata e non oltre, e su ogni breakpoint l'engine vale quanto il
+    laboratorio mostra. La finestra, non toccata, resta com'era."""
+    Envelope = _motore(tmp_path)
+    st = _in_secondi_dict(_stream("stream2"))
+    got = _lab(tmp_path, _apri(st) + _tocca(0, "volume", -9)
+               + "console.log(JSON.stringify({bps, doc: labDoc()}));\n")
+    out = got["doc"]["streams"][0]
+    vol = out["volume"]
+    assert isinstance(vol, list) and vol[0] == [0, -9, "step"]
+    assert all(0 <= p[0] <= DUR_S for p in vol) and vol[-1][0] == DUR_S
+    env = Envelope(vol)
+    for b in got["bps"]:
+        assert _vicini(env.evaluate(b["t"] * DUR_S), b["vals"]["volume"]), b["t"]
+    assert out["grain"]["envelope"] == st["grain"]["envelope"]
+    assert "time_mode" not in out
+
+
 # --- su una pagina di questo repo -----------------------------------------------
 # Le manopole di `1-10ms` sono altre (density e grain.duration, piu' quelle che
 # ogni pagina ha), e il suo `base:` e' quello di uno sweep: `pointer.speed_ratio:

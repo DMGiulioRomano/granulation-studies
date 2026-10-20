@@ -1722,13 +1722,18 @@ function vociCarica(st) {
 // inviluppi che lo stream ha gia' (nella sua) restano giusti. Vale per tutto
 // cio' che sta sui breakpoint — numerici, voci, loop, `curve` della finestra,
 // progressione: l'engine legge tutti con lo stesso `time_mode`. Un
-// `{type, points}` (#4) si scala nei suoi punti.
+// `{type, points}` (#4) si scala nei suoi punti, e un punto `{t, v}` nel suo
+// `t`: `curva` li legge tutti e due, e l'engine li scala come i `[t, v]`
+// (`_scale_time_recursive`). Lasciati com'erano, riaprendo i loro secondi si
+// leggevano come frazioni.
 function scalaTempi(v, f) {
   if (v && typeof v === "object" && !Array.isArray(v) && Array.isArray(v.points))
     return Object.assign({}, v, {points: scalaTempi(v.points, f)});
   if (!Array.isArray(v)) return v;
   return v.map(p => Array.isArray(p) && typeof p[0] === "number"
-    ? [f(p[0])].concat(p.slice(1)) : p);
+    ? [f(p[0])].concat(p.slice(1))
+    : p && typeof p === "object" && typeof p.t === "number" && "v" in p
+      ? Object.assign({}, p, {t: f(p.t)}) : p);
 }
 
 // Quanto vale 1 sull'asse dei tempi del documento: 1 se normalized, la
@@ -1746,7 +1751,9 @@ function tempiFrazione(st, dur = st.duration) {
   const f = t => +(t / k).toFixed(6);
   for (const p of AUT) {
     const v = leggiPath(out, p.path);
-    if (p.path === EP) { if (v && Array.isArray(v.curve)) v.curve = scalaTempi(v.curve, f); }
+    // La `curve` della finestra puo' essere anche un `{type, points}` (la
+    // scrive PGE-ui appena il suo tipo non e' lineare), e `curva` la legge.
+    if (p.path === EP) { if (v && typeof v === "object" && v.curve) v.curve = scalaTempi(v.curve, f); }
     else if (Array.isArray(v) || (v && Array.isArray(v.points)))
       setPath(out, p.path, scalaTempi(v, f));
   }
