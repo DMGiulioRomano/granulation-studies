@@ -116,7 +116,8 @@ bozza riscritta a fine `carica` e dopo ogni scrittura, perche' dalla #89
 `FILE` e' anche l'id, e un refresh che riprende il file di prima riprende un
 altro stream.
 Dalla #88 la pagina ha di nuovo una deviazione sua, da riportare in
-mare-nostrum, che ha lo stesso difetto: `curva` legge i punti `{t, v}` e una
+mare-nostrum, che ha lo stesso difetto (DMGiulioRomano/mare-nostrum#22):
+`curva` legge i punti `{t, v}` e una
 `curve` della finestra scritta `{type, points}`, ma la conversione dei tempi in
 secondi (`scalaTempi`, `tempiFrazione`) non scendeva in nessuno dei due, e su
 uno stream senza `time_mode: normalized` i loro secondi si leggevano come
