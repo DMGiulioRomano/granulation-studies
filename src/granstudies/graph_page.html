@@ -140,6 +140,11 @@
  #envs button.on .n { color:var(--fg); }
  #fFile { color:var(--dim); font-size:11px; margin-left:6px; }
  #fFile.dirty::after { content:" •  modificato"; color:var(--on); }
+ /* Il seed: si legge, non si cambia — percio' e' un testo e non un campo
+    (#5). Senza seed si accende, perche' li' ogni render e' un'altra
+    estrazione e le curve realizzate non sono quelle che hai sentito. */
+ #fSeed { color:var(--dim); font-size:11px; margin-left:10px; }
+ #fSeed.manca { color:var(--on); }
  /* La coppia spectroscope/stereoscope non ha margine sotto: lo mette qui
     chi le sta sotto. */
  #envView { margin-top:10px; }
@@ -184,6 +189,7 @@
       <button id="fSave">salva</button>
       <button id="fSaveAs">salva con nome…</button>
       <span id="fFile"></span>
+      <span id="fSeed"></span>
     </div>
     <div id="labFixed"></div>
     <h2>parametri</h2>
@@ -493,7 +499,8 @@ let bps = [];        // [{t, vals:{path: numero}}] — sempre ordinati per t
 // lo stesso stream: si parte da lui e si sovrascrive solo cio' che il
 // laboratorio conosce E che e' stato toccato. Tutto il resto — chiavi che il
 // laboratorio non ha (`grain.read_direction`), parametri che il documento
-// lascia al default dell'engine, `stream_id`, `onset` — resta com'era.
+// lascia al default dell'engine, `onset` — resta com'era. Lo `stream_id` no:
+// e' il nome del file (#5, `labDoc`).
 //   APERTO: lo stream cosi' com'e' arrivato. null = foglio bianco, che invece
 //           nasce da `base:` e DEFAULTS e il laboratorio scrive per intero.
 //   VISTA0: come il laboratorio lo scriveva appena aperto (`labView`), prima
@@ -729,6 +736,12 @@ function labInit() {
     i.id = id; i.type = type; i.value = val;
     r.appendChild(k); r.appendChild(i); fixed.appendChild(r);
   }
+  // Il nome non e' un'etichetta: e' il nome del file, e il nome del file e'
+  // lo `stream_id` che finisce nel documento (#5). Finche' il foglio non e'
+  // salvato e' questo campo a dare l'id.
+  document.getElementById("labName").title =
+    "il nome del file, e quindi lo stream_id del documento: l'RNG "
+    + "dell'engine e' (seed, stream_id, componente)";
   lucchetto();
   bottoneSegui();
   const box = document.getElementById("labParams");
@@ -799,6 +812,12 @@ function labInit() {
   document.getElementById("fOpen").onclick = fOpen;
   document.getElementById("fSave").onclick = () => fSave(false);
   document.getElementById("fSaveAs").onclick = () => fSave(true);
+  // Finche' il foglio non e' salvato il `nome` E' lo `stream_id` (#5):
+  // cambiarlo cambia il documento, e il `• modificato` deve dirlo subito
+  // invece di aspettare il prossimo disegno.
+  // Per la stessa ragione va nella bozza: un refresh subito dopo non deve
+  // riportare l'id di prima.
+  document.getElementById("labName").onchange = () => { bozzaSalva(); segna(); };
   segna();
   avvio();
 }
@@ -1136,8 +1155,9 @@ let DURPREC = 0;              // la durata da cui si riscala
 // Il punto in cui il segmento a->b taglia il tempo t. Serve accorciando:
 // senza, l'ultimo tratto dell'inviluppo sparirebbe con il punto che lo
 // chiudeva e la coda resterebbe piatta sull'ultimo valore rimasto.
-// Come `valoreA`, interpola in linea anche dove il tipo e' `cubic`: e'
-// l'approssimazione che la pagina fa gia' ovunque legga un inviluppo.
+// Il valore e' quello della curva dei breakpoint letta come la legge l'engine
+// (`valoreA`): `step` tiene, `cubic` e' la cubica — che dipende anche dai
+// punti oltre a e b, per questo si passa la curva intera e non la coppia.
 function bpFra(a, b, t) {
   const k = (t - a.t) / (b.t - a.t);
   const vals = {}, ints = {};
@@ -1145,8 +1165,12 @@ function bpFra(a, b, t) {
     const tipo = tipoDi(a, p.path);
     ints[p.path] = tipo;
     const x = a.vals[p.path], y = b.vals[p.path];
-    vals[p.path] = (tipo !== "step" && typeof x === "number" && typeof y === "number")
-                 ? x + (y - x) * k : x;
+    if (typeof x !== "number" || typeof y !== "number") { vals[p.path] = x; continue; }
+    const c = bps.map(q => [q.t, q.vals[p.path], tipoDi(q, p.path)]);
+    // Un valore che non e' un numero altrove guasterebbe le tangenti: li' si
+    // resta sul segmento, come si faceva prima.
+    vals[p.path] = c.every(q => Number.isFinite(q[1])) ? valoreA(c, t)
+                 : tipo === "step" ? x : x + (y - x) * k;
   }
   return {t, vals, ints};
 }
@@ -1697,11 +1721,19 @@ function vociCarica(st) {
 // bianco: i tempi si scrivono nella sua convenzione, cosi' anche gli
 // inviluppi che lo stream ha gia' (nella sua) restano giusti. Vale per tutto
 // cio' che sta sui breakpoint — numerici, voci, loop, `curve` della finestra,
-// progressione: l'engine legge tutti con lo stesso `time_mode`.
+// progressione: l'engine legge tutti con lo stesso `time_mode`. Un
+// `{type, points}` (#4) si scala nei suoi punti, e un punto `{t, v}` nel suo
+// `t`: `curva` li legge tutti e due, e l'engine li scala come i `[t, v]`
+// (`_scale_time_recursive`). Lasciati com'erano, riaprendo i loro secondi si
+// leggevano come frazioni.
 function scalaTempi(v, f) {
+  if (v && typeof v === "object" && !Array.isArray(v) && Array.isArray(v.points))
+    return Object.assign({}, v, {points: scalaTempi(v.points, f)});
   if (!Array.isArray(v)) return v;
   return v.map(p => Array.isArray(p) && typeof p[0] === "number"
-    ? [f(p[0])].concat(p.slice(1)) : p);
+    ? [f(p[0])].concat(p.slice(1))
+    : p && typeof p === "object" && typeof p.t === "number" && "v" in p
+      ? Object.assign({}, p, {t: f(p.t)}) : p);
 }
 
 // Quanto vale 1 sull'asse dei tempi del documento: 1 se normalized, la
@@ -1719,8 +1751,11 @@ function tempiFrazione(st, dur = st.duration) {
   const f = t => +(t / k).toFixed(6);
   for (const p of AUT) {
     const v = leggiPath(out, p.path);
-    if (p.path === EP) { if (v && Array.isArray(v.curve)) v.curve = scalaTempi(v.curve, f); }
-    else if (Array.isArray(v)) setPath(out, p.path, scalaTempi(v, f));
+    // La `curve` della finestra puo' essere anche un `{type, points}` (la
+    // scrive PGE-ui appena il suo tipo non e' lineare), e `curva` la legge.
+    if (p.path === EP) { if (v && typeof v === "object" && v.curve) v.curve = scalaTempi(v.curve, f); }
+    else if (Array.isArray(v) || (v && Array.isArray(v.points)))
+      setPath(out, p.path, scalaTempi(v, f));
   }
   out.time_mode = "normalized";
   return out;
@@ -1747,7 +1782,7 @@ function labView() {
   }
   for (const p of NUM) {
     const v = serie(p.path);
-    if (v !== null) setPath(st, p.path, scalaTempi(v, tempo));
+    if (v !== null) setPath(st, p.path, scalaTempi(forma(leggiPath(APERTO, p.path), v), tempo));
   }
   if (ENVP) {
     const v = serieEnv();
@@ -1762,16 +1797,68 @@ function labView() {
   return st;
 }
 
-function labDoc() {
+// --- l'identita' dello stream: il nome del file e il seed (#5) -------------
+// L'RNG dell'engine e' (seed, rng_group o stream_id, componente)
+// (`shared/seeding.py`), quindi uno stream suona uguale nel laboratorio e nel
+// brano solo con lo stesso seed e lo stesso id. Nessuno dei due e' una
+// manopola: non si scelgono, si leggono — l'id dal file, il seed dal
+// documento o dallo studio.
+
+// L'id e' il nome del file senza estensione, che e' anche il modo in cui il
+// master nomina uno stream importato (il piano, regola 3: `stream_id`
+// default = il nome del file). Un foglio mai salvato non ha un file: vale il
+// campo `nome`, che e' quello che poi il pannello di salvataggio propone.
+function idDa(path) {
+  // L'estensione anche in maiuscolo: il motore toglie qualunque estensione
+  // (`os.path.splitext`), e con `risacca.YML` il brano usa `risacca`.
+  const base = (path || "").split("/").pop().replace(/\.ya?ml$/i, "");
+  return base || document.getElementById("labName").value || NOME0;
+}
+
+// Il seed: si conserva quello del documento aperto; se il documento non ne ha
+// uno, vale il `seed:` dello study.yml servito (`lab_data` lo passa alla
+// pagina). Se nemmeno lo studio ne ha, il laboratorio NON lo inventa — un
+// numero scelto qui non e' il seed di nessuno — e lo dice nella riga di
+// stato: senza seed ogni render e' un'altra estrazione, e le curve realizzate
+// non sono quelle che si e' sentito.
+// `seed: 0` e' un seed come gli altri (l'engine deriva su sha256, non sulla
+// verita' del valore), quindi il controllo e' su null/undefined e non sulla
+// truthiness. `undefined` = non c'e'.
+function seedDoc() {
+  const t = TESTA ? TESTA.seed : undefined;
+  if (t !== undefined && t !== null) return t;
+  return L.seed === undefined || L.seed === null ? undefined : L.seed;
+}
+
+// Il seed in testa, come nei documenti scritti a mano: aggiunto in coda
+// finirebbe sotto `streams`, cioe' dopo dieci metri di inviluppi.
+function conSeed(doc, s) {
+  if (s === undefined) return doc;          // non si inventa
+  if ("seed" in doc) { doc.seed = s; return doc; }
+  return Object.assign({seed: s}, doc);
+}
+
+// `dest` e' il file su cui il documento sta andando: un `salva con nome`
+// conosce la destinazione prima che `FILE` la diventi, e l'id e' quello del
+// file che si scrive, non di quello da cui si veniva.
+function labDoc(dest) {
   const vista = labView();
-  if (!APERTO || !VISTA0) return {duration: durata(), bpm: 120, streams: [vista]};
-  // La testa segue la regola dello stream: del laboratorio c'e' solo la
-  // durata (il bpm non ha un campo), e si scrive solo se e' stata toccata.
-  // Il resto — `seed`, `bpm`, chiavi di PGE-ui — resta com'era.
-  const doc = clona(TESTA || {streams: null});
-  if (!uguali(vista.duration, VISTA0.duration)) doc.duration = vista.duration;
-  doc.streams = [toccati(clona(APERTO), VISTA0, vista)];
-  return doc;
+  let doc;
+  if (!APERTO || !VISTA0) {
+    doc = {duration: durata(), bpm: 120, streams: [vista]};
+  } else {
+    // La testa segue la regola dello stream: del laboratorio c'e' solo la
+    // durata (il bpm non ha un campo), e si scrive solo se e' stata toccata.
+    // Il resto — `bpm`, chiavi di PGE-ui — resta com'era.
+    doc = clona(TESTA || {streams: null});
+    if (!uguali(vista.duration, VISTA0.duration)) doc.duration = vista.duration;
+    doc.streams = [toccati(clona(APERTO), VISTA0, vista)];
+  }
+  // L'identita' non passa dal "toccato" (#3): non e' una chiave che il
+  // laboratorio sceglie, e' il file. Un `salva con nome` cambia il nome,
+  // quindi l'id, quindi la realizzazione — ed e' la riga di stato a dirlo.
+  doc.streams[0].stream_id = idDa(dest === undefined ? FILE : dest);
+  return conSeed(doc, seedDoc());
 }
 
 // Le chiavi che il loop scrive insieme (`scriviLoop`). Se una cambia, si
@@ -2169,13 +2256,18 @@ function preview() {
 // a parte perche' non sono un'informazione in piu': sono i tempi che
 // compaiono negli inviluppi.
 
-let FILE = "";        // path assoluto del file aperto; "" = mai salvato
-let SALVATO = "";     // com'era il documento all'ultimo salvataggio
+// Il path assoluto del file scelto in un pannello; "" = mai salvato. Un
+// render su un foglio mai salvato scrive in `live/` ma non riempie questo:
+// quel file non e' stato scelto da nessuno (vedi `labPost`).
+let FILE = "";
+let SALVATO = "";     // com'e' il FILE su disco, identita' compresa (#5)
 
 // Rete di sicurezza per il refresh accidentale: il lavoro in corso torna da
 // solo. Non e' un salvataggio — quello e' il file.
 const BOZZA = "lab:" + D.study;
-// Il foglio bianco si chiama cosi' finche' non e' un file.
+// Il foglio bianco si chiama cosi' finche' non e' un file — ed e' anche il
+// suo `stream_id`, perche' un foglio mai salvato non ha un nome di file da
+// cui prenderlo (#5).
 const NOME0 = "nuovo stream";
 // Letta subito, prima che qualunque disegno la riscriva: e' la bozza con cui
 // la pagina e' stata aperta.
@@ -2193,7 +2285,28 @@ function segna() {
   el.title = FILE || "";
   el.classList.toggle("dirty", sporco());
   document.getElementById("fSave").disabled = !bps.length || !sporco();
+  segnaSeed();
 }
+
+// Il seed si mostra e non si modifica (#5): cambiarlo qui romperebbe
+// l'identita' col brano, dove il master usa il proprio seed e ignora quello
+// del file. Il nome del file e' li' accanto, e il nome del file E' l'id.
+function segnaSeed() {
+  const s = seedDoc();
+  const el = document.getElementById("fSeed");
+  el.textContent = s === undefined ? "senza seed" : "seed " + s;
+  el.title = s === undefined ? SENZA_SEED
+    : "l'RNG dell'engine e' (seed, stream_id, componente): stesso seed e "
+      + "stesso nome di file, stesso suono. Si legge e non si cambia — il "
+      + "brano usa il proprio seed e ignora quello del file.";
+  el.classList.toggle("manca", s === undefined);
+}
+
+// Cosa si perde senza seed. Una frase sola, letta dal tooltip del chip e
+// dalla riga di stato di ogni scrittura: due copie direbbero due cose.
+const SENZA_SEED = "ne' il documento ne' lo study.yml dichiarano un seed: "
+  + "ogni render e' un'altra estrazione, e le curve realizzate e i grani non "
+  + "sono quelli che hai sentito";
 
 function bozzaSalva() {
   try {
@@ -2403,19 +2516,14 @@ function carica(doc, path) {
   const st = tempiFrazione(clona(APERTO), APERTO.duration || doc.duration || DUR);
   const fissiLoop = leggiLoop(st);
   const ts = new Set([0]);
-  // Solo dalle forme che la pagina sa leggere (`leggibile`): un blocco
-  // compatto, un gruppo, i punti `{t, v}` non portano tempi, e restano
-  // com'erano. Prima qui si moriva a meta', con APERTO gia' preso e il file di
-  // prima ancora aperto: il `salva` dopo scriveva lo stream nuovo dentro quel
-  // file.
-  for (const p of NUM) {
-    const v = leggiPath(st, p.path);
-    if (leggibile(v)) for (const [t] of v) ts.add(t);
-  }
+  // `curva` legge la lista e il `{type, points}`; una forma che non conosce
+  // non porta tempi (e resta com'e' nel documento, perche' nessuno la tocca).
+  const tempi = v => { for (const p of curva(v) || []) ts.add(p.t); };
+  for (const p of NUM) tempi(leggiPath(st, p.path));
   // I tempi della curve dell'envelope sono breakpoint come gli altri: e' la
   // stessa unione, altrimenti riaprendo un cambio di finestra sparirebbe.
   const espec = ENVP ? leggiPath(st, EP) : null;
-  if (espec && leggibile(espec.curve)) for (const [t] of espec.curve) ts.add(t);
+  if (espec && typeof espec === "object") tempi(espec.curve);
   // E i tempi della progressione di accordi, per la stessa ragione.
   const prog = leggiPath(st, "voices.pitch.progression");
   if (Array.isArray(prog)) for (const passo of prog)
@@ -2446,11 +2554,11 @@ function carica(doc, path) {
   // Un documento con piu' stream non e' il file del laboratorio (sopra): il
   // foglio non ha un file.
   FILE = legato ? path || "" : "";
-  // Il nome di un foglio senza file e' il suo `stream_id`: qui quello dello
-  // stream aperto, che e' anche il nome che il pannello di `salva` propone.
-  // Non il nome del documento, che proporrebbe di salvarci sopra.
-  document.getElementById("labName").value = legato
-    ? (path || NOME0).split("/").pop().replace(/\.ya?ml$/, "")
+  // Il nome di un foglio senza file e' il suo `stream_id` (#5): qui quello
+  // dello stream aperto, che e' anche il nome che il pannello di `salva`
+  // propone — salvato cosi', suona come nel documento da cui viene. Non il
+  // nome del documento, che proporrebbe di salvarci sopra.
+  document.getElementById("labName").value = legato ? idDa(path || NOME0)
     : idDelloStream(APERTO);
   // La durata dello stream, prima di quella del documento: aperto un brano,
   // la `duration` in testa e' quella del brano intero.
@@ -2461,15 +2569,29 @@ function carica(doc, path) {
   VISTA0 = labView();
   storiaReset();
   bpLoad(0);
+  // "Salvato" e' com'e' il file su disco. Il laboratorio lo riscriverebbe
+  // uguale (#3), salvo l'identita' (#5): l'id e' il nome del file, e il seed,
+  // se il documento non ne ha, e' quello dello studio. Dove non coincidono
+  // il file non e' gia' il documento che si scriverebbe: il `• modificato`
+  // deve dirlo, il `salva` poterlo scrivere, e la riga di stato spiegare
+  // perche', prima che lo dica l'orecchio al primo render.
+  const scritto = labDoc();
   // Senza un file, niente e' salvato: `• modificato`, `salva` che apre il
   // pannello, e la conferma prima di `nuovo`/`apri`, come un foglio nuovo.
-  SALVATO = legato ? statoOra() : "";
+  SALVATO = legato ? JSON.stringify(comeLetto(scritto)) : "";
   segna();
-  document.getElementById("labInfo").textContent = legato
+  document.getElementById("labInfo").textContent = (legato
     ? (path || "documento") + " — " + bps.length + " breakpoint"
     : (path || "il documento") + " contiene " + doc.streams.length + " stream: aperto il primo ("
       + idDelloStream(APERTO) + ", " + bps.length + " breakpoint). Il laboratorio non riscrive "
-      + "quel file con uno stream solo: salva per dargli un file suo.";
+      + "quel file con uno stream solo: salva per dargli un file suo.")
+    + notaIdentita(scritto, APERTO.stream_id, TESTA.seed === undefined || TESTA.seed === null);
+  // La bozza va riscritta a caricamento finito. Quella di `drawTl`, dentro
+  // `bpLoad` qui sopra, l'ha scritta prima che `SALVATO` esistesse, e si
+  // portava dietro quello del documento di prima (sul primo caricamento:
+  // vuoto). Un refresh lo rileggeva da li': il file appena aperto risultava
+  // `• modificato` senza che nessuno avesse toccato niente.
+  bozzaSalva();
 }
 
 // Una voce di `streams:` che importa lo stream da un altro file (`- file:`,
@@ -2480,12 +2602,12 @@ function rimando(voce) {
 }
 
 // La testa del documento che nasce dal primo stream di uno che ne ha di piu'
-// (`carica`): quella di un documento del laboratorio, di uno stream solo — il
-// `seed` e il `bpm` del documento, e la durata dello stream (il seed viene
-// prima, come lo scrivera' il foglio bianco con la #89). Il resto e' del
-// documento intero: la sua durata, il titolo,
-// le corsie di PGE-ui (`ui_tracks`), che nominano tutti i suoi stream e che,
-// aperto il file in PGE-ui, diventerebbero corsie vuote.
+// (`carica`): quella di un documento del laboratorio, nell'ordine in cui la
+// scrive il foglio bianco (`labDoc`, `conSeed`) — il `seed`, che e'
+// l'identita' (#5), e il `bpm` del documento, e la durata dello stream. Il
+// resto e' del documento intero: la sua durata, il titolo, le corsie di
+// PGE-ui (`ui_tracks`), che nominano tutti i suoi stream e che, aperto il
+// file in PGE-ui, diventerebbero corsie vuote.
 function testaDiUnoStream(doc, st) {
   const t = {};
   if (doc.seed !== undefined) t.seed = clona(doc.seed);
@@ -2502,50 +2624,158 @@ function idDelloStream(st) {
   return id === undefined || id === null || String(id) === "" ? NOME0 : String(id);
 }
 
+// Il documento che `labDoc` scriverebbe, con l'identita' che il file aperto
+// aveva su disco: lo `stream_id` di `APERTO`, il `seed` di `TESTA` o nessuno.
+// Tutto il resto coincide per costruzione (#3), quindi i due differiscono
+// solo dove il laboratorio riscrive l'identita'.
+function comeLetto(doc) {
+  const d = clona(doc);
+  d.streams[0].stream_id = APERTO.stream_id;
+  if ("seed" in TESTA) d.seed = TESTA.seed; else delete d.seed;
+  return d;
+}
+
 // Il valore di un parametro al tempo t: il punto se c'e', altrimenti quello
 // che l'inviluppo vale li' — INTERPOLATO, non il piu' vicino a sinistra.
 // Riaprendo, un parametro prende un punto a ogni tempo della griglia: col
 // valore a sinistra una rampa 0.2 -> 0.75 diventerebbe un plateau a 0.2 e poi
 // una rampa piu' ripida, e il file risalvato suonerebbe diverso da quello
 // aperto. Un gradino dichiarato (terzo elemento `step`) invece tiene.
+//
+// E non un'approssimazione: e' `Envelope.evaluate` dell'engine, rifatto qui
+// passo per passo (#4), compresa la cubica. Riaprendo, un inviluppo prende
+// un punto anche dove il breakpoint e' di un altro parametro, e li' il valore
+// a schermo e' quello che l'engine suona; toccato e risalvato, la curva ci
+// passa sopra. Il confronto con l'engine e' in `tests/test_lab_documento.py`.
+// Due modi, come nell'engine (`Envelope._parse_segments`):
+//   - nessun punto dichiara un tipo suo: UN segmento, il tipo globale (della
+//     lista: linear; del dict: `type`) vale per tutti i punti;
+//   - almeno uno lo dichiara: un segmento per coppia di punti, ognuno col tipo
+//     del punto da cui parte (o quello globale).
+// Le tangenti della cubica sono comunque calcolate su TUTTI i punti.
 function valoreA(v, t) {
-  if (!Array.isArray(v)) return v;
-  if (!leggibile(v)) return NaN;          // una forma che qui non si legge
-  let prev = v[0];
-  for (const pt of v) {
-    if (pt[0] >= t - 1e-9) {
-      if (pt[0] - prev[0] < 1e-9 || prev[2] === "step") return prev[1];
-      const k = (t - prev[0]) / (pt[0] - prev[0]);
-      return prev[1] + (pt[1] - prev[1]) * k;
+  const c = curva(v);
+  if (c === null) return v;                 // uno scalare, o un nome
+  if (!c || !c.length) return NaN;          // un inviluppo che qui non si legge
+  const n = c.length;
+  if (!c.some(p => p.suo)) {
+    if (t < c[0].t) return c[0].v;
+    if (t > c[n - 1].t) return c[n - 1].v;
+    // StepInterpolation: l'ultimo punto che non sta dopo t.
+    if (c[0].tipo === "step") {
+      for (let i = n - 1; i >= 0; i--) if (t >= c[i].t) return c[i].v;
+      return c[0].v;
     }
-    prev = pt;
+  } else {
+    if (n === 1 || t <= c[0].t) return c[0].v;
+    if (t >= c[n - 1].t) return c[n - 1].v;
   }
-  return prev[1];
+  // Sul tempo di un punto, il suo valore. L'engine ci arriva dalla fine del
+  // segmento prima (s=1), che con la retta e' il valore a meno di un
+  // arrotondamento: 0.001 + (0.009 - 0.001) e' 0.009000000000000001, e
+  // risalvato non sarebbe piu' il numero scritto.
+  const k = c.findIndex(p => p.t === t);
+  if (k >= 0) return c[k].v;
+  const m = c.some(p => p.tipo === "cubic") ? tangenti(c) : null;
+  for (let i = 0; i < n - 1; i++) {
+    const a = c[i], b = c[i + 1];
+    if (a.t <= t && t <= b.t) {
+      if (a.tipo === "step") return a.v;
+      if (a.tipo === "cubic") return hermite(t, a.t, a.v, m[i], b.t, b.v, m[i + 1]);
+      return a.v + (b.t > a.t ? (t - a.t) / (b.t - a.t) : 0) * (b.v - a.v);
+    }
+  }
+  return c[n - 1].v;
 }
 
 // Il tipo del segmento che contiene t (l'ultimo punto non ne ha: vale linear).
+// In un `{type, points}` e' `type`, salvo i punti che ne dichiarano uno loro.
 function tipoA(v, t) {
-  if (!leggibile(v)) return "linear";
+  const c = curva(v);
+  if (!c) return "linear";
   let tipo = "linear";
-  for (const pt of v) {
-    if (pt[0] > t + 1e-9) break;
-    tipo = pt[2] || "linear";
+  for (const p of c) {
+    if (p.t > t) break;
+    tipo = p.tipo;
   }
   return tipo;
 }
 
-// Un inviluppo che la pagina sa leggere: la lista di punti `[t, v]` o
-// `[t, v, tipo]`, che e' quella che scrive. L'engine ne legge altre — il
-// blocco compatto `[pattern, end_time, n_reps]` (l'"add loop" di PGE-ui),
-// anche dentro una lista, il gruppo `[punti, interp]`, i punti `{t, v}` — e
-// qui, come il `{type, points}` fino alla #88, non portano tempi fra i
-// breakpoint (`carica`), a schermo non hanno un valore ne' un tipo, e nel
-// file restano com'erano perche' nessuno le tocca (#87).
-function leggibile(v) {
-  return Array.isArray(v) && v.length > 0 && v.every(p =>
-    Array.isArray(p) && (p.length === 2 || p.length === 3) &&
-    typeof p[0] === "number" && typeof p[1] === "number" &&
-    (p[2] == null || typeof p[2] === "string"));
+// Un inviluppo come lista di punti {t, v, tipo, suo}: `suo` dice se il tipo
+// e' scritto sul punto o viene da quello globale. Le forme che si leggono
+// sono quelle che il laboratorio scrive o che PGE-ui scrive per una curva di
+// soli breakpoint: la lista `[[t, v], [t, v, tipo], ...]` (anche coi punti
+// `{t, v, type}`) e il dict `{type, points}` (#4), dove `type` e' il tipo di
+// ogni segmento che non ne dichiara uno. null: non e' un inviluppo (uno
+// scalare). undefined: lo e', ma in una forma che qui non si legge (la
+// compatta, i gruppi) — e allora resta com'e' nel documento.
+function curva(v) {
+  let pts, glob = "linear";
+  if (Array.isArray(v)) pts = v;
+  else if (v && typeof v === "object" && Array.isArray(v.points)) {
+    pts = v.points;
+    glob = v.type || "linear";
+  } else return null;
+  const out = [];
+  for (const p of pts) {
+    const q = Array.isArray(p) ? p
+            : (p && typeof p === "object" && "t" in p && "v" in p) ? [p.t, p.v, p.type] : null;
+    if (!q || q.length < 2 || q.length > 3 || typeof q[0] !== "number" ||
+        typeof q[1] !== "number" || (q[2] != null && typeof q[2] !== "string")) return undefined;
+    out.push({t: q[0], v: q[1], tipo: q[2] || glob, suo: q[2] != null});
+  }
+  return out;
+}
+
+// Le tangenti di Fritsch-Carlson, come `Envelope._compute_fritsch_carlson_
+// tangents`: con due punti sole sono zero (la cubica diventa lo smoothstep),
+// dove la pendenza cambia segno sono zero (niente overshoot), altrove la
+// media armonica delle due pendenze.
+function tangenti(c) {
+  const n = c.length;
+  if (n < 2) return new Array(n).fill(0);
+  if (n === 2) return [0, 0];
+  const d = [];
+  for (let i = 0; i < n - 1; i++)
+    d.push(c[i + 1].t > c[i].t ? (c[i + 1].v - c[i].v) / (c[i + 1].t - c[i].t) : 0);
+  const m = new Array(n).fill(0);
+  m[0] = d[0];
+  for (let i = 1; i < n - 1; i++)
+    m[i] = d[i - 1] * d[i] <= 0 ? 0 : 2 / (1 / d[i - 1] + 1 / d[i]);
+  m[n - 1] = d[n - 2];
+  return m;
+}
+
+// L'interpolazione di Hermite su un segmento (`CubicInterpolation._cubic_hermite`).
+function hermite(t, t0, v0, m0, t1, v1, m1) {
+  const h = t1 - t0;
+  if (h === 0) return v0;
+  const s = (t - t0) / h, s2 = s * s, s3 = s2 * s;
+  return (2 * s3 - 3 * s2 + 1) * v0 + (s3 - 2 * s2 + s) * h * m0 +
+         (-2 * s3 + 3 * s2) * v1 + (s3 - s2) * h * m1;
+}
+
+// Un inviluppo toccato si riscrive dai breakpoint, nella forma lista che
+// `serie` produce. Se era arrivato come `{type: T, points}` e i suoi segmenti
+// sono ancora tutti T, resta un `{type: T, points}`: e' la forma che l'autore,
+// o PGE-ui, aveva scelto. Per l'engine le due forme sono lo stesso inviluppo
+// — un tipo globale e lo stesso tipo su ogni punto valgono uguale ovunque,
+// integrale compreso, perche' le tangenti della cubica le calcola sempre su
+// tutti i punti (provato sull'engine, vedi
+// `test_type_points_e_tipo_su_ogni_punto_sono_lo_stesso_inviluppo`).
+// Con i tipi mescolati, invece, la lista: il dict col tipo globale e le
+// eccezioni sul punto sarebbe lo stesso inviluppo per l'engine, ma PGE-ui non
+// lo rilegge intatto (`wrapEnv`, appena un punto ha un tipo suo, scrive la
+// lista piatta e il `type` globale si perde). Cosi' il laboratorio scrive solo
+// forme che PGE-ui riapre e riscrive uguali.
+function forma(orig, v) {
+  if (!Array.isArray(v) || !orig || typeof orig !== "object" || !Array.isArray(orig.points))
+    return v;
+  const T = orig.type || "linear";
+  if (!v.slice(0, -1).every(p => (p[2] || "linear") === T)) return v;
+  const out = Object.assign({}, orig, {points: v.map(p => [p[0], p[1]])});
+  if ("type" in orig) out.type = T;
+  return out;
 }
 
 function leggiPath(st, path) {
@@ -2555,6 +2785,26 @@ function leggiPath(st, path) {
 }
 
 function labRender() { return labPost(true); }
+
+// Cosa la riga di stato dice dell'identita' del documento appena scritto, o
+// appena aperto. Tre cose, e nessuna e' un errore:
+//   - l'id e' cambiato, cioe' il nome del file non e' piu' l'id di prima:
+//     `salva con nome`, o un file aperto il cui `stream_id` non e' il suo
+//     nome. E' accettato, ma l'RNG dipende dall'id e il suono quindi non e'
+//     piu' quello di prima. Dirlo e' l'unico modo di non scoprirlo a orecchio;
+//   - il documento aperto non aveva un seed e prende quello dello studio
+//     (`senzaSeedPrima`, solo da `carica`: scrivendo, il seed non cambia);
+//   - non c'e' un seed da nessuna parte, e allora vale `SENZA_SEED`.
+function notaIdentita(doc, prima, senzaSeedPrima) {
+  const id = doc.streams[0].stream_id;
+  const senza = doc.seed === undefined || doc.seed === null;
+  return (id !== prima
+            ? "  ·  stream_id: " + id + (prima == null ? "" : " (era " + prima + ")")
+              + " — un altro nome e' un'altra realizzazione (l'RNG dell'engine lo usa)"
+            : "")
+       + (senza ? "  ·  " + SENZA_SEED
+                : senzaSeedPrima ? "  ·  seed " + doc.seed + " dallo study.yml" : "");
+}
 
 // Il documento da ascoltare: lo stesso, senza il suo posto nel brano. Uno
 // stream aperto dal brano si porta dietro `onset` (si sentirebbero prima i
@@ -2573,15 +2823,42 @@ async function labPost(render, path) {
   const info = document.getElementById("labInfo");
   info.textContent = render ? "render in corso…" : "salvo…";
   try {
-    const doc = labDoc();
-    const body = {name, doc, render, path: path || FILE};
+    // Il documento va verso `dest`, che in un `salva con nome` non e' ancora
+    // `FILE`: l'id e' quello del file che si scrive (#5).
+    const dest = path || FILE;
+    const prima = idDa(FILE);
+    const doc = labDoc(dest);
+    const body = {name, doc, render, path: dest};
     if (render) body.ascolto = perAscolto(doc);
     const out = await post("render", body);
     if (!out.ok) { info.textContent = out.error; return; }
-    FILE = out.path || FILE;
-    SALVATO = statoOra();
+    // `FILE` e' il file che l'utente ha scelto in un pannello, non il file
+    // che il server scrive: un `rendi e ascolta` su un foglio mai salvato
+    // scrive in `live/` col nome ripulito (`_SAFE` in serve.py), e adottarlo
+    // qui faceva due cose sbagliate — `salva` provava a riscrivere un
+    // percorso che nessun pannello aveva autorizzato, e da #5 l'id dello
+    // stream cambierebbe fra il primo render e il secondo, cioe' lo stesso
+    // documento darebbe due audio.
+    if (path) {
+      FILE = out.path || FILE;
+      // Il campo `nome` e' il nome del file: dopo un `salva con nome` deve
+      // dire il nome nuovo, come fa `carica` aprendo. Se no il pannello
+      // dopo riproporrebbe quello di prima, e la riga del `nome` direbbe un
+      // id che non e' quello scritto. Passa da `idDa`, che e' la regola.
+      document.getElementById("labName").value = idDa(FILE);
+    }
+    // Salvato vuol dire scritto su `FILE`, per la stessa ragione: un render
+    // del foglio mai salvato non lo e'. Contarlo come salvataggio lasciava
+    // `(non salvato)` senza `• modificato`, il `salva` spento proprio dove
+    // non c'e' un file, e `nuovo`/`apri` buttavano il lavoro senza chiedere.
+    if (dest) SALVATO = statoOra();
     segna();
-    info.textContent = out.yaml + (render ? "" : "  (salvato)");
+    // `FILE`, `SALVATO` e il nome stanno nella bozza, e qui sono appena
+    // cambiati: senza riscriverla un refresh riprendeva quelli di prima — il
+    // file di prima, cioe' il suo id e il percorso su cui il `salva` dopo
+    // avrebbe scritto.
+    bozzaSalva();
+    info.textContent = out.yaml + (render ? "" : "  (salvato)") + notaIdentita(doc, prima);
     if (!render) return;
     // `?t=` perche' rirendendo con lo stesso nome il browser servirebbe il
     // file vecchio dalla cache.

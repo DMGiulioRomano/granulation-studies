@@ -121,7 +121,9 @@ def pannello(mode: str, name: str = "stream.yml", start: str = "") -> Tuple[str,
     # scriverebbe `brano.yml` ma l'autorizzazione (e il recente) resterebbe su
     # `brano`, e il salvataggio dopo — sul path che la pagina ha tenuto —
     # verrebbe rifiutato. Il path che torna e' quello che si scrivera'.
-    if path and mode == "save" and not path.endswith((".yml", ".yaml")):
+    # L'estensione anche in maiuscolo, come in `render_doc`: `risacca.YML` e'
+    # gia' un documento YAML, e diventava `risacca.YML.yml`.
+    if path and mode == "save" and not path.lower().endswith((".yml", ".yaml")):
         path += ".yml"
     if path:
         _AUTORIZZATI.add(os.path.abspath(path))
@@ -219,7 +221,9 @@ def render_doc(doc: dict, name: str, gen_root: str, repo_root: str,
         if not autorizzato(path):
             return {"ok": False, "error": "percorso non scelto da un pannello: "
                                           "usa 'salva con nome'."}
-        doc_path = path if path.endswith((".yml", ".yaml")) else path + ".yml"
+        # L'estensione anche in maiuscolo: `risacca.YML` e' gia' un documento
+        # YAML, e scriverlo in `risacca.YML.yml` lascerebbe il file aperto com'era.
+        doc_path = path if path.lower().endswith((".yml", ".yaml")) else path + ".yml"
         base = os.path.dirname(doc_path)
         out_path = os.path.splitext(doc_path)[0] + ".aif"
         os.makedirs(os.path.join(base, "logs"), exist_ok=True)
@@ -275,12 +279,16 @@ def _analisi(doc_path: str, repo_root: str, live: str) -> dict:
     derivate (``effective_density``), gli offset per-voce e i grani veri, che
     nel documento non ci sono affatto.
 
+    Sono la realizzazione che ha suonato, non un'altra estrazione: il
+    documento porta un ``seed`` e lo ``stream_id`` del file (#89), e l'RNG
+    dell'engine e' ``(seed, rng_group o stream_id, componente)`` — ricaricare
+    lo stesso YAML ridisegna gli stessi grani, anche con una strategia
+    stocastica. Senza seed ne' nel documento ne' nello ``study.yml`` il
+    laboratorio non ne inventa uno e lo dice nella riga di stato: li' ogni
+    render e' un'altra estrazione, e questo disegno con esso.
+
     ponytail: un ascolto non deve fallire perche' il disegno non si sa fare,
-    quindi qualunque inciampo qui vale "niente da disegnare". E il foglio
-    bianco del laboratorio non porta un ``seed`` (un documento aperto conserva
-    il suo), quindi le curve di una strategia **stocastica** sono un'altra
-    estrazione rispetto a quella che ha suonato: scrivere il seed nel
-    documento, se dara' fastidio.
+    quindi qualunque inciampo qui vale "niente da disegnare".
     """
     from . import engine_bridge
 

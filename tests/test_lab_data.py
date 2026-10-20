@@ -349,5 +349,7 @@ def test_lab_data_non_tocca_il_documento_che_legge():
 
 
 def test_senza_niente_da_leggere_resta_il_guscio():
-    assert lab_data(None) == {"base": {}, "params": []}
+    # Il seed di uno studio che non lo dichiara e' `None`, non assente: la
+    # pagina lo legge cosi' e non ne inventa uno (#89).
+    assert lab_data(None) == {"base": {}, "params": [], "seed": None}
     assert lab_data({})["params"] == []

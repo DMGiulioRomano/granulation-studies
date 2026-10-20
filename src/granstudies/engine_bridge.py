@@ -273,8 +273,9 @@ def _grani(stream, massimo: int = GRANI_MAX) -> Optional[dict]:
     La forma e' pero' quella del laboratorio: **colonne verticali**, non
     frecce ne' silhouette. Alla scala del pannello un grano e' largo un paio
     di pixel — la partitura stessa ripiega sulla freccia sotto i
-    ``window_shape_min_px`` — e decine di migliaia di poligoni a cinque
-    vertici costerebbero il disegno senza aggiungere niente da vedere.
+    ``window_shape_min_mm`` (tre pixel a 100 dpi; ``window_shape_min_px``
+    fino alla PGE #280) — e decine di migliaia di poligoni a cinque vertici
+    costerebbero il disegno senza aggiungere niente da vedere.
     ponytail: la freccia torna utile solo con uno zoom sull'asse dei tempi,
     che il pannello non ha.
 

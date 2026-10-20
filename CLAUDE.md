@@ -102,7 +102,26 @@ si apre, un documento con piu' stream non si riscrive: mare-nostrum@c971ef9 e
 @49a9b2f), senza le righe che dipendono dalle issue dopo nello stack — l'id
 dal nome del file (#89) e la firma (#90), che le riporteranno con le loro —
 e senza la terza correzione di c971ef9, l'estensione maiuscola (`risacca.YML`)
-in `idDa` e in `render_doc`, che non riguarda `carica`.
+in `idDa` e in `render_doc`, che non riguarda `carica`. La seconda e' la
+lettura degli inviluppi `{type, points}` (#88, da DMGiulioRomano/mare-nostrum#4,
+071683c, e la sua parte del merge e3c02f5 coi tempi in secondi): il codice e'
+quello di mare-nostrum alla lettera, e `curva` prende il posto di
+`leggibile`, che la #87 aveva scritto qui per le forme che la pagina non
+leggeva. La terza e' l'identita' dello stream (#89, da
+DMGiulioRomano/mare-nostrum#5, 5dbaece e e1e5e49), con le righe di c971ef9 e
+49a9b2f che la #87 aveva lasciato fuori per lei e l'estensione maiuscola di
+c971ef9, che riguarda `idDa`. Con la #89 sono arrivate anche due righe che in
+mare-nostrum stanno nei commit della #6 (74a8290, 5c8f1ea), senza la firma: la
+bozza riscritta a fine `carica` e dopo ogni scrittura, perche' dalla #89
+`FILE` e' anche l'id, e un refresh che riprende il file di prima riprende un
+altro stream.
+Dalla #88 la pagina ha di nuovo una deviazione sua, da riportare in
+mare-nostrum, che ha lo stesso difetto (DMGiulioRomano/mare-nostrum#22):
+`curva` legge i punti `{t, v}` e una
+`curve` della finestra scritta `{type, points}`, ma la conversione dei tempi in
+secondi (`scalaTempi`, `tempiFrazione`) non scendeva in nessuno dei due, e su
+uno stream senza `time_mode: normalized` i loro secondi si leggevano come
+frazioni (sotto, «I tempi sul documento seguono il suo `time_mode`»).
 Non e' stata portata la griglia delle
 varianti discrete (la pagina si chiama `graph` per lei), che mare-nostrum
 aveva gia' tolto, ne' `make explore`, che serviva a lei.
@@ -177,8 +196,9 @@ le sole chiavi in cui la `labView()` di adesso differisce da `VISTA0`
 `voices.pitch`...) ma non nei valori: un inviluppo cambia o resta tutto
 intero. Cosi' restano com'erano le chiavi che il laboratorio non ha
 (`grain.read_direction`, che nel brano di mare-nostrum hanno 8 stream su 10),
-`stream_id` e `onset`, e i parametri che il documento lascia al default
-dell'engine anche se il laboratorio ha un campo per loro. Prima ne usciva uno
+`onset`, e i parametri che il documento lascia al default dell'engine anche se
+il laboratorio ha un campo per loro. Lo `stream_id` no: dalla #89 e' il nome
+del file, e l'identita' non passa dal "toccato" (sotto). Prima ne usciva uno
 stream ricostruito sul `base:` dello studio servito, che qui e' quello di uno
 sweep: aperto su `1-10ms`, uno stream del brano perdeva `fill_factor`, `pitch`
 e `distribution`, prendeva una `density` dallo schermo e si fermava
@@ -202,20 +222,69 @@ Il **foglio bianco** (`nuovo`, o la pagina appena aperta) non ha uno stream
 aperto: nasce da `DEFAULTS` e `base:` e il laboratorio lo scrive per intero,
 come prima.
 
-Un inviluppo `{type, points}` (lo scrive PGE-ui, appena l'interpolazione
-globale di una curva non e' lineare) il laboratorio non lo legge ancora: lo
-legge la #88. Fino ad allora a schermo non ha un valore, nel file resta
-com'era — prima della #87 si perdeva — e una modifica fatta li' non si
-scrive.
+**Gli inviluppi `{type, points}`** (#88, da DMGiulioRomano/mare-nostrum#4).
+L'interpolazione globale di un inviluppo si scrive `{type: cubic, points:
+[...]}`: la scrive PGE-ui da solo, appena l'interpolazione globale di una
+curva di soli breakpoint non e' lineare, e nel brano di mare-nostrum (la
+fixture) la portano `grain.duration` (stream6, stream8), `fill_factor`
+(stream4) e `voices.pitch.pitch_range` (stream10, `step`). Il laboratorio li
+legge (`curva`): `type` e' il tipo di ogni segmento che non ne dichiara uno
+sul punto, e il menu di interpolazione di ogni breakpoint lo mostra. **I
+valori si leggono come li legge l'engine**, non in linea: `valoreA` e'
+`Envelope.evaluate` rifatto passo per passo — un segmento solo se nessun punto
+dichiara un tipo, uno per coppia altrimenti, e la cubica e' la PCHIP di
+Fritsch-Carlson con le tangenti calcolate su **tutti** i punti (`tangenti`,
+`hermite`). Conta perche' riaprendo ogni inviluppo prende un punto anche dove
+il breakpoint e' di un altro parametro: li' il valore a schermo e' quello che
+l'engine suona. Sul tempo di un punto vale il punto, senza l'arrotondamento
+della formula (`0.009`, non `0.009000000000000001`). La stessa lettura la
+usano `segui il render` e il lucchetto (`bpFra`), sulla curva dei breakpoint.
+Prima a schermo un `{type, points}` non aveva un valore, e una modifica fatta
+li' non si scriveva.
 
-Lo stesso vale per le altre forme che l'engine legge e la pagina non scrive:
-il blocco compatto `[pattern, end_time, n_reps]` (l'"add loop" di PGE-ui),
-anche dentro una lista, il gruppo di breakpoint `[punti, interp]`, i punti
-`{t, v}`. La pagina legge solo la lista di punti `[t, v]` / `[t, v, tipo]`
-(`leggibile`), e le altre non portano tempi fra i breakpoint. Prima `carica`
-ci moriva a meta', dopo aver gia' preso lo stream nuovo (`APERTO`) col file
-di prima ancora aperto: il `salva` dopo scriveva lo stream nuovo dentro quel
-file. Verificato in `tests/test_lab_documento.py`.
+Non toccato, un `{type, points}` resta com'era (#87). **Toccato, resta un
+`{type: T, points}` finche' i suoi segmenti sono tutti T** (`forma`); con i
+tipi mescolati diventa la lista del laboratorio, col tipo sui punti da cui
+parte un segmento non lineare. Per l'engine le due forme sono lo stesso
+inviluppo, bit per bit, integrale compreso: le tangenti della cubica le
+calcola sempre su tutti i punti, che il tipo sia globale o scritto su ogni
+punto. Non e' un'ipotesi: lo prova
+`test_type_points_e_tipo_su_ogni_punto_sono_lo_stesso_inviluppo` sui quattro
+inviluppi del brano. La terza forma — il dict col tipo globale e le eccezioni
+sul punto — l'engine la legge uguale, ma il laboratorio non la scrive. La
+ragione era PGE-ui, che non la rileggeva intatta (`wrapEnv`, appena un punto
+aveva un tipo suo, scriveva la lista piatta e il `type` globale si perdeva:
+la cubica degli altri segmenti diventava una retta alla prima modifica fatta
+li'); da DMGiulioRomano/PGE-ui#189 la riscrive com'e', quindi scriverla e'
+diventata una scelta, non ancora fatta in mare-nostrum, da cui la pagina viene
+(il commento di `forma` nella pagina dice ancora la ragione di prima, come
+la'). Le due forme che il laboratorio scrive PGE-ui le riapre e le riscrive
+uguali. Il prezzo di un inviluppo toccato e' quello di sempre del
+laboratorio: prende un punto a ogni breakpoint dove il suo valore cambia,
+anche a quelli di altri parametri, e una cubica con un punto in piu' ha
+tangenti diverse — fra due punti la curva puo' muoversi di poco, mentre su
+ogni breakpoint l'engine vale quanto il laboratorio mostra.
+
+I punti `{t, v, type}` sono un'altra scrittura della lista (l'`EnvelopeBuilder`
+dell'engine li normalizza in `[t, v, type]`), e `curva` li legge come la
+lista: fino alla #88 stavano fra le forme che la pagina non legge. Non
+toccati restano come sono scritti, toccati diventano la lista del
+laboratorio.
+
+Le forme che restano non lette sono il blocco compatto `[pattern, end_time,
+n_reps]` (l'"add loop" di PGE-ui), anche dentro una lista, e il gruppo di
+breakpoint `[punti, interp]`: `curva` non le conosce, e non portano tempi fra
+i breakpoint. Prima della #87 `carica` ci moriva a meta', dopo aver gia'
+preso lo stream nuovo (`APERTO`) col file di prima ancora aperto: il `salva`
+dopo scriveva lo stream nuovo dentro quel file. Verificato in
+`tests/test_lab_documento.py`.
+
+Il criterio del passo 1 del piano di mare-nostrum
+(`docs/plans/stream-come-file.md`, la') e' un test: ognuno dei 10 stream della
+fixture del brano, aperto e risalvato senza toccare niente, da' all'engine lo
+stesso fingerprint (`StreamCacheManager.compute_fingerprint`), sulla pagina di
+`001-41` e su quella di `1-10ms`
+(`test_criterio_del_piano_ogni_stream_del_brano_risalvato_e_lo_stesso`).
 
 L'**anteprima** sotto i breakpoint legge il documento (`labDoc`), non i
 breakpoint: un inviluppo non toccato vi compare com'e' scritto.
@@ -228,6 +297,64 @@ senza `mute`/`solo` (`perAscolto`), e il server rende quello (scritto in
 `logs/<nome>.ascolto.yml`) accanto allo YAML salvato. Senza, uno stream con
 onset 43 s partirebbe dopo 43 s di silenzio e uno con `mute` non suonerebbe
 affatto.
+
+**L'identita' dello stream: il nome del file e il seed** (#89, da
+DMGiulioRomano/mare-nostrum#5). L'RNG dell'engine e' `(seed, rng_group o
+stream_id, componente)` (`shared/seeding.py`), quindi lo stesso stream suona
+uguale in due posti solo con lo stesso seed e lo stesso id. Nessuno dei due e'
+una manopola del laboratorio: non si scelgono, si leggono. Prima il
+laboratorio scriveva `stream_id: lab` e, sul foglio bianco, nessun seed.
+
+- **`stream_id` = il nome del file**, senza estensione (`idDa`), che e' anche
+  il modo in cui un master nomina uno stream importato (`file:`, il piano di
+  mare-nostrum, regola 3). L'estensione si riconosce anche in maiuscolo, come
+  la toglie il motore (`os.path.splitext`): `risacca.YML` e' lo stream
+  `risacca`. Un foglio mai salvato non ha un nome di file: vale il campo
+  `nome`, che e' poi quello che il pannello di salvataggio propone.
+  **`salva con nome` cambia il nome, quindi l'id, quindi la realizzazione**:
+  e' accettato, e la riga di stato lo dice (`notaIdentita`) — a orecchio non
+  si capirebbe da dove viene.
+- **`seed`**: si conserva quello del documento aperto; se il documento non ne
+  ha, vale il `seed:` dello `study.yml` servito, che `lab_data` passa alla
+  pagina (gli studi a scala di qui hanno `seed: 1988`, i `brano*` `5`). Se
+  nemmeno lo studio ne ha uno il laboratorio **non lo inventa** — un numero
+  scelto qui non e' il seed di nessuno — e lo dice nella riga di stato e nel
+  chip. `seed: 0` e' un seed come gli altri (l'engine deriva su sha256),
+  quindi il controllo e' su null/undefined. Il seed e' quello scritto in
+  testa allo `study.yml`: la pagina e' una per studio, e un `for_each:` che
+  patcha `seed` non le arriva (nessuno studio di qui lo fa).
+- **Il seed si mostra e non si cambia**, in un testo accanto al nome del file
+  e non in un campo: cambiarlo qui romperebbe l'identita' col brano, dove il
+  master usa il proprio seed e ignora quello del file importato (regola 3).
+
+Da qui viene che **due render dello stesso documento danno lo stesso audio**, e
+che le curve realizzate e il piano dei grani sono la realizzazione che ha
+suonato anche con una strategia stocastica (vedi "Gli inviluppi realizzati").
+Misurato in `tests/test_engine_bridge.py` sull'engine, e in
+`tests/test_lab_documento.py` sul documento che scrive la pagina, reso due
+volte da `render_doc` come lo rende `make serve`.
+
+Il corollario e' su `FILE`, il file su cui si lavora: e' quello scelto in un
+pannello, non quello che il server scrive. Un `rendi e ascolta` su un foglio
+mai salvato scrive in `live/` col nome ripulito (`_SAFE` in `serve.py`), e
+adottarlo faceva due cose sbagliate — `salva` provava a riscrivere un percorso
+che nessun pannello aveva autorizzato, e l'id cambiava fra il primo render e il
+secondo, cioe' lo stesso documento dava due audio. Dopo un salvataggio invece
+il campo `nome` segue il file, come fa `carica` aprendo. Per la stessa ragione
+**salvato vuol dire scritto su `FILE`**: un render del foglio mai salvato
+lascia il `• modificato`, il `salva` acceso e la conferma prima di `nuovo` e
+`apri`. E la bozza si riscrive dopo ogni scrittura e a fine `carica`: un
+refresh subito dopo riprendeva il file di prima (il suo id, e il percorso su
+cui il `salva` avrebbe scritto) o lo `SALVATO` del documento di prima, cioe' un
+`• modificato` su un file che nessuno aveva toccato.
+
+E un file **aperto** il cui `stream_id` non e' il suo nome, o che non ha un
+seed mentre lo studio si', non e' gia' il documento che il laboratorio
+scriverebbe: `SALVATO` e' preso con l'identita' che il file aveva su disco
+(`comeLetto`), quindi si apre gia' `• modificato`, e la riga di stato dice
+perche' (`stream_id: risacca (era stream2)`, `seed 1441 dallo study.yml`).
+Senza, il `salva` restava spento e il primo render suonava diverso dal file
+aperto senza che niente l'avesse detto.
 
 **Un master non si apre, e un documento con piu' stream non si riscrive.** Il
 laboratorio scrive un documento con uno stream solo, quindi riscriverlo sul
@@ -244,21 +371,35 @@ Ora `carica` distingue due casi:
   documento di uno studio con `stack` o `versions` — si apre sul primo, come
   sempre, ma senza file. Nella barra c'e' `(non salvato)` con `• modificato`,
   `salva` apre il pannello e `rendi e ascolta` scrive in `live/`. Il nome
-  proposto e' lo `stream_id` di quello stream (`idDelloStream`). La testa e'
+  proposto e' lo `stream_id` di quello stream (`idDelloStream`), che e' il
+  nome che lo fa suonare come nel documento da cui viene. La testa e'
   quella di un documento di uno stream solo (`testaDiUnoStream`): il `seed` e
   il `bpm` del documento e la durata dello stream. Il resto della testa e' del
   documento intero — la durata di tutto,
   il titolo, le corsie di PGE-ui (`ui_tracks`), che in PGE-ui diventerebbero
-  corsie vuote — e non passa. La barra e il `salva` restano cosi' solo fino
-  al primo `rendi e ascolta`: come sul foglio bianco, `labPost` adotta il file
-  scritto in `live/` come file del laboratorio, e da li' `salva` e il render
-  dopo vengono rifiutati (`percorso non scelto da un pannello`) finche' non si
-  fa `salva con nome`.
-  Il documento da cui lo stream viene resta comunque intatto. La correzione e'
-  in DMGiulioRomano/mare-nostrum#5 (mare-nostrum@5dbaece e @e1e5e49), che qui
-  porta la #89.
+  corsie vuote — e non passa. Dalla #89 la testa porta il `seed` dello
+  studio se il documento non ne ha, come quella del foglio bianco, e il foglio
+  resta senza file anche dopo un `rendi e ascolta`: il render va in `live/`, ma
+  quel file non e' `FILE` (sopra, «L'identita' dello stream»). Prima `labPost`
+  lo adottava, e da li' `salva` e il render dopo venivano rifiutati
+  (`percorso non scelto da un pannello`) finche' non si faceva `salva con
+  nome`. Il documento da cui lo stream viene resta comunque intatto.
 
 Verificato in `tests/test_lab_documento.py`.
+
+**Un master lo rende il motore.** Dalla #91 il submodule `engine/` risolve
+`- file: <path>` negli stream di un master
+(DMGiulioRomano/PythonGranularEngine#290): il master tiene il piazzamento
+(`onset`, `mute`, `solo`, e lo `stream_id`, che di default e' il nome del
+file), il file tutto lo stream. La testa del file e il piazzamento scritto
+dentro il suo stream non arrivano, e il seed che conta e' quello del master:
+uno diverso nel file il motore lo ignora e lo dice (`[SEED]`). La promessa che
+ne viene, un documento del laboratorio importato da un master suona come lo
+stesso stream scritto dentro, e' un test (`tests/test_stream_come_file.py`),
+sulla fixture di mare-nostrum (`tests/fixtures/mare-nostrum/stream_come_file/`):
+a seed fisso gli stessi grani, campo per campo. Il documento importato l'ha
+scritto la pagina, e lo stesso test lo riapre su `001-41` e su `1-10ms` e lo
+ritrova identico e gia' salvato.
 
 I test del documento girano sulla pagina intera, non a frammenti
 (`tests/test_lab_documento.py`): `tests/lab_dom.js` e' un DOM finto in node
@@ -501,13 +642,17 @@ resta com'e' scritto, e un inviluppo non toccato esce nei suoi secondi di
 prima. Cosi' gli inviluppi che lo stream ha gia' restano nella loro
 convenzione: forzare `time_mode: normalized` sarebbe stato piu' semplice, ma
 li avrebbe riletti in frazioni. Vale per tutto cio' che sta sui breakpoint:
-numerici, voci, loop, la `curve` di `grain.envelope`, la progressione. Prima
+numerici, voci, loop, la `curve` di `grain.envelope`, la progressione, e ogni
+forma che `curva` legge (#88): i punti di un `{type, points}`, i punti
+`{t, v}` e una `curve` scritta `{type, points}`, che l'engine scala come gli
+altri. Prima
 la pagina contava sul `time_mode: normalized` del `base:`, che oggi tutti gli
 studi dichiarano: su uno studio senza, una rampa di 30 s si schiacciava nel
 primo secondo. Nata qui come deviazione da mare-nostrum, che poi l'ha ripresa
 (DMGiulioRomano/mare-nostrum#9); verificata in `tests/test_graph_js.py`
 (foglio bianco) e in `tests/test_lab_documento.py` (uno stream aperto in
-secondi).
+secondi, anche col suo `{type: cubic}`, coi punti `{t, v}` e con la `curve`
+della finestra a dict).
 
 **Il tempo di un breakpoint si scrive.** La riga `tempo (0-1)` in cima ai
 parametri mostra la x normalizzata del punto selezionato e la accetta digitata:
@@ -535,8 +680,10 @@ cosa deve succedere.
 Accorciando, i punti che finiscono oltre la nuova fine escono, ma lasciano il
 punto in cui l'inviluppo **tagliava** il bordo, interpolato (`bpFra`) — se no
 la coda resterebbe piatta sull'ultimo valore rimasto; è la stessa cura del
-`truncateEnvArray` di PGE-ui. Un `step` sul punto di partenza tiene il suo
-valore invece di interpolare. Quanti ne sono usciti lo dice la riga di stato.
+`truncateEnvArray` di PGE-ui. Il valore del punto di chiusura e' quello della
+curva dei breakpoint letta come l'engine (`valoreA`): un `step` sul punto di
+partenza tiene il suo valore, una `cubic` resta la cubica. Quanti ne sono
+usciti lo dice la riga di stato.
 
 La durata entra nella storia dell'undo: riportare indietro i breakpoint senza
 di lei lascerebbe i tempi in secondi diversi da quelli ripristinati. Verificato
@@ -544,9 +691,10 @@ in `tests/test_graph_js.py`.
 
 **Limite dichiarato: il lucchetto muove solo i breakpoint.** Quindi solo gli
 inviluppi che il laboratorio riscrive da li'. Quelli che uno stream aperto
-conserva senza leggerli (#87) — `grain.read_direction`, e fino alla #88 un
-`{type, points}` — restano com'erano scritti, nei tempi del loro
-`time_mode`, e in due casi su quattro non vanno piu' d'accordo con gli altri:
+conserva senza leggerli (#87) — `grain.read_direction`, un parametro che su
+quella pagina non e' una manopola (il `fill_factor` del brano aperto su
+`1-10ms`), le forme che `curva` non legge — restano com'erano scritti, nei
+tempi del loro `time_mode`, e in due casi su quattro non vanno piu' d'accordo con gli altri:
 con `time_mode: normalized` e il lucchetto chiuso si stirano con lo stream
 mentre gli altri tengono i secondi; senza `time_mode` (tempi in secondi) e il
 lucchetto aperto tengono i secondi mentre gli altri si stirano. E' lo stesso
@@ -556,7 +704,8 @@ della pagina.
 **Seguire il render.** Sotto il lucchetto c'e' `segui il render`: acceso,
 mentre suona i parametri smettono di mostrare il breakpoint selezionato e
 mostrano **dove sono adesso** — gli inviluppi letti al tempo del cursore, con
-la stessa interpolazione dei breakpoint (`bpFra`, via `bpA`), l'estremo fuori
+la stessa interpolazione dei breakpoint (`bpFra`, via `bpA`: la curva dei
+breakpoint letta come l'engine, cubica compresa), l'estremo fuori
 dagli estremi. E' una lettura: non tocca i breakpoint, non entra nell'undo, e
 spegnendolo si torna al punto selezionato (`mostraBp`). Vale solo sul render
 dello stream, non sull'ascolto di un sample. Verificato in
@@ -716,10 +865,13 @@ Le curve occupano la frazione di larghezza che lo stream occupa nel file
 (la coda dell'ultimo grano puo' allungarlo), verificata in
 `tests/test_graph_js.py`.
 
-Una cosa non torna esatta: il foglio bianco non porta un `seed`, quindi le
-curve di una strategia **stocastica** sono una realizzazione diversa da quella
-che ha suonato. Un documento aperto che ne ha uno lo conserva (#87), e li'
-tornano; altrimenti si aggiusta scrivendo il seed nel documento.
+Sono la realizzazione **che ha suonato**, non un'altra estrazione, anche con
+una strategia stocastica: il documento porta un `seed` e lo `stream_id` del
+file (#89) e l'analisi ricarica quello stesso YAML, quindi l'RNG
+`(seed, stream_id, componente)` ripesca le stesse sequenze. L'unico caso in cui
+non torna e' un documento senza seed su uno studio senza seed, dove il
+laboratorio non ne inventa uno: li' lo dice la riga di stato, e il chip accanto
+al nome del file legge `senza seed`.
 
 **L'altezza dei pannelli di analisi** e' quella dell'attributo `height` del
 canvas e basta: `width:100%` da solo la lascerebbe al rapporto fra gli
@@ -754,8 +906,10 @@ Sono decine di migliaia di grani, e per questo:
   centomillesimo grano;
 - il grano e' una **colonna**, non la freccia ne' la silhouette della finestra:
   a questa scala e' largo un paio di pixel, e la partitura stessa ripiega sulla
-  freccia sotto i tre (`window_shape_min_px`). La freccia tornerebbe utile solo
-  con uno zoom sull'asse dei tempi, che il pannello non ha;
+  freccia sotto i tre a 100 dpi (`window_shape_min_mm`, 0.762 mm sulla pagina;
+  fino alla PGE #280 si contava in pixel, `window_shape_min_px`). La freccia
+  tornerebbe utile solo con uno zoom sull'asse dei tempi, che il pannello non
+  ha;
 - si disegna **un `Path2D` per tinta**, non per grano: `fillStyle` cambia 128
   volte invece di 40000, ed e' li' che sta il costo di un canvas 2D.
 

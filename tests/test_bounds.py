@@ -4,9 +4,9 @@ from granstudies import bounds
 
 
 def test_bounds_from_engine_registry():
-    # density: [0.01, 4000] dal registry dell'engine
+    # density: pavimento 0.01, nessun tetto (engine #272)
     lo, hi = bounds.bounds_for("density")
-    assert lo == 0.01 and hi == 4000.0
+    assert lo == 0.01 and hi is None
 
 
 def test_bounds_nested_path():
@@ -38,7 +38,7 @@ def test_bounds_unknown_path():
 def test_clamp_within_and_outside():
     assert bounds.clamp("density", 50) == 50
     assert bounds.clamp("density", -5) == 0.01
-    assert bounds.clamp("density", 99999) == 4000.0
+    assert bounds.clamp("density", 99999) == 99999  # nessun tetto
     # path sconosciuto: no-op
     assert bounds.clamp("non.esiste", 12345) == 12345
 
@@ -52,7 +52,7 @@ def test_bounds_grain_duration_dynamic_output_sr():
 
 def test_bounds_output_sr_ignored_for_other_paths():
     # output_sr non tocca i parametri senza bound dinamico
-    assert bounds.bounds_for("density", output_sr=48000) == (0.01, 4000.0)
+    assert bounds.bounds_for("density", output_sr=48000) == (0.01, None)
     assert bounds.bounds_for("pitch.semitones", output_sr=48000) == (-36.0, 36.0)
 
 
@@ -172,24 +172,12 @@ def _vocabolari_loop_unit_dell_engine():
     Da PGE #246 le due tuple stanno in ``pge.parameters.loop_unit``, un
     modulo senza dipendenze, e la seconda ha perso l'underscore. Prima
     stavano in ``pge.controllers.pointer_controller``, con lo scope privato
-    (``_LOOP_UNIT_SCOPE``): letto li', il bump del submodule oltre la #246
-    rendeva questo confronto un ``AttributeError``.
-
-    Il ripiego vale solo per un modulo che manca: un ``ImportError`` *dentro*
-    ``loop_unit`` (una dipendenza nuova, un nome rotto) e' un guasto da
-    vedere, non una ragione per leggere il path vecchio.
-
-    ponytail: il ripiego serve finche' il submodule e' pinnato prima della
-    PGE #246; dopo il bump va tolto, e resta la sola lettura nuova.
+    (``_LOOP_UNIT_SCOPE``), e questo test ripiegava li' finche' il submodule
+    era pinnato prima della #246: il bump della #91 lo porta oltre, e resta la
+    sola lettura nuova.
     """
-    try:
-        import pge.parameters.loop_unit as loop_unit
-    except ModuleNotFoundError as e:
-        if e.name != "pge.parameters.loop_unit":
-            raise
-        from pge.controllers import pointer_controller
+    import pge.parameters.loop_unit as loop_unit
 
-        return pointer_controller.LOOP_UNITS, pointer_controller._LOOP_UNIT_SCOPE
     return loop_unit.LOOP_UNITS, loop_unit.LOOP_UNIT_SCOPE
 
 

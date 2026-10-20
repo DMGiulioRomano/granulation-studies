@@ -304,12 +304,17 @@ def _fn(js: str, nome: str) -> str:
     return js[i:j] + "\n"
 
 
+def _lettura(js: str) -> str:
+    """Come la pagina legge un inviluppo: `valoreA` e quello che usa (#88)."""
+    return "".join(_fn(js, f) for f in ("valoreA", "curva", "tangenti", "hermite"))
+
+
 def _env(bps: str, coda: str, tmp_path) -> str:
     js = _script()
     src = "\n".join([
         'const EP = "grain.envelope";',
         _fn(js, "serieEnv"), _fn(js, "envA"),
-        _fn(js, "valoreA"), _fn(js, "leggibile"), _fn(js, "tipoDi"),
+        _lettura(js), _fn(js, "tipoDi"),
         "let bps = " + bps + ";", coda,
     ])
     p = tmp_path / "env.js"
@@ -657,7 +662,7 @@ def test_col_lucchetto_i_breakpoint_tengono_il_tempo_in_secondi(tmp_path):
         "const AUT = [{path:'a'}, {path:'b'}];\n"
         "let bps = [{t:0, vals:{a:0, b:0}}, {t:0.5, vals:{a:10, b:0}, ints:{b:'step'}},\n"
         "           {t:1, vals:{a:20, b:100}}];\n"
-        + _fn(js, "tipoDi") + _fn(js, "bpFra") + _fn(js, "ridimensiona") + """
+        + _fn(js, "tipoDi") + _fn(js, "bpFra") + _fn(js, "ridimensiona") + _lettura(js) + """
 const lungo = ridimensiona(30, 60);        // il doppio: tutto si contrae
 const dopoLungo = bps.map(b => [b.t, b.vals.a]);
 const corto = ridimensiona(60, 30);        // e torna dov'era
@@ -880,7 +885,7 @@ def test_seguendo_il_render_i_valori_sono_quelli_dell_inviluppo(tmp_path):
         "let bps = [{t:0.2, vals:{a:0,  b:0}, ints:{b:'step'}},\n"
         "           {t:0.6, vals:{a:10, b:100}},\n"
         "           {t:1,   vals:{a:20, b:100}}];\n"
-        + _fn(js, "tipoDi") + _fn(js, "bpFra") + _fn(js, "bpA") + """
+        + _fn(js, "tipoDi") + _fn(js, "bpFra") + _fn(js, "bpA") + _lettura(js) + """
 const a = x => bpA(x).vals.a, b = x => bpA(x).vals.b;
 console.log(JSON.stringify([a(0), a(0.2), a(0.4), a(0.8), a(1), a(1.5),
                             b(0.4), b(0.6)]));
@@ -913,6 +918,10 @@ def _lab_tempi(base: str, coda: str, tmp_path) -> list:
         "const durata = () => 30;",
         # Foglio bianco: niente documento aperto, labDoc scrive labView intera.
         "let APERTO = null, VISTA0 = null, TESTA = null;",
+        # L'identita' (#89) non c'entra coi tempi, ma `labDoc` la scrive: un
+        # file finto basta a dare un id a `idDa` senza un DOM, e senza un
+        # `seed` ne' nel documento ne' in `L` la testa non ne prende uno.
+        'let FILE = "/x/tempi.yml", NOME0 = "nuovo stream";',
         # vociDoc vero e' accoppiato alle righe delle voci: qui basta la
         # progressione, che e' l'unica cosa sua che porta tempi.
         "function vociDoc(st) { st.voices = {pitch: {strategy: 'chord_progression',"
@@ -928,7 +937,8 @@ def _lab_tempi(base: str, coda: str, tmp_path) -> list:
         _fn(js, "serie"), _fn(js, "serieEnv"), _fn(js, "tipoDi"),
         _fn(js, "progressione"), _fn(js, "setPath"), _fn(js, "leggiPath"),
         _fn(js, "scalaTempi"), _fn(js, "inSecondi"), _fn(js, "tempiFrazione"),
-        _fn(js, "labView"), _fn(js, "clona"),
+        _fn(js, "labView"), _fn(js, "clona"), _fn(js, "forma"),
+        _fn(js, "idDa"), _fn(js, "seedDoc"), _fn(js, "conSeed"),
         _fn(js, "labDoc"), coda,
     ]))
     out = subprocess.run(["node", str(p)], capture_output=True, text=True, timeout=60)
@@ -970,6 +980,143 @@ def test_senza_normalized_i_tempi_vanno_in_secondi(tmp_path):
     assert [p[0] for p in prog] == [0, 15]
     assert vr == [[0, 0], [10, 3]]                   # del base:, gia' secondi
     assert back == [[0, 10, "step"], [0.5, 80], [1, 20]]
+
+
+# --- #89: il seed del documento -----------------------------------------------
+# L'altra meta' dell'identita' di uno stream, insieme all'id: l'RNG dell'engine
+# e' (seed, rng_group o stream_id, componente), quindi senza un seed scritto
+# ogni render pesca un seed di sessione e le curve realizzate sono un'altra
+# estrazione rispetto a quella che ha suonato. Tre regole, e la terza e' un
+# rifiuto: il laboratorio non inventa un seed che non e' di nessuno.
+# L'id sta in `tests/test_lab_documento.py`, dove sta il giro del documento.
+# Portati da DMGiulioRomano/mare-nostrum#5 (5dbaece), sulla pagina di 001-41
+# della fixture (`seed: 1441`); in fondo, gli studi di questo repo (1988).
+
+def _seed(tmp_path, testa, **kw):
+    """Il `seed` del documento scritto, e cosa ne dice il chip accanto al nome
+    del file. `None` = la chiave non c'e' affatto."""
+    from test_lab_documento import _lab, _stream
+    doc = dict(testa, bpm=120, streams=[_stream("stream2")])
+    return _lab(tmp_path, "carica(%s, '/brano/stream2.yml');\n" % json.dumps(doc) + """
+const d = labDoc();
+console.log(JSON.stringify({seed: 'seed' in d ? d.seed : null,
+  chip: document.getElementById('fSeed').textContent,
+  manca: document.getElementById('fSeed').classList.contains('manca'),
+  tag: document.getElementById('fSeed').tagName}));
+""", **kw)
+
+
+@node
+def test_il_seed_del_documento_aperto_si_conserva(tmp_path):
+    """Vince su quello dello studio: e' una scelta che qualcuno ha scritto."""
+    got = _seed(tmp_path, {"duration": 10, "seed": 7})
+    assert (got["seed"], got["chip"], got["manca"]) == (7, "seed 7", False)
+
+
+@node
+def test_un_documento_senza_seed_prende_quello_dello_studio(tmp_path):
+    """`lab_data` passa alla pagina il `seed:` dello `study.yml` servito."""
+    got = _seed(tmp_path, {"duration": 10})
+    assert (got["seed"], got["chip"]) == (1441, "seed 1441")
+
+
+@node
+def test_seed_zero_e_un_seed_come_gli_altri(tmp_path):
+    """L'engine deriva su sha256, non sulla verita' del valore: `0` non deve
+    cadere nel ramo "non c'e'" di un controllo sulla truthiness."""
+    got = _seed(tmp_path, {"duration": 10, "seed": 0})
+    assert (got["seed"], got["chip"], got["manca"]) == (0, "seed 0", False)
+
+
+@node
+def test_senza_seed_nello_studio_il_laboratorio_non_ne_inventa_uno(tmp_path):
+    """Un numero scelto qui non sarebbe il seed di nessuno. La chiave non si
+    scrive, e il chip lo dice (`manca`) — con esso la riga di stato di ogni
+    scrittura, vedi `notaIdentita`."""
+    got = _seed(tmp_path, {"duration": 10}, seed_studio=None)
+    assert (got["seed"], got["chip"], got["manca"]) == (None, "senza seed", True)
+
+
+@node
+def test_un_seed_nullo_nel_documento_non_e_un_seed(tmp_path):
+    """`seed:` vuoto e assente sono la stessa cosa per l'engine (genera un
+    seed di sessione): vale lo studio, come per un documento che non ne ha."""
+    assert _seed(tmp_path, {"duration": 10, "seed": None})["seed"] == 1441
+
+
+@node
+def test_il_seed_si_mostra_e_non_si_cambia(tmp_path):
+    """Cambiarlo qui romperebbe l'identita' col brano, dove il master usa il
+    proprio seed e ignora quello del file importato (il piano, regola 3).
+
+    Percio' non e' un controllo: e' un testo, e nella barra dei file non c'e'
+    nessun campo da cui scriverlo. Il test lo chiede alla pagina, non alla
+    sorgente: un `<input>` aggiunto li' domani lo fa parlare.
+    """
+    from test_lab_documento import _lab
+    got = _lab(tmp_path, """
+const bar = document.getElementById('fBar');
+console.log(JSON.stringify({
+  tag: document.getElementById('fSeed').tagName,
+  scrivibili: bar.querySelectorAll('input').length + bar.querySelectorAll('textarea').length,
+  gestori: ['onchange', 'oninput', 'onclick'].filter(
+    k => typeof document.getElementById('fSeed')[k] === 'function')}));
+""")
+    assert got["tag"] == "SPAN"
+    assert got["scrivibili"] == 0
+    assert got["gestori"] == []
+
+
+@node
+def test_il_seed_entra_anche_nel_documento_d_ascolto(tmp_path):
+    """Il render passa dal documento `ascolto` (onset 0, senza mute/solo): se
+    il seed restasse fuori da quello, l'audio sarebbe di un'altra estrazione
+    rispetto al file salvato — e rispetto al disegno, che ricarica il file reso.
+    """
+    from test_lab_documento import _lab, _stream
+    doc = {"duration": 10, "bpm": 120, "seed": 7, "streams": [_stream("stream5")]}
+    got = _lab(tmp_path, "carica(%s, '/brano/stream5.yml');\n" % json.dumps(doc) + """
+const POST = [];
+fetch = async (rotta, opt) => { POST.push(JSON.parse(opt.body));
+  return {ok: true, json: async () => ({ok: false, error: 'fermo qui'})}; };
+labRender().then(() => console.log(JSON.stringify(
+  {doc: POST[0].doc.seed, ascolto: POST[0].ascolto.seed,
+   id: POST[0].ascolto.streams[0].stream_id})));
+""")
+    assert got == {"doc": 7, "ascolto": 7, "id": "stream5"}
+
+
+def test_il_nome_del_file_si_legge_in_un_posto_solo(tmp_path):
+    """`idDa` e' la regola: il basename senza estensione, col campo `nome`
+    quando un file non c'e'.
+
+    Ne esistevano due copie — `carica` aprendo e `labPost` dopo un
+    salvataggio, che adottava il path del server — e finche' l'id era una cosa
+    e il nome un'altra potevano divergere in silenzio. Ora l'id dipende da
+    quella lettura, e due letture diverse sarebbero due id.
+    """
+    js = _script()
+    assert js.count("ya?ml") == 1
+    assert "ya?ml" in _fn(js, "idDa")
+
+
+@node
+@pytest.mark.parametrize("study", ["1-10ms", "1-50smp", "stack_1-50smp"])
+def test_su_uno_studio_di_qui_il_foglio_bianco_porta_il_seed_dello_studio(study, tmp_path):
+    """Gli studi di questo repo dichiarano `seed: 1988`: un foglio bianco
+    salvato e' gia' un documento che suona sempre uguale, e in testa, come nei
+    documenti scritti a mano."""
+    import yaml
+
+    from test_lab_documento import _lab
+    with open(os.path.join(_STUDIES, study, "study.yml"), encoding="utf-8") as fh:
+        atteso = yaml.safe_load(fh)["seed"]
+    got = _lab(tmp_path, "bpAdd();\nconsole.log(JSON.stringify({doc: labDoc(), "
+               "chip: document.getElementById('fSeed').textContent}));\n",
+               study=study, radice=os.path.dirname(_STUDIES), campioni=["silenzi.wav"])
+    assert atteso == 1988
+    assert list(got["doc"])[0] == "seed" and got["doc"]["seed"] == atteso
+    assert got["chip"] == "seed %d" % atteso
 
 
 # --- il corpus: da dove partono le manopole --------------------------------

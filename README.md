@@ -172,7 +172,8 @@ non si tocca, e il messaggio dice chi la tiene.
   nome. Senza un file scelto, tutto va in `generated/<studio>/live/`. Aperto e
   risalvato, uno stream resta lo stesso: il laboratorio ci scrive sopra solo
   cio' che conosce e che e' stato toccato, e il `base:` dello studio vale solo
-  per il foglio bianco.
+  per il foglio bianco. Gli inviluppi si leggono come li legge l'engine, il
+  `{type, points}` di PGE-ui compreso.
 
 Dopo il render, a destra:
 
@@ -193,10 +194,11 @@ laboratorio non dipende da quel processo, compone da zero e rende per conto
 suo — li' mancano le tacche, non le manopole.
 
 Vincoli: **solo macOS** (`osascript` per i pannelli, Safari che decodifica
-AIFF). Il foglio bianco non porta un `seed` (un documento aperto conserva il
-suo): le curve di una strategia stocastica sono un'altra realizzazione
-rispetto a quella che ha suonato. La descrizione completa, pezzo per pezzo, è
-in `CLAUDE.md`.
+AIFF). L'identità dello stream non è una manopola: lo `stream_id` è il nome
+del file, il `seed` quello del documento aperto o, se non ne ha, quello dello
+`study.yml` (mostrato accanto al nome del file, non modificabile). Così due
+render dello stesso documento sono lo stesso audio, e curve e grani sono quelli
+che hanno suonato. La descrizione completa, pezzo per pezzo, è in `CLAUDE.md`.
 
 ## Struttura
 

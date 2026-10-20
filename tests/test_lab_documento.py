@@ -21,6 +21,7 @@ import os
 import shutil
 import subprocess
 
+import numpy as np
 import pytest
 import yaml
 
@@ -51,9 +52,20 @@ def _predefiniti():
     return parameter_path_defaults()
 
 
-def _pagina(tmp_path, study="001-41", radice=MARE_NOSTRUM, campioni=CAMPIONI):
+# Il `seed:` dello `study.yml` servito si tiene com'e' scritto, salvo quando un
+# test vuole l'altro ramo (#89): `seed_studio=None` e' uno studio che non ne
+# dichiara, un numero e' un altro seed.
+TIENE = object()
+
+
+def _pagina(tmp_path, study="001-41", radice=MARE_NOSTRUM, campioni=CAMPIONI,
+            seed_studio=TIENE):
     with open(os.path.join(radice, "studies", study, "study.yml")) as fh:
         raw = yaml.safe_load(fh)
+    if seed_studio is not TIENE:
+        raw.pop("seed", None)
+        if seed_studio is not None:
+            raw["seed"] = seed_studio
     p = tmp_path / "graph.html"
     p.write_text(build_html(study, lab_completo(raw, campioni, {}, lambda _p: None,
                                                 _predefiniti(), study)))
@@ -61,9 +73,9 @@ def _pagina(tmp_path, study="001-41", radice=MARE_NOSTRUM, campioni=CAMPIONI):
 
 
 def _lab(tmp_path, scenario, prima=None, study="001-41", radice=MARE_NOSTRUM,
-         campioni=CAMPIONI):
+         campioni=CAMPIONI, seed_studio=TIENE):
     """Fa girare lo scenario sulla pagina; l'ultima riga stampata e' JSON."""
-    args = ["node", HARNESS, str(_pagina(tmp_path, study, radice, campioni))]
+    args = ["node", HARNESS, str(_pagina(tmp_path, study, radice, campioni, seed_studio))]
     sc = tmp_path / "scenario.js"
     sc.write_text(scenario)
     args.append(str(sc))
@@ -275,17 +287,25 @@ def test_la_finestra_che_cambia_diventa_a_stati(tmp_path):
 def test_il_foglio_bianco_nasce_da_defaults_e_base(tmp_path):
     doc = _lab(tmp_path, "bpAdd();\n" + STAMPA)
     out = doc["streams"][0]
-    assert (out["stream_id"], out["onset"], out["time_mode"]) == ("lab", 0, "normalized")
+    # Lo `stream_id` di un foglio mai salvato e' il campo `nome` (#89): non
+    # c'e' un file da cui prenderlo, e `lab` non era il nome di niente.
+    assert (out["stream_id"], out["onset"], out["time_mode"]) == \
+        ("nuovo stream", 0, "normalized")
     assert out["grain"]["duration"] == 0.064             # DEFAULTS
     assert out["distribution_mode"] == "uniform"         # base:
 
 
 @node
 def test_nuovo_dopo_un_documento_aperto_non_se_lo_porta_dietro(tmp_path):
-    """`nuovo` torna al foglio bianco: lo stream di prima non e' piu' la base."""
+    """`nuovo` torna al foglio bianco: lo stream di prima non e' piu' la base.
+
+    E nemmeno il suo nome: `fNew` riporta il campo a `nuovo stream`, quindi
+    l'id torna quello del foglio bianco e non quello del file che si aveva
+    aperto.
+    """
     doc = _lab(tmp_path, _apri(_stream("stream2")) + "fNew(); bpAdd();\n" + STAMPA)
     out = doc["streams"][0]
-    assert (out["stream_id"], out["onset"]) == ("lab", 0)
+    assert (out["stream_id"], out["onset"]) == ("nuovo stream", 0)
     assert "read_direction" not in out["grain"]
 
 
@@ -390,6 +410,325 @@ labRender().then(() => console.log(JSON.stringify(POST[0])));
             == {k: v for k, v in st.items() if k not in piazzati})
 
 
+# --- #89: l'identita' dello stream e' il nome del file -----------------------
+# L'RNG dell'engine e' (seed, rng_group o stream_id, componente), quindi l'id
+# non e' un'etichetta: decide il suono. Il seed, l'altra meta', sta in
+# `tests/test_graph_js.py`. Portati da DMGiulioRomano/mare-nostrum#5 (5dbaece,
+# e1e5e49), con i casi dell'estensione in maiuscolo di mare-nostrum@c971ef9.
+
+@node
+def test_lo_stream_id_e_il_nome_del_file_non_quello_che_c_era_scritto(tmp_path):
+    """Il piano (regola 3): nel master l'id di uno stream importato e' il nome
+    del file. Il laboratorio scrive quello, e non passa dal "toccato" della
+    #87 — l'id non e' una chiave che si scelga, e' il file."""
+    st = _stream("stream2")                     # stream_id: stream2
+    doc = _lab(tmp_path, _apri(st, "/brano/risacca.yml") + STAMPA)
+    assert doc["streams"][0]["stream_id"] == "risacca"
+    # Il resto dello stream resta quello di prima: cambia solo l'identita'.
+    atteso = dict(st, stream_id="risacca")
+    assert doc["streams"][0] == atteso
+
+
+@node
+@pytest.mark.parametrize("path,atteso", [
+    ("/brano/risacca.yml", "risacca"),
+    ("/brano/risacca.yaml", "risacca"),
+    ("/brano/risacca", "risacca"),          # il server gli mette .yml lui
+    ("/brano/ri.sacca.yml", "ri.sacca"),    # il punto nel nome non e' l'estensione
+    # L'estensione si riconosce come il motore riconosce lo `stream_id` di
+    # default di una voce `file:` (`os.path.splitext`), quindi anche in
+    # maiuscolo: con `risacca.YML` il brano usa `risacca`, e il laboratorio
+    # deve scrivere lo stesso id o il file suona un'altra realizzazione.
+    ("/brano/risacca.YML", "risacca"),
+    ("/brano/risacca.Yaml", "risacca"),
+])
+def test_l_estensione_non_entra_nell_id(tmp_path, path, atteso):
+    doc = _lab(tmp_path, _apri(_stream("stream2"), path) + STAMPA)
+    assert doc["streams"][0]["stream_id"] == atteso
+
+
+@node
+def test_il_foglio_mai_salvato_prende_l_id_dal_campo_nome(tmp_path):
+    doc = _lab(tmp_path, "document.getElementById('labName').value = 'risacca';\n"
+                         "bpAdd();\n" + STAMPA)
+    assert doc["streams"][0]["stream_id"] == "risacca"
+
+
+@node
+def test_salva_con_nome_scrive_l_id_nuovo_e_la_riga_di_stato_lo_dice(tmp_path):
+    """`salva con nome` cambia il nome, quindi l'id, quindi la realizzazione.
+
+    E' accettato, ma deve dirlo: a orecchio un suono diverso dopo un
+    salvataggio non si spiega. L'id e' quello del file di **destinazione**,
+    che quando `labDoc` gira non e' ancora `FILE`.
+    """
+    got = _lab(tmp_path, _apri(_stream("stream2"), "/brano/a.yml") + """
+const POST = [];
+fetch = async (rotta, opt) => { POST.push(JSON.parse(opt.body));
+  return {ok: true, json: async () => ({ok: true, yaml: 'b.yml', path: '/brano/b.yml'})}; };
+labPost(false, '/brano/b.yml').then(() => console.log(JSON.stringify({
+  id: POST[0].doc.streams[0].stream_id,
+  info: document.getElementById('labInfo').textContent,
+  file: FILE, nome: document.getElementById('labName').value})));
+""")
+    assert got["id"] == "b"
+    assert "stream_id: b (era a)" in got["info"]
+    # Il campo `nome` segue il file: il pannello dopo non deve riproporre `a`,
+    # e la riga del `nome` non deve dire un id che non e' quello scritto.
+    assert (got["file"], got["nome"]) == ("/brano/b.yml", "b")
+
+
+@node
+def test_un_render_su_un_foglio_mai_salvato_non_diventa_il_file(tmp_path):
+    """Il server scrive in `live/` col nome ripulito (`_SAFE`), e adottarlo
+    cambiava l'id fra il primo render e il secondo: lo stesso documento dava
+    due audio. `FILE` e' il file scelto in un pannello, non quello scritto."""
+    got = _lab(tmp_path, """
+bpAdd();
+const POST = [];
+fetch = async (rotta, opt) => { POST.push(JSON.parse(opt.body));
+  return {ok: true, json: async () => ({ok: true, src: 'x.aif', yaml: 'live/nuovo_stream.yml',
+                                        path: '/gen/live/nuovo_stream.yml'})}; };
+labPost(true).then(() => labPost(true)).then(() => console.log(JSON.stringify({
+  id: POST.map(b => b.doc.streams[0].stream_id), file: FILE,
+  nome: document.getElementById('labName').value})));
+""")
+    assert got["id"] == ["nuovo stream", "nuovo stream"]
+    assert (got["file"], got["nome"]) == ("", "nuovo stream")
+
+
+# Lo stato "salvato" (`SALVATO`) e' com'e' il file su disco: il `• modificato`,
+# il `salva` acceso e la conferma prima di `nuovo`/`apri` leggono tutti da li'.
+
+# Cosa la barra dei file dice del lavoro, e se `nuovo` chiederebbe conferma.
+STATO_FILE = """{sporco: sporco(), salva: !document.getElementById('fSave').disabled,
+  dirty: document.getElementById('fFile').classList.contains('dirty'),
+  etichetta: document.getElementById('fFile').textContent,
+  info: document.getElementById('labInfo').textContent,
+  chiede: (() => { let c = false; const v = confirm;
+                   confirm = () => { c = true; return false; };
+                   confermaPerdita('x'); confirm = v; return c; })()}"""
+
+
+@node
+def test_un_render_su_un_foglio_mai_salvato_lo_lascia_da_salvare(tmp_path):
+    """Il render scrive in `live/`, ma quel file non e' `FILE`: il lavoro resta
+    non salvato, e la pagina deve dirlo tutta insieme.
+
+    Prima `SALVATO` si aggiornava a ogni scrittura, anche questa: la barra
+    diceva `(non salvato)` senza `• modificato`, il `salva` era spento — su un
+    foglio che non ha un file, cioe' proprio dove serve — e `nuovo` buttava il
+    lavoro senza chiedere.
+    """
+    got = _lab(tmp_path, """
+bpAdd();
+fetch = async () => ({ok: true, json: async () => ({ok: true, src: 'x.aif',
+  yaml: 'live/nuovo_stream.yml', path: '/gen/live/nuovo_stream.yml'})});
+labPost(true).then(() => console.log(JSON.stringify(%s)));
+""" % STATO_FILE)
+    assert got["etichetta"] == "(non salvato)"
+    assert (got["sporco"], got["dirty"], got["salva"], got["chiede"]) == (True,) * 4
+
+
+@node
+def test_scritto_sul_file_scelto_il_lavoro_e_salvato(tmp_path):
+    """L'altra meta': un render o un `salva` che scrivono su `FILE` (o sul
+    file appena scelto) rendono pulito il documento, come prima."""
+    for azione in ("labPost(false, '/brano/b.yml')", "labPost(true)"):
+        got = _lab(tmp_path, _apri(_stream("stream2")) + _tocca(0, "pitch.ratio", 0.75) + """
+fetch = async (rotta, opt) => ({ok: true, json: async () => ({ok: true, src: 'x.aif',
+  yaml: 'x.yml', path: JSON.parse(opt.body).path})});
+%s.then(() => console.log(JSON.stringify(%s)));
+""" % (azione, STATO_FILE))
+        assert (got["sporco"], got["dirty"], got["salva"], got["chiede"]) == (False,) * 4, azione
+
+
+@node
+def test_aperto_con_la_sua_identita_e_pulito(tmp_path):
+    """Un file il cui nome e' gia' il suo `stream_id`, e che ha un seed: il
+    laboratorio lo riscriverebbe uguale, quindi niente da salvare e niente da
+    dire sull'identita'."""
+    got = _lab(tmp_path, "carica(%s, '/brano/stream2.yml');\n"
+               % json.dumps(_con_testa(_stream("stream2")))
+               + "console.log(JSON.stringify(%s));\n" % STATO_FILE)
+    assert (got["sporco"], got["dirty"], got["salva"]) == (False,) * 3
+    assert "stream_id" not in got["info"] and "seed" not in got["info"]
+
+
+@node
+def test_aperto_con_un_altro_id_e_da_salvare_e_lo_dice(tmp_path):
+    """Il laboratorio scrive l'id del file, non quello che c'era dentro (#89):
+    quello su disco non e' piu' il documento che si scriverebbe. Prima la
+    pagina lo dava per salvato — `salva` spento, nessuna conferma — e la riga
+    di stato taceva, cosi' il primo render suonava diverso dal file aperto
+    senza che niente lo avesse detto."""
+    doc = _con_testa(_stream("stream2"))                  # seed 1441, id stream2
+    got = _lab(tmp_path, "carica(%s, '/brano/risacca.yml');\n" % json.dumps(doc)
+               + "console.log(JSON.stringify(%s));\n" % STATO_FILE)
+    assert (got["sporco"], got["dirty"], got["salva"], got["chiede"]) == (True,) * 4
+    assert "stream_id: risacca (era stream2)" in got["info"]
+
+
+@node
+def test_aperto_senza_seed_prende_quello_dello_studio_e_lo_dice(tmp_path):
+    """Stessa cosa per il seed: il file non ne ha, il documento che si
+    scriverebbe porta quello dello `study.yml`."""
+    doc = _documento(_stream("stream2"))                  # nessun seed
+    got = _lab(tmp_path, "carica(%s, '/brano/stream2.yml');\n" % json.dumps(doc)
+               + "console.log(JSON.stringify(%s));\n" % STATO_FILE)
+    assert (got["sporco"], got["dirty"], got["salva"]) == (True,) * 3
+    assert "seed 1441 dallo study.yml" in got["info"]
+    assert "stream_id" not in got["info"]
+
+
+@node
+def test_aperto_senza_seed_su_uno_studio_senza_seed_lo_dice(tmp_path):
+    """Ne' il documento ne' lo studio: il laboratorio non ne inventa uno, il
+    documento resta senza `seed`, quindi e' gia' quello su disco — ma la riga
+    di stato dice che ogni render sara' un'altra estrazione."""
+    doc = _documento(_stream("stream2"))
+    got = _lab(tmp_path, "carica(%s, '/brano/stream2.yml');\n" % json.dumps(doc)
+               + "console.log(JSON.stringify(Object.assign(%s, {doc: labDoc()})));\n"
+               % STATO_FILE, seed_studio=None)
+    assert (got["sporco"], got["dirty"], got["salva"]) == (False,) * 3
+    assert "seed" not in got["doc"]
+    assert "ogni render e' un'altra estrazione" in got["info"]
+
+
+@node
+def test_il_nome_di_un_foglio_mai_salvato_entra_nella_bozza(tmp_path):
+    """Sul foglio bianco il `nome` e' lo `stream_id`: cambiarlo cambia il
+    documento, e un refresh subito dopo non deve riportare l'id di prima."""
+    got = _lab(tmp_path, """
+bpAdd();
+const n = document.getElementById('labName');
+n.value = 'risacca';
+n.dispatchEvent(new Event('change'));
+console.log(localStorage.getItem('lab:001-41'));
+""")
+    assert got["name"] == "risacca"
+
+
+def _refresh(tmp_path, scenario):
+    """Lo scenario (asincrono: puo' aspettare le sue scritture), poi la pagina
+    riaperta sulla bozza che ha lasciato (stessa sessione del server, quindi la
+    bozza torna): cosa dice la barra dei file e che documento scriverebbe."""
+    bozza = _lab(tmp_path, "(async () => {\n" + scenario
+                 + "console.log(localStorage.getItem('lab:001-41'));\n})();\n")
+    bozza["sess"] = "S"
+    prima = """
+localStorage.setItem('lab:001-41', %s);
+fetch = async () => ({ok: true, json: async () => ({ok: true, sessione: 'S', recenti: []})});
+""" % json.dumps(json.dumps(bozza))
+    return _lab(tmp_path, "console.log(JSON.stringify(Object.assign(%s, {file: FILE, "
+                          "nome: document.getElementById('labName').value, doc: labDoc()})));\n"
+                % STATO_FILE, prima=prima)
+
+
+@node
+def test_aperto_e_poi_un_refresh_resta_pulito(tmp_path):
+    """La bozza di `drawTl`, dentro il `bpLoad` di `carica`, veniva scritta
+    prima di `SALVATO`, e si portava dietro quello del documento di prima: un
+    refresh subito dopo aver aperto un file dava `• modificato` su un file che
+    nessuno aveva toccato. `carica` riscrive la bozza a caricamento finito
+    (come in mare-nostrum, dove la riga e' arrivata con la sua #6)."""
+    doc = _con_testa(_stream("stream2"))
+    got = _refresh(tmp_path, "carica(%s, '/brano/stream2.yml');\n" % json.dumps(doc))
+    assert got["file"] == "/brano/stream2.yml"
+    assert (got["sporco"], got["dirty"], got["salva"]) == (False,) * 3
+    assert got["doc"] == doc
+
+
+@node
+def test_salvato_con_nome_e_poi_un_refresh_resta_sul_file_nuovo(tmp_path):
+    """Dopo un `salva con nome` `FILE`, il nome e `SALVATO` cambiano, e dalla
+    #89 `FILE` e' anche l'id. Senza riscrivere la bozza, un refresh subito
+    dopo riprendeva il file di prima: il suo id, e il percorso su cui il
+    `salva` dopo avrebbe scritto."""
+    got = _refresh(tmp_path, _apri(_stream("stream2"), "/brano/a.yml") + """
+fetch = async (rotta, opt) => ({ok: true, json: async () => ({ok: true, yaml: 'b.yml',
+  path: JSON.parse(opt.body).path})});
+await labPost(false, '/brano/b.yml');
+""")
+    assert (got["file"], got["nome"]) == ("/brano/b.yml", "b")
+    assert got["doc"]["streams"][0]["stream_id"] == "b"
+    assert (got["sporco"], got["dirty"], got["salva"]) == (False,) * 3
+
+
+# Il criterio della #89 dal lato del laboratorio: il documento che la pagina
+# scrive, reso come lo rende `make serve` (`render_doc`, che chiama l'engine e
+# poi `_analisi`), suona sempre uguale, e il disegno e' quello che ha suonato.
+# I test sull'engine da solo stanno in `tests/test_engine_bridge.py`.
+
+def _stocastico():
+    """Uno stream breve con due sorgenti di casualita' vere: voci stocastiche
+    e una banda sulla durata del grano."""
+    return {"stream_id": "qualcosa", "onset": 0, "duration": 1.5, "sample": "onda.wav",
+            "time_mode": "normalized", "density": 40, "distribution": 0.5,
+            "grain": {"duration": 0.04, "duration_range": 0.01, "envelope": "hanning"},
+            "pointer": {"start": 0, "speed_ratio": 1, "offset_range": 0.05},
+            "pan": 0, "volume": -9,
+            "voices": {"num_voices": 3,
+                       "pitch": {"strategy": "stochastic", "unit": "semitones",
+                                 "pitch_range": 7}}}
+
+
+def _rendi_due_volte(tmp_path, seed_studio):
+    """Il documento che la pagina scrive per `/brano/risacca.yml`, reso due
+    volte da `render_doc`: le due onde e le due analisi."""
+    import numpy as np
+    import soundfile as sf
+    from granstudies import serve as S
+
+    got = _lab(tmp_path, "carica(%s, '/brano/risacca.yml');\n"
+               % json.dumps({"duration": 1.5, "bpm": 120, "streams": [_stocastico()]})
+               + "const d = labDoc();\n"
+               + "console.log(JSON.stringify({doc: d, ascolto: perAscolto(d)}));\n",
+               campioni=["onda.wav"], seed_studio=seed_studio)
+    radice = tmp_path / "repo"
+    (radice / "samples").mkdir(parents=True)
+    os.symlink(os.path.join(ROOT, "engine"), radice / "engine")
+    sr = 44100
+    t = np.arange(2 * sr) / sr
+    sf.write(str(radice / "samples" / "onda.wav"), 0.5 * np.sin(2 * np.pi * 220 * t), sr)
+    gen = tmp_path / "gen"
+    gen.mkdir()
+    onde, analisi = [], []
+    for _ in range(2):
+        out = S.render_doc(got["doc"], "risacca", str(gen), str(radice),
+                           render=True, ascolto=got["ascolto"])
+        assert out["ok"], out.get("error")
+        dati, _sr = sf.read(str(gen / out["src"]))
+        onde.append(dati)
+        analisi.append({"inviluppi": out["inviluppi"], "grani": out["grani"]})
+    return got["doc"], onde, analisi
+
+
+@node
+@engine
+def test_due_render_del_documento_del_laboratorio_sono_lo_stesso_audio(tmp_path):
+    """Col seed dello studio e lo `stream_id` del nome del file, due render
+    dello stesso documento sono lo stesso audio, campione per campione, e le
+    curve realizzate e i grani che tornano col render sono gli stessi."""
+    doc, onde, analisi = _rendi_due_volte(tmp_path, seed_studio=TIENE)
+    assert (doc["seed"], doc["streams"][0]["stream_id"]) == (1441, "risacca")
+    assert onde[0].shape == onde[1].shape and np.array_equal(onde[0], onde[1])
+    assert float(np.max(np.abs(onde[0]))) > 0.0       # non due silenzi uguali
+    assert analisi[0] == analisi[1] and analisi[0]["grani"]
+
+
+@node
+@engine
+def test_senza_seed_da_nessuna_parte_due_render_sono_due_estrazioni(tmp_path):
+    """La controprova: ne' il documento ne' lo studio hanno un seed, il
+    laboratorio non ne inventa uno, e ogni render pesca un seed di sessione —
+    il caso che la riga di stato dichiara (`SENZA_SEED`)."""
+    doc, onde, analisi = _rendi_due_volte(tmp_path, seed_studio=None)
+    assert "seed" not in doc
+    assert not np.array_equal(onde[0], onde[1])
+    assert analisi[0] != analisi[1]
+
+
 # --- un documento che non e' uno stream solo ---------------------------------
 # Il laboratorio e' il banco di UNO stream, e scrive un documento con uno
 # stream solo. Aperto un documento che ne ha di piu', o un master che li
@@ -399,10 +738,11 @@ labRender().then(() => console.log(JSON.stringify(POST[0])));
 # anche quella del documento intero: le corsie di PGE-ui di tutti gli stream,
 # la durata di tutto.
 #
-# Portati da DMGiulioRomano/mare-nostrum@c971ef9 e @49a9b2f, senza le parti
-# che vengono dalle issue dopo nello stack (l'id dal nome del file e il seed
-# dello studio, #89; la firma, #90), e con un master scritto qui: quello vero
-# del brano di mare-nostrum non e' fra le fixture.
+# Portati da DMGiulioRomano/mare-nostrum@c971ef9 e @49a9b2f, senza la parte
+# che viene da una issue dopo nello stack (la firma, #90), e con un master
+# scritto qui: quello vero del brano di mare-nostrum non e' fra le fixture.
+# Le parti dell'identita' (l'id dal nome del file e il seed dello studio) sono
+# arrivate con la #89.
 #
 # Il "disco" e' fatto di piu' file: `/open` legge quello chiesto, `/render`
 # scrive dove la pagina dice (in `live/`, se non dice niente).
@@ -517,16 +857,52 @@ def test_un_documento_con_piu_stream_si_apre_sul_primo_e_non_ci_si_riscrive(tmp_
     assert got["disco"] == doc
 
 
+@node
+def test_dopo_il_render_il_foglio_da_un_documento_con_piu_stream_resta_da_salvare(tmp_path):
+    """Il foglio nato dal primo stream resta senza file anche dopo un `rendi e
+    ascolta`: il render va in `live/` ma quel file non e' `FILE` (#89). Prima
+    `labPost` lo adottava, e da li' il `salva` e il render dopo venivano
+    rifiutati (`percorso non scelto da un pannello`) finche' non si faceva
+    `salva con nome`. Ora il secondo render va ancora in `live/` con lo stesso
+    id, e `salva` apre il pannello, proponendo il nome dello stream."""
+    a, b = _stream("stream2"), _stream("stream5")
+    doc = {"duration": 322.074, "bpm": 120, "seed": 1441, "streams": [a, b]}
+    got = _lab(tmp_path, _dischi({"/brano/vecchio.yml": doc}) + DOVE + """
+const PANNELLI = [];
+const rendi = fetch;
+fetch = async (rotta, opt) => {
+  if (rotta === 'pick') { PANNELLI.push(JSON.parse(opt.body).name);
+    return {ok: true, json: async () => ({ok: true, path: ''})}; }  // annullato
+  return rendi(rotta, opt);
+};
+(async () => {
+  await apriPath('/brano/vecchio.yml');
+  await labRender();
+  const dopo = {file: FILE, nome: document.getElementById('labName').value, sporco: sporco()};
+  await labRender();
+  await fSave(false);
+  console.log(JSON.stringify({dopo, scritture: SCRITTURE(), pannelli: PANNELLI,
+    id: POST.filter(p => p.rotta === 'render').map(p => p.doc.streams[0].stream_id),
+    disco: DISCHI['/brano/vecchio.yml']}));
+})();
+""")
+    assert got["dopo"] == {"file": "", "nome": "stream2", "sporco": True}
+    assert got["scritture"] == ["", ""]
+    assert got["id"] == ["stream2", "stream2"]
+    assert got["pannelli"] == ["stream2.yml"]
+    assert got["disco"] == doc
+
+
 @pytest.mark.parametrize("testa, durata, attese", [
     # La testa di un brano scritto da PGE-ui: il titolo e le sue corsie, che
     # nominano tutti gli stream del brano.
     ({"title": "brano", "duration": 322.074, "bpm": 120, "seed": 1441,
       "ui_tracks": [{"id": "t1", "name": "bassi", "streams": ["stream2", "stream5"]}]},
      True, ["seed", "duration", "bpm", "streams"]),
-    # Senza seed nel documento non se ne inventa uno; senza durata nello
-    # stream (lunga quanto il sample, PGE #205) non se ne scrive una: quella
-    # del documento e' del brano intero.
-    ({"duration": 322.074, "bpm": 120}, False, ["bpm", "streams"]),
+    # Senza seed nel documento vale quello dello studio, in testa (#89);
+    # senza durata nello stream (lunga quanto il sample, PGE #205) non se ne
+    # scrive una: quella del documento e' del brano intero.
+    ({"duration": 322.074, "bpm": 120}, False, ["seed", "bpm", "streams"]),
 ])
 @node
 def test_lo_stream_preso_da_un_documento_con_piu_stream_ha_la_testa_di_uno_stream(
@@ -545,12 +921,12 @@ def test_lo_stream_preso_da_un_documento_con_piu_stream_ha_la_testa_di_uno_strea
 (async () => {
   await apriPath('/brano/brano.yml');
   const d = labDoc();
-  console.log(JSON.stringify({chiavi: Object.keys(d), doc: d}));
+  console.log(JSON.stringify({chiavi: Object.keys(d), doc: d, seed: L.seed}));
 })();
 """)
     assert got["chiavi"] == attese
     scritto = got["doc"]
-    assert scritto.get("seed") == testa.get("seed")
+    assert scritto["seed"] == testa.get("seed", got["seed"])
     assert scritto["bpm"] == 120
     assert scritto.get("duration") == a.get("duration")
     assert scritto["streams"] == [a]
@@ -559,22 +935,21 @@ def test_lo_stream_preso_da_un_documento_con_piu_stream_ha_la_testa_di_uno_strea
 # --- le forme che il laboratorio non legge ---------------------------------------
 # L'engine legge piu' forme di inviluppo di quelle che la pagina scrive: il
 # blocco compatto `[pattern, end_time, n_reps]` (l'"add loop" di PGE-ui), anche
-# dentro una lista, il gruppo di breakpoint `[punti, interp]`, i punti
-# `{t, v}`. La pagina sa leggere solo la lista di punti `[t, v]` /
-# `[t, v, tipo]` (`leggibile`): le altre non portano tempi fra i breakpoint, e
-# nel file restano com'erano, come il `{type, points}` fino alla #88.
+# dentro una lista, e il gruppo di breakpoint `[punti, interp]`. La pagina
+# legge la lista di punti `[t, v]` / `[t, v, tipo]` — anche coi punti
+# `{t, v, type}` — e il `{type, points}` (`curva`, #88, sotto): le altre non
+# portano tempi fra i breakpoint, e nel file restano com'erano.
 #
 # Prima `carica` ci moriva a meta' (`for (const [t] of v)` su un numero o su un
 # `{t, v}`), e moriva dopo aver gia' preso lo stream nuovo (`APERTO`) col file
 # di prima ancora aperto: il `salva` dopo scriveva lo stream nuovo dentro il
 # file di prima. Su `main`, senza `APERTO`, lo stesso `apri` falliva senza
-# toccare niente.
+# toccare niente. I punti `{t, v}` stavano qui fino alla #88, che li legge.
 
 FORME = {
     "compatto": [[[0, -6], [50, 0], [100, -6]], 1.0, 4],
     "compatto_in_lista": [[0, -6], [[[0, -6], [100, 0]], 0.5, 2], [1, 0]],
     "gruppo": [[[0, -6], [0.5, 0], [1, -6]], "cubic"],
-    "punti_dict": [{"t": 0, "v": -6}, {"t": 1, "v": 0}],
 }
 
 
@@ -603,30 +978,391 @@ console.log(JSON.stringify(vista));
 @node
 def test_aperto_dopo_un_altro_non_finisce_nel_file_di_prima(tmp_path):
     """Il caso vero: aperto un file, poi uno stream di PGE-ui con un blocco
-    compatto, il `salva` scriveva il secondo stream dentro il primo file."""
+    compatto, il `salva` scriveva il secondo stream dentro il primo file.
+
+    I file si chiamano come i loro stream, cosi' l'id resta quello (#89); il
+    `seed` dello studio, che il documento non ha, il laboratorio ce lo scrive.
+    """
     a = _stream("stream2")
     b = dict(_stream("stream5"), volume=FORME["compatto"])
-    got = _lab(tmp_path, _dischi({"/brano/a.yml": _documento(a),
-                                  "/brano/b.yml": _documento(b)}) + """
+    got = _lab(tmp_path, _dischi({"/brano/stream2.yml": _documento(a),
+                                  "/brano/stream5.yml": _documento(b)}) + """
 (async () => {
-  await apriPath('/brano/a.yml');
-  await apriPath('/brano/b.yml');
+  await apriPath('/brano/stream2.yml');
+  await apriPath('/brano/stream5.yml');
   const file = FILE;
   await fSave(false);
-  console.log(JSON.stringify({file, a: DISCHI['/brano/a.yml'], b: DISCHI['/brano/b.yml']}));
+  console.log(JSON.stringify({file, a: DISCHI['/brano/stream2.yml'],
+                              b: DISCHI['/brano/stream5.yml']}));
 })();
 """)
-    assert got["file"] == "/brano/b.yml"
+    assert got["file"] == "/brano/stream5.yml"
     assert got["a"] == _documento(a)
-    assert got["b"] == _documento(b)
+    assert got["b"] == dict(_documento(b), seed=1441)
+
+
+# --- #88: gli inviluppi {type, points} ------------------------------------------
+# `{type: cubic, points: [...]}` e' l'interpolazione globale di un inviluppo:
+# la scrive PGE-ui appena quella di una curva di soli breakpoint non e'
+# lineare, e nel brano di mare-nostrum la portano grain.duration (stream6,
+# stream8), fill_factor (stream4) e voices.pitch.pitch_range (stream10, step).
+# Portati da DMGiulioRomano/mare-nostrum#4 (071683c), sulle stesse fixture.
+
+STREAMS = [s["stream_id"] for s in _brano()["streams"]]
+
+
+def _motore(tmp_path):
+    from granstudies import engine_bridge
+    engine_bridge._ensure_engine_on_path()
+    engine_bridge._silence_loggers(str(tmp_path / "logs"))
+    from pge.envelopes.envelope import Envelope
+    return Envelope
+
+
+_TIPI = {"LinearInterpolation": "linear", "CubicInterpolation": "cubic",
+         "StepInterpolation": "step"}
+
+
+def _tipo_motore(env, t):
+    """Il tipo del segmento che parte da t, per l'engine; None fuori dai punti."""
+    segs = env.segments
+    if not segs[0].start_time <= t < segs[-1].end_time:
+        return None
+    for s in segs:
+        if s.start_time <= t < s.end_time:
+            return _TIPI[type(s.strategy).__name__]
+    return None
+
+
+def _inviluppo(v):
+    return isinstance(v, list) or (isinstance(v, dict) and "points" in v)
+
+
+def _leggi(st, path):
+    for k in path.split("."):
+        if not isinstance(st, dict):
+            return None
+        st = st.get(k)
+    return st
+
+
+def _vicini(a, b):
+    return abs(a - b) <= 1e-12 * max(1.0, abs(a), abs(b))
+
+
+@node
+@engine
+@pytest.mark.parametrize("sid", STREAMS)
+def test_ogni_breakpoint_si_apre_col_valore_e_il_tipo_del_motore(tmp_path, sid):
+    """Niente NaN, e non un'approssimazione: su ogni breakpoint ogni inviluppo
+    vale quanto lo valuta l'engine, anche dove il breakpoint e' di un altro
+    parametro e il segmento e' `cubic` (PCHIP di Fritsch-Carlson, con le
+    tangenti calcolate su tutti i punti) o `step`. E il menu di
+    interpolazione di quel breakpoint mostra il tipo del segmento che ne parte.
+    """
+    Envelope = _motore(tmp_path)
+    st = _stream(sid)
+    got = _lab(tmp_path, _apri(st)
+               + "console.log(JSON.stringify({bps, num: NUM.map(p => p.path)}));\n")
+    visti = 0
+    for path in got["num"]:
+        raw = _leggi(st, path)
+        if not _inviluppo(raw):
+            continue
+        env = Envelope(raw)
+        for b in got["bps"]:
+            v = b["vals"][path]
+            assert isinstance(v, (int, float)), (path, b["t"], v)
+            assert _vicini(v, env.evaluate(b["t"])), (path, b["t"], v, env.evaluate(b["t"]))
+            tipo = _tipo_motore(env, b["t"])
+            if tipo:
+                assert b["ints"][path] == tipo, (path, b["t"])
+            visti += 1
+    assert visti
+
+
+def _impronte(tmp_path, path):
+    """Il fingerprint di ogni stream di un documento, per l'engine
+    (`StreamCacheManager.compute_fingerprint`, quello che decide se uno stem
+    va rifatto)."""
+    _motore(tmp_path)
+    from pge.engine.generator import Generator
+    from pge.rendering.stream_cache_manager import StreamCacheManager
+
+    g = Generator(str(path))
+    g.load_yaml()
+    m = StreamCacheManager(str(tmp_path / "manifest.json"), renderer_type="numpy")
+    return {s["stream_id"]: m.compute_fingerprint(s) for s in g.data["streams"]}
+
+
+@node
+@engine
+@pytest.mark.parametrize("study, radice", [("001-41", MARE_NOSTRUM), ("1-10ms", ROOT)],
+                         ids=["001-41", "1-10ms"])
+@pytest.mark.parametrize("sid", STREAMS)
+def test_criterio_del_piano_ogni_stream_del_brano_risalvato_e_lo_stesso(
+        tmp_path, sid, study, radice):
+    """Passo 1 di `docs/plans/stream-come-file.md` di mare-nostrum.
+
+    Ogni stream del brano, aperto nel laboratorio e risalvato senza toccare
+    niente, da' all'engine lo stesso stream: stesso fingerprint. Il giro e'
+    quello vero: YAML -> JSON del server -> pagina -> JSON -> YAML scritto
+    come lo scrive `render_doc`. Sulla pagina di 001-41, dove nasce il
+    criterio, e su quella di `1-10ms`, dove le manopole sono altre: li'
+    `fill_factor` non e' una manopola e resta come scritto, `grain.duration`
+    si'.
+    """
+    from granstudies import serve as S
+    doc = _lab(tmp_path, _apri(_stream(sid)) + STAMPA, study=study, radice=radice,
+               campioni=["silenzi.wav"] + CAMPIONI)
+    salvato = tmp_path / (sid + ".yml")
+    with open(salvato, "w") as fh:
+        yaml.dump(doc, fh, Dumper=S._Dumper, sort_keys=False, allow_unicode=True)
+    brano = os.path.join(MARE_NOSTRUM, "mare-nostrum.yml")
+    assert _impronte(tmp_path, salvato)[sid] == _impronte(tmp_path, brano)[sid]
+
+
+@node
+@pytest.mark.parametrize("sid,path", [("stream4", "fill_factor"),
+                                      ("stream6", "grain.duration"),
+                                      ("stream8", "grain.duration"),
+                                      ("stream10", "voices.pitch.pitch_range")])
+def test_un_type_points_non_toccato_si_riscrive_nella_sua_forma(tmp_path, sid, path):
+    st = _stream(sid)
+    doc = _lab(tmp_path, _apri(st) + STAMPA)
+    assert _leggi(doc["streams"][0], path) == _leggi(st, path)
+
+
+@engine
+def test_type_points_e_tipo_su_ogni_punto_sono_lo_stesso_inviluppo(tmp_path):
+    """La prova che decide la forma di riscrittura, fatta sull'engine.
+
+    `{type: T, points}` (un segmento solo, strategia T su tutti i punti) e la
+    lista con T scritto su ogni punto (un segmento per coppia) potrebbero non
+    coincidere: le tangenti della cubica si calcolano sui punti del segmento.
+    Non e' cosi': l'engine le calcola sempre su TUTTI i punti, e i due
+    inviluppi valgono uguale ovunque, integrale compreso (il pointer integra
+    speed_ratio), sui quattro `{type, points}` del brano. Per questo un
+    `{type, points}` toccato puo' restare tale (tutti i segmenti T) o
+    diventare la lista del laboratorio (tipi mescolati) senza che il suono
+    cambi. Vale anche col tipo globale e le eccezioni per punto insieme, la
+    forma scritta a mano che il laboratorio legge (`curva`) come una lista.
+    """
+    Envelope = _motore(tmp_path)
+    casi = []
+    for st in _brano()["streams"]:
+        for path in ("grain.duration", "fill_factor", "voices.pitch.pitch_range"):
+            d = _leggi(st, path)
+            if isinstance(d, dict) and "points" in d:
+                casi.append(d)
+    assert len(casi) == 4
+    # Un toccato: tipo globale cubic, un segmento `linear` e uno `step`.
+    casi.append({"type": "cubic", "points": [[0, 2], [0.2, 0.5, "linear"], [0.4, 3],
+                                             [0.6, 1, "step"], [0.8, 2.5], [1, 1]]})
+    for d in casi:
+        P = d["points"]
+        lista = [[p[0], p[1], p[2] if len(p) > 2 else d["type"]] for p in P[:-1]] + [P[-1][:2]]
+        a, b = Envelope(d), Envelope(lista)
+        for i in range(2401):
+            t = -0.1 + 1.2 * i / 2400
+            assert a.evaluate(t) == b.evaluate(t), (d, t)
+        for k in range(1, 41):
+            assert _vicini(a.integrate(0, k / 40), b.integrate(0, k / 40)), (d, k)
+
+
+def _toccato(tmp_path, js):
+    """stream4 aperto, `fill_factor` toccato; il documento e i breakpoint."""
+    return _lab(tmp_path, _apri(_stream("stream4")) + """
+const at = t => bps.findIndex(b => Math.abs(b.t - t) < 1e-9);
+""" + js + "console.log(JSON.stringify({doc: labDoc(), bps}));\n")
+
+
+def _riceve_cio_che_si_vede(Envelope, inv, bps):
+    """L'engine, letto il documento, vale su ogni breakpoint quanto il
+    laboratorio mostra li', col tipo di segmento che il menu mostra."""
+    env = Envelope(inv)
+    for b in bps:
+        assert _vicini(env.evaluate(b["t"]), b["vals"]["fill_factor"]), b["t"]
+        tipo = _tipo_motore(env, b["t"])
+        if tipo:
+            assert tipo == b["ints"]["fill_factor"], b["t"]
+
+
+@node
+@engine
+def test_un_type_points_toccato_resta_type_points(tmp_path):
+    """Toccato un valore, i segmenti restano tutti `cubic`: si riscrive
+    `{type: cubic, points}`, la forma in cui era arrivato. Il resto dello
+    stream non e' stato toccato."""
+    Envelope = _motore(tmp_path)
+    got = _toccato(tmp_path, "bpLoad(at(0.1631)); "
+                             "document.getElementById('P:fill_factor').value = '0.9'; bpSave();\n")
+    out = got["doc"]["streams"][0]
+    ff = out["fill_factor"]
+    assert isinstance(ff, dict) and ff["type"] == "cubic"
+    assert all(len(p) == 2 for p in ff["points"])
+    assert [0.1631, 0.9] in ff["points"]
+    _riceve_cio_che_si_vede(Envelope, ff, got["bps"])
+    st = _stream("stream4")
+    out["fill_factor"] = st["fill_factor"]
+    assert out == st
+
+
+@node
+@engine
+def test_un_type_points_coi_tipi_mescolati_si_riscrive_lista(tmp_path):
+    """Un segmento passato a `linear` in un `{type: cubic}`: si riscrive la
+    lista del laboratorio, col tipo su ogni punto da cui parte una cubica.
+
+    Il dict col tipo globale e le eccezioni sul punto sarebbe per l'engine lo
+    stesso inviluppo, ma il laboratorio non lo scrive: PGE-ui non lo
+    rileggeva intatto (`wrapEnv`, appena un punto aveva un tipo suo, riscriveva
+    la lista piatta e il `type` globale si perdeva). Da DMGiulioRomano/PGE-ui#189
+    lo riscrive com'e', ma scriverlo e' una scelta che mare-nostrum, da cui la
+    pagina viene, non ha ancora fatto. La lista coi tipi sul punto PGE-ui la
+    tiene.
+    """
+    Envelope = _motore(tmp_path)
+    got = _toccato(tmp_path, "bpLoad(at(0.1631)); "
+                             "document.getElementById('P:fill_factor').value = '0.9'; bpSave();\n"
+                             "bpLoad(at(0.2586)); "
+                             "document.getElementById('I:fill_factor').value = 'linear'; bpSave();\n")
+    ff = got["doc"]["streams"][0]["fill_factor"]
+    assert isinstance(ff, list)
+    assert [0.1631, 0.9, "cubic"] in ff and [0.2586, 0.4] in ff
+    assert len(ff[-1]) == 2
+    _riceve_cio_che_si_vede(Envelope, ff, got["bps"])
+
+
+@node
+def test_un_type_points_che_non_usa_piu_il_suo_tipo_torna_lista(tmp_path):
+    """Se nessun segmento e' piu' del tipo globale, `{type: step}` non dice
+    piu' niente: torna la lista, che e' la forma di sempre del laboratorio."""
+    got = _lab(tmp_path, _apri(_stream("stream10")) + """
+for (const b of bps) b.ints['voices.pitch.pitch_range'] = 'linear';
+drawTl();
+console.log(JSON.stringify(labDoc()));
+""")
+    pr = got["streams"][0]["voices"]["pitch"]["pitch_range"]
+    assert isinstance(pr, list) and all(len(p) == 2 for p in pr)
+
+
+@node
+@engine
+def test_segui_il_render_legge_gli_inviluppi_come_il_motore(tmp_path):
+    """Fra due breakpoint `segui` mostra il valore della curva dei breakpoint
+    come la valuterebbe l'engine: il gradino tiene, la cubica e' una cubica."""
+    Envelope = _motore(tmp_path)
+    xs = [0.05, 0.12, 0.2, 0.3, 0.33, 0.5, 0.9]
+    got = _lab(tmp_path, _apri(_stream("stream4")) + """
+const xs = %s;
+console.log(JSON.stringify({bps, a: xs.map(x => bpA(x).vals)}));
+""" % json.dumps(xs))
+    curva = [[b["t"], b["vals"]["fill_factor"], b["ints"]["fill_factor"]] for b in got["bps"]]
+    env = Envelope(curva)
+    for x, vals in zip(xs, got["a"]):
+        assert _vicini(vals["fill_factor"], env.evaluate(x)), x
+    step = _lab(tmp_path, _apri(_stream("stream10")) + """
+console.log(JSON.stringify([0.2, 0.5].map(x => bpA(x).vals['voices.pitch.pitch_range'])));
+""")
+    assert step == [0.5, 0]
+
+
+@node
+@engine
+def test_il_lucchetto_taglia_un_type_points_dove_la_curva_passa(tmp_path):
+    """Lucchetto chiuso, durata dimezzata: i punti tengono il loro tempo in
+    secondi, quelli oltre la nuova fine escono, e il punto di chiusura sta
+    dove la curva (cubica) passava a meta' della durata vecchia."""
+    Envelope = _motore(tmp_path)
+    st = _stream("stream4")
+    got = _lab(tmp_path, _apri(st) + """
+const prima = bps.map(b => [b.t, b.vals['fill_factor'], b.ints['fill_factor']]);
+LUCCHETTO = true;
+const d = document.getElementById('labDur');
+d.value = String(%s / 2);
+d.onchange();
+console.log(JSON.stringify({prima, doc: labDoc()}));
+""" % st["duration"])
+    ff = got["doc"]["streams"][0]["fill_factor"]
+    assert isinstance(ff, dict) and ff["type"] == "cubic"
+    assert ff["points"][-1][0] == 1
+    attesa = Envelope(got["prima"]).evaluate(0.5)
+    assert _vicini(ff["points"][-1][1], attesa)
+    assert got["doc"]["streams"][0]["duration"] == st["duration"] / 2
+
+
+@node
+def test_genera_breakpoint_su_un_type_points(tmp_path):
+    """I punti generati prendono i valori a schermo e i tipi dei menu: niente
+    NaN, e l'inviluppo resta `{type: cubic}` con i tempi nuovi dentro."""
+    got = _lab(tmp_path, _apri(_stream("stream4")) + """
+document.getElementById('gN').value = '3';
+document.getElementById('gDa').value = '0.4';
+document.getElementById('gA').value = '0.6';
+genBps();
+console.log(JSON.stringify(labDoc()));
+""")
+    ff = got["streams"][0]["fill_factor"]
+    assert isinstance(ff, dict) and ff["type"] == "cubic"
+    assert all(isinstance(p[1], (int, float)) for p in ff["points"])
+    # Tutti e tre col valore a schermo (quello del primo breakpoint, 2): il
+    # punto di mezzo, uguale ai due vicini e dello stesso tipo, non dice
+    # niente e `serie` lo lascia fuori, come per ogni inviluppo.
+    punti = {p[0]: p[1] for p in ff["points"]}
+    assert punti[0.4] == punti[0.6] == 2 and 0.5 not in punti
+
+
+# I punti `{t, v}` (con `type` facoltativo) sono un'altra scrittura della lista:
+# l'`EnvelopeBuilder` dell'engine li normalizza in `[t, v, type]`. Fino alla
+# #88 la pagina non li leggeva (stavano fra le forme qui sopra); `curva` li
+# legge come la lista, e il gesto e' lo stesso: non toccati restano come sono
+# scritti, toccati si riscrivono nella lista del laboratorio — per l'engine lo
+# stesso inviluppo.
+PUNTI_DICT = [{"t": 0, "v": -6, "type": "step"}, {"t": 0.5, "v": 3}, {"t": 1, "v": 0}]
+
+
+@node
+@engine
+def test_i_punti_t_v_si_leggono_come_li_legge_il_motore(tmp_path):
+    Envelope = _motore(tmp_path)
+    st = dict(_stream("stream2"), volume=PUNTI_DICT)
+    got = _lab(tmp_path, _apri(st) + """
+const vista = {bps: bps.map(b => [b.t, b.vals['volume'], tipoDi(b, 'volume')]),
+               intatto: labDoc()};
+""" + _tocca(0, "pitch.ratio", 0.75) + """
+vista.altro = labDoc();
+""" + _tocca(0, "volume", -9) + """
+vista.toccato = labDoc();
+console.log(JSON.stringify(vista));
+""")
+    env = Envelope(PUNTI_DICT)
+    ts = [t for t, _v, _tipo in got["bps"]]
+    assert 0.5 in ts and 1 in ts                  # i suoi tempi sono breakpoint
+    for t, v, tipo in got["bps"]:
+        assert _vicini(v, env.evaluate(t)), t
+        atteso = _tipo_motore(env, t)
+        if atteso:
+            assert tipo == atteso, t
+    assert got["intatto"]["streams"][0] == st
+    # Un altro parametro toccato: i punti `{t, v}` restano come sono scritti.
+    assert got["altro"]["streams"][0]["volume"] == PUNTI_DICT
+    # Toccati, la lista del laboratorio: per l'engine lo stesso inviluppo, a
+    # meno del primo punto, che e' quello toccato.
+    vol = got["toccato"]["streams"][0]["volume"]
+    assert isinstance(vol, list) and vol[0] == [0, -9, "step"]
+    nuovo = Envelope(vol)
+    for i in range(1, 101):
+        t = 0.5 + 0.5 * i / 100
+        assert _vicini(nuovo.evaluate(t), env.evaluate(t)), t
 
 
 # --- i tempi in secondi sopra lo stream conservato ------------------------------
 # Senza `time_mode: normalized` l'engine legge i tempi in secondi (93f201c):
 # il laboratorio li porta a frazioni per leggerli (`tempiFrazione`, su una
 # copia: lo stream aperto resta com'e' scritto) e li riscrive in secondi
-# (`scalaTempi`) solo dove ha toccato. Gli inviluppi `{type, points}` in secondi
-# sono della #88.
+# (`scalaTempi`) solo dove ha toccato — anche dentro un `{type, points}`, che
+# la #88 legge e scala nei suoi punti (sotto).
 
 DUR_S = 100.0
 
@@ -669,6 +1405,140 @@ def test_in_secondi_un_parametro_toccato_si_scrive_in_secondi(tmp_path):
     assert out == st
 
 
+def _in_secondi_tp(st):
+    """stream4 com'e' scritto senza `time_mode`: gli inviluppi in secondi,
+    `fill_factor` che e' un `{type: cubic}` compreso. Prima della #88 la sola
+    conversione dei tempi lasciava il dict com'era, cioe' in secondi letti come
+    frazioni."""
+    st = json.loads(json.dumps(st))
+    st.pop("time_mode", None)
+    st["duration"] = DUR_S
+
+    def sec(v):
+        if isinstance(v, dict):
+            return dict(v, points=sec(v["points"]))
+        return [[round(p[0] * DUR_S, 6)] + p[1:] for p in v]
+
+    st["fill_factor"] = sec(st["fill_factor"])
+    st["grain"]["duration"] = sec(st["grain"]["duration"])
+    return st
+
+
+@node
+def test_in_secondi_un_type_points_aperto_e_risalvato_e_lo_stesso_stream(tmp_path):
+    st = _in_secondi_tp(_stream("stream4"))
+    got = _lab(tmp_path, _apri(st) + "console.log(JSON.stringify({ts: bps.map(b => b.t), "
+                                     "doc: labDoc()}));\n")
+    assert got["doc"]["streams"][0] == st
+    assert all(0 <= t <= 1 for t in got["ts"]) and 0.0926 in got["ts"]
+
+
+@node
+@engine
+def test_in_secondi_ogni_breakpoint_vale_quanto_per_il_motore(tmp_path):
+    Envelope = _motore(tmp_path)
+    st = _in_secondi_tp(_stream("stream4"))
+    got = _lab(tmp_path, _apri(st) + "console.log(JSON.stringify(bps));\n")
+    for path in ("fill_factor", "grain.duration"):
+        env = Envelope(_leggi(st, path))
+        for b in got:
+            assert _vicini(b["vals"][path], env.evaluate(b["t"] * DUR_S)), (path, b["t"])
+
+
+@node
+@engine
+def test_in_secondi_un_type_points_toccato_si_scrive_in_secondi(tmp_path):
+    """Toccato resta `{type: cubic}`, coi tempi in secondi, e l'engine vale su
+    ogni breakpoint quanto il laboratorio mostra. `grain.duration`, non
+    toccato, resta com'era."""
+    Envelope = _motore(tmp_path)
+    st = _in_secondi_tp(_stream("stream4"))
+    got = _lab(tmp_path, _apri(st) + """
+const i = bps.findIndex(b => Math.abs(b.t - 0.1631) < 1e-9);
+bpLoad(i); document.getElementById('P:fill_factor').value = '0.9'; bpSave();
+console.log(JSON.stringify({doc: labDoc(), bps}));
+""")
+    out = got["doc"]["streams"][0]
+    ff = out["fill_factor"]
+    assert isinstance(ff, dict) and ff["type"] == "cubic"
+    assert [16.31, 0.9] in ff["points"] and ff["points"][-1][0] == DUR_S
+    env = Envelope(ff)
+    for b in got["bps"]:
+        assert _vicini(env.evaluate(b["t"] * DUR_S), b["vals"]["fill_factor"]), b["t"]
+    assert out["grain"]["duration"] == st["grain"]["duration"]
+    assert "time_mode" not in out
+
+
+# I punti `{t, v}` e la `curve` della finestra scritta `{type, points}` (la
+# scrive PGE-ui appena il tipo globale di quella curva non e' lineare) sono
+# forme che la pagina legge dalla #88, e in secondi i loro tempi vanno portati
+# a frazioni come quelli di ogni altro punto. `scalaTempi` scendeva solo nei
+# punti `[t, v]` e `tempiFrazione` solo in una `curve` lista: aperti, i loro
+# secondi si leggevano come frazioni — breakpoint a t = 50 su una linea che va
+# da 0 a 1 — e, toccato il parametro, il salvataggio li moltiplicava di nuovo
+# per la durata.
+
+def _in_secondi_dict(st):
+    """stream2 in secondi (`_in_secondi`), col `volume` in punti `{t, v}` e la
+    finestra a stati con la `curve` in forma `{type, points}`. Le due finestre
+    sono fra le tacche di 001-41, cosi' il menu le tiene."""
+    st = _in_secondi(st)
+    st["volume"] = [dict(p, t=round(p["t"] * DUR_S, 6)) for p in PUNTI_DICT]
+    st["grain"]["envelope"] = {"states": [[0, "bartlett"], [1, "gaussian"]],
+                               "curve": {"type": "cubic",
+                                         "points": [[0, 0], [25, 0.3], [100, 1]]}}
+    return st
+
+
+@node
+@engine
+def test_in_secondi_i_punti_t_v_e_la_curve_a_dict_si_aprono_in_frazioni(tmp_path):
+    """I loro tempi sono breakpoint della linea, fra 0 e 1, e su ognuno il
+    laboratorio vale quanto l'engine all'istante in secondi; non toccati
+    restano come sono scritti."""
+    Envelope = _motore(tmp_path)
+    st = _in_secondi_dict(_stream("stream2"))
+    got = _lab(tmp_path, _apri(st) + "console.log(JSON.stringify({bps, doc: labDoc()}));\n")
+    ts = [b["t"] for b in got["bps"]]
+    assert all(0 <= t <= 1 for t in ts), ts
+    assert 0.25 in ts and 0.5 in ts and 1 in ts
+    vol = Envelope(st["volume"])
+    curve = Envelope(st["grain"]["envelope"]["curve"])
+    stati = st["grain"]["envelope"]["states"]
+    for b in got["bps"]:
+        s = b["t"] * DUR_S
+        assert _vicini(b["vals"]["volume"], vol.evaluate(s)), b["t"]
+        tipo = _tipo_motore(vol, s)
+        if tipo:
+            assert b["ints"]["volume"] == tipo, b["t"]
+        # La finestra del breakpoint e' lo stato piu' vicino al valore della
+        # curve (`envA`): quello che conta qui e' l'istante in cui la si legge.
+        attesa = min(stati, key=lambda x: abs(x[0] - curve.evaluate(s)))[1]
+        assert b["vals"]["grain.envelope"] == attesa, b["t"]
+    assert got["doc"]["streams"][0] == st
+
+
+@node
+@engine
+def test_in_secondi_i_punti_t_v_toccati_si_scrivono_in_secondi(tmp_path):
+    """Toccato il `volume`, la lista del laboratorio coi tempi in secondi,
+    fino alla durata e non oltre, e su ogni breakpoint l'engine vale quanto il
+    laboratorio mostra. La finestra, non toccata, resta com'era."""
+    Envelope = _motore(tmp_path)
+    st = _in_secondi_dict(_stream("stream2"))
+    got = _lab(tmp_path, _apri(st) + _tocca(0, "volume", -9)
+               + "console.log(JSON.stringify({bps, doc: labDoc()}));\n")
+    out = got["doc"]["streams"][0]
+    vol = out["volume"]
+    assert isinstance(vol, list) and vol[0] == [0, -9, "step"]
+    assert all(0 <= p[0] <= DUR_S for p in vol) and vol[-1][0] == DUR_S
+    env = Envelope(vol)
+    for b in got["bps"]:
+        assert _vicini(env.evaluate(b["t"] * DUR_S), b["vals"]["volume"]), b["t"]
+    assert out["grain"]["envelope"] == st["grain"]["envelope"]
+    assert "time_mode" not in out
+
+
 # --- su una pagina di questo repo -----------------------------------------------
 # Le manopole di `1-10ms` sono altre (density e grain.duration, piu' quelle che
 # ogni pagina ha), e il suo `base:` e' quello di uno sweep: `pointer.speed_ratio:
@@ -705,7 +1575,8 @@ def test_su_1_10ms_il_foglio_bianco_nasce_dal_suo_base(tmp_path):
     """Il foglio bianco resta quello di prima: `DEFAULTS` e il `base:` dello
     studio sotto, scritto per intero."""
     out = _qui(tmp_path, "bpAdd();\n" + STAMPA)["streams"][0]
-    assert (out["stream_id"], out["onset"], out["time_mode"]) == ("lab", 0, "normalized")
+    assert (out["stream_id"], out["onset"], out["time_mode"]) == \
+        ("nuovo stream", 0, "normalized")
     assert out["grain"] == {"envelope": "hanning", "duration": 0.064}   # base:, DEFAULTS
     assert out["pointer"] == {"speed_ratio": 0}                         # base:
     assert out["sample"] == "silenzi.wav"

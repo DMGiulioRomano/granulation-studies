@@ -403,10 +403,12 @@ def check_corredi_combos(
 def _si_muove(value: Any) -> bool:
     """True se leggere il valore come frazione invece che in secondi lo sposta.
 
-    E' lo specchio di ``_rescaling_would_change`` nel ``PointerController``
-    dell'engine, e per restare utile deve avere le sue stesse due esclusioni:
-    uno zero e' zero sotto qualunque fattore di scala, e cio' che la
-    conversione lascia passare invariato non si muoveva nemmeno prima.
+    Era lo specchio di ``_rescaling_would_change``, il filtro dell'avviso
+    ``[LOOP_UNIT]`` che il ``PointerController`` dell'engine dava a render
+    time. L'engine l'ha tolto con l'avviso (PGE #242), ma le sue due
+    esclusioni sono le ragioni di questo rilievo e restano: uno zero e' zero
+    sotto qualunque fattore di scala, e cio' che la conversione lascia passare
+    invariato non si muoveva nemmeno prima.
     """
     if value is None or isinstance(value, bool):
         return False
@@ -456,9 +458,11 @@ def check_loop_unit(
     sono 0.3 secondi. Il sintomo classico da warning: il documento ha un
     significato, ma non quello voluto.
 
-    L'engine lo segnala a render time; il rilievo serve prima, e serve qui,
-    perche' quell'avviso arriva in mezzo al log di uno sweep da trenta
-    varianti mentre questo si legge quando lo study si scrive.
+    Fino alla v9.1.0 l'engine lo segnalava a render time (``[LOOP_UNIT]``),
+    in mezzo al log di uno sweep da trenta varianti; l'avviso era transitorio
+    e dalla PGE #242 non c'e' piu', mentre i numeri si leggono ancora in
+    secondi. Il rilievo e' quindi l'unico a dirlo, e si legge quando lo study
+    si scrive.
 
     Il controllo guarda il ``pointer`` **efficace** di ogni stream (base di
     documento deep-mergiato con l'override), che e' anche l'unico modo di
