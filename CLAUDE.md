@@ -115,6 +115,12 @@ mare-nostrum stanno nei commit della #6 (74a8290, 5c8f1ea), senza la firma: la
 bozza riscritta a fine `carica` e dopo ogni scrittura, perche' dalla #89
 `FILE` e' anche l'id, e un refresh che riprende il file di prima riprende un
 altro stream.
+Dalla #88 la pagina ha di nuovo una deviazione sua, da riportare in
+mare-nostrum, che ha lo stesso difetto: `curva` legge i punti `{t, v}` e una
+`curve` della finestra scritta `{type, points}`, ma la conversione dei tempi in
+secondi (`scalaTempi`, `tempiFrazione`) non scendeva in nessuno dei due, e su
+uno stream senza `time_mode: normalized` i loro secondi si leggevano come
+frazioni (sotto, «I tempi sul documento seguono il suo `time_mode`»).
 Non e' stata portata la griglia delle
 varianti discrete (la pagina si chiama `graph` per lei), che mare-nostrum
 aveva gia' tolto, ne' `make explore`, che serviva a lei.
@@ -635,14 +641,17 @@ resta com'e' scritto, e un inviluppo non toccato esce nei suoi secondi di
 prima. Cosi' gli inviluppi che lo stream ha gia' restano nella loro
 convenzione: forzare `time_mode: normalized` sarebbe stato piu' semplice, ma
 li avrebbe riletti in frazioni. Vale per tutto cio' che sta sui breakpoint:
-numerici, voci, loop, la `curve` di `grain.envelope`, la progressione, e i
-punti di un `{type, points}` (#88). Prima
+numerici, voci, loop, la `curve` di `grain.envelope`, la progressione, e ogni
+forma che `curva` legge (#88): i punti di un `{type, points}`, i punti
+`{t, v}` e una `curve` scritta `{type, points}`, che l'engine scala come gli
+altri. Prima
 la pagina contava sul `time_mode: normalized` del `base:`, che oggi tutti gli
 studi dichiarano: su uno studio senza, una rampa di 30 s si schiacciava nel
 primo secondo. Nata qui come deviazione da mare-nostrum, che poi l'ha ripresa
 (DMGiulioRomano/mare-nostrum#9); verificata in `tests/test_graph_js.py`
 (foglio bianco) e in `tests/test_lab_documento.py` (uno stream aperto in
-secondi, anche col suo `{type: cubic}`).
+secondi, anche col suo `{type: cubic}`, coi punti `{t, v}` e con la `curve`
+della finestra a dict).
 
 **Il tempo di un breakpoint si scrive.** La riga `tempo (0-1)` in cima ai
 parametri mostra la x normalizzata del punto selezionato e la accetta digitata:
